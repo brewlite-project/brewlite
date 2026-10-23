@@ -1,0 +1,115 @@
+\documentclass[11pt,a4paper,oneside]{report}
+% Layout adapted from the supplied SGU Assignment_report.tex.
+% XeLaTeX supports native Vietnamese text and modern Unicode fonts.
+\usepackage[a4paper,left=24mm,right=22mm,top=33mm,bottom=28mm,headheight=40pt,headsep=9mm,footskip=13mm]{geometry}
+\usepackage{fontspec}
+\setmainfont{Tinos}
+\setsansfont{Noto Sans}
+\setmonofont{DejaVu Sans Mono}[Scale=0.85]
+\usepackage{amsmath,amssymb}
+\usepackage{longtable,booktabs,array,calc,tabularx,multirow}
+\usepackage{graphicx,pdfpages,rotating}
+\usepackage[table]{xcolor}
+\usepackage{float}
+\usepackage{enumitem}
+\usepackage{fancyhdr,lastpage}
+\usepackage{setspace}
+\usepackage{etoolbox}
+\usepackage{caption}
+\usepackage{hyperref}
+\definecolor{sgublue}{HTML}{173FAB}
+\hypersetup{colorlinks=true,linkcolor=black,urlcolor=sgublue,citecolor=black,pdftitle={BrewLite - Assignment 1},pdfauthor={Nhóm 3 - Trường Đại học Sài Gòn}}
+\setcounter{secnumdepth}{0} % Chapter numbers only; preserve source's own section numbering.
+\setcounter{tocdepth}{2}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt}
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.10}
+\setlength{\LTpre}{5pt}
+\setlength{\LTpost}{10pt}
+\AtBeginEnvironment{longtable}{\small}
+\emergencystretch=3em
+\sloppy
+\setlist{itemsep=1pt,parsep=0pt,topsep=4pt}
+\newcommand{\tightlist}{\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{%
+ \begin{tabular}{@{}cl@{}}
+ \includegraphics[width=9mm]{assets/branding/logoITSGUsmall.png} &
+ \begin{tabular}{@{}l@{}}{\scriptsize\sffamily\bfseries Trường Đại học Sài Gòn}\\[-1pt]{\scriptsize\sffamily\bfseries Khoa Công nghệ Thông tin}\end{tabular}
+ \end{tabular}}
+\fancyfoot[L]{{\scriptsize\sffamily Báo cáo Công nghệ phần mềm -- BrewLite | Nhóm 3}}
+\fancyfoot[R]{{\scriptsize\sffamily Trang \thepage /\pageref{LastPage}}}
+\renewcommand{\headrulewidth}{0.3pt}
+\renewcommand{\footrulewidth}{0.3pt}
+\fancypagestyle{plain}{\fancyhf{}\fancyfoot[L]{\scriptsize\sffamily BrewLite -- Assignment 1 | Nhóm 3}\fancyfoot[R]{\scriptsize\sffamily Trang \thepage /\pageref{LastPage}}\renewcommand{\headrulewidth}{0pt}\renewcommand{\footrulewidth}{0.3pt}}
+\captionsetup{font=small,labelfont=bf}
+
+\renewcommand{\contentsname}{Mục lục}
+
+\begin{document}
+\begin{titlepage}
+\begin{center}
+{\bfseries\small TRƯỜNG ĐẠI HỌC SÀI GÒN}\\[2pt]
+{\bfseries\small KHOA CÔNG NGHỆ THÔNG TIN}\\[16mm]
+\includegraphics[width=33mm]{assets/branding/logoITSGU.png}\\[17mm]
+{\color{sgublue}\LARGE\bfseries CÔNG NGHỆ PHẦN MỀM}\\[7mm]
+{\color{sgublue}\rule{0.9\textwidth}{0.8pt}}\\[4mm]
+{\color{sgublue}\large\bfseries SƠ ĐỒ / THIẾT KẾ ASSIGNMENT 1}\\[3mm]
+{\color{sgublue}\Huge\bfseries BrewLite}\\[4mm]
+\parbox{0.94\textwidth}{\centering\color{sgublue}\Large\bfseries Sequence Diagram 3}\par\vspace{5mm}
+{\color{sgublue}\rule{0.9\textwidth}{0.8pt}}\\[15mm]
+\end{center}
+\begin{flushright}
+\begin{tabular}{@{}rl@{}}
+\textbf{Giảng viên:} & Từ Lãng Phiêu \\
+\textbf{Nhóm:} & Nhóm 3 \\
+\textbf{Môn học:} & Công nghệ phần mềm \\
+\end{tabular}
+\end{flushright}
+\vfill
+\begin{center}
+{\small\bfseries THÀNH VIÊN THỰC HIỆN}\\[3mm]
+\begin{tabular}{@{}ll@{}}
+ Nguyễn Châu Hoàng Khang & 3124410143 \\
+ Hoàng Văn Lập & 3124410184 \\
+ Nguyễn Khải Hoàng & 3124410106 \\
+ Nguyễn Đăng Thụy & 3124410352 \\
+ Cao Nguyễn Quốc Khánh & 3124410149 \\
+ Lâm Chí Khang & 3124410142 \\
+
+\end{tabular}
+\vfill
+{\small TP. HỒ CHÍ MINH, THÁNG 10/2026}
+\end{center}
+\end{titlepage}
+\pagenumbering{roman}
+\chapter*{DANH SÁCH THÀNH VIÊN VÀ PHÂN CÔNG}
+\noindent Nhóm 3 -- Trường Đại học Sài Gòn -- Môn Công nghệ phần mềm.
+\par\smallskip
+\textit{Cột Phân công để Chưa cập nhật khi chưa có phân nhiệm chính thức; vai trò lấy theo Project Charter.}
+\vspace{4mm}
+\begingroup\small
+\begin{longtable}{|>{\centering\arraybackslash}p{8mm}|p{41mm}|p{25mm}|p{36mm}|p{36mm}|}
+\hline
+\rowcolor{blue!9}\textbf{STT} & \textbf{Họ và tên} & \textbf{MSSV} & \textbf{Vai trò} & \textbf{Phân công} \\ \hline
+\endfirsthead
+\hline\rowcolor{blue!9}\textbf{STT} & \textbf{Họ và tên} & \textbf{MSSV} & \textbf{Vai trò} & \textbf{Phân công} \\ \hline
+\endhead
+1 & Nguyễn Châu Hoàng Khang & 3124410143 & Team Leader / Developer & \textit{Chưa cập nhật} \\ \hline
+2 & Hoàng Văn Lập & 3124410184 & Developer & \textit{Chưa cập nhật} \\ \hline
+3 & Nguyễn Khải Hoàng & 3124410106 & Developer & \textit{Chưa cập nhật} \\ \hline
+4 & Nguyễn Đăng Thụy & 3124410352 & Developer & \textit{Chưa cập nhật} \\ \hline
+5 & Cao Nguyễn Quốc Khánh & 3124410149 & Developer & \textit{Chưa cập nhật} \\ \hline
+6 & Lâm Chí Khang & 3124410142 & Developer & \textit{Chưa cập nhật} \\ \hline
+\end{longtable}
+\endgroup
+\vspace{5mm}
+\noindent\textbf{Tài liệu:} Sequence Diagram 3\\
+\textbf{Nguồn gốc:} \texttt{diagram/Sequence/Sequence\_Brewlite-Page-3.drawio.svg}
+\par\smallskip\textit{Các trang sau chèn trực tiếp từ bản PDF gốc hoặc bản PDF vector được xuất từ SVG, không vẽ lại nội dung.}
+\par\clearpage
+\pagenumbering{arabic}
+\includepdf[pages=-,pagecommand={\thispagestyle{empty}},scale=0.98]{assets/diagrams/05-sequence-3.pdf}
+\end{document}

@@ -1,0 +1,593 @@
+\documentclass[11pt,a4paper,oneside]{report}
+% Layout adapted from the supplied SGU Assignment_report.tex.
+% XeLaTeX supports native Vietnamese text and modern Unicode fonts.
+\usepackage[a4paper,left=24mm,right=22mm,top=33mm,bottom=28mm,headheight=40pt,headsep=9mm,footskip=13mm]{geometry}
+\usepackage{fontspec}
+\setmainfont{Tinos}
+\setsansfont{Noto Sans}
+\setmonofont{DejaVu Sans Mono}[Scale=0.85]
+\usepackage{amsmath,amssymb}
+\usepackage{longtable,booktabs,array,calc,tabularx,multirow}
+\usepackage{graphicx,pdfpages,rotating}
+\usepackage[table]{xcolor}
+\usepackage{float}
+\usepackage{enumitem}
+\usepackage{fancyhdr,lastpage}
+\usepackage{setspace}
+\usepackage{etoolbox}
+\usepackage{caption}
+\usepackage{hyperref}
+\definecolor{sgublue}{HTML}{173FAB}
+\hypersetup{colorlinks=true,linkcolor=black,urlcolor=sgublue,citecolor=black,pdftitle={BrewLite - Assignment 1},pdfauthor={Nhóm 3 - Trường Đại học Sài Gòn}}
+\setcounter{secnumdepth}{0} % Chapter numbers only; preserve source's own section numbering.
+\setcounter{tocdepth}{2}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt}
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.10}
+\setlength{\LTpre}{5pt}
+\setlength{\LTpost}{10pt}
+\AtBeginEnvironment{longtable}{\small}
+\emergencystretch=3em
+\sloppy
+\setlist{itemsep=1pt,parsep=0pt,topsep=4pt}
+\newcommand{\tightlist}{\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{%
+ \begin{tabular}{@{}cl@{}}
+ \includegraphics[width=9mm]{assets/branding/logoITSGUsmall.png} &
+ \begin{tabular}{@{}l@{}}{\scriptsize\sffamily\bfseries Trường Đại học Sài Gòn}\\[-1pt]{\scriptsize\sffamily\bfseries Khoa Công nghệ Thông tin}\end{tabular}
+ \end{tabular}}
+\fancyfoot[L]{{\scriptsize\sffamily Báo cáo Công nghệ phần mềm -- BrewLite | Nhóm 3}}
+\fancyfoot[R]{{\scriptsize\sffamily Trang \thepage /\pageref{LastPage}}}
+\renewcommand{\headrulewidth}{0.3pt}
+\renewcommand{\footrulewidth}{0.3pt}
+\fancypagestyle{plain}{\fancyhf{}\fancyfoot[L]{\scriptsize\sffamily BrewLite -- Assignment 1 | Nhóm 3}\fancyfoot[R]{\scriptsize\sffamily Trang \thepage /\pageref{LastPage}}\renewcommand{\headrulewidth}{0pt}\renewcommand{\footrulewidth}{0.3pt}}
+\captionsetup{font=small,labelfont=bf}
+
+\renewcommand{\contentsname}{Mục lục}
+
+\begin{document}
+\begin{titlepage}
+\begin{center}
+{\bfseries\small TRƯỜNG ĐẠI HỌC SÀI GÒN}\\[2pt]
+{\bfseries\small KHOA CÔNG NGHỆ THÔNG TIN}\\[16mm]
+\includegraphics[width=33mm]{assets/branding/logoITSGU.png}\\[17mm]
+{\color{sgublue}\LARGE\bfseries CÔNG NGHỆ PHẦN MỀM}\\[7mm]
+{\color{sgublue}\rule{0.9\textwidth}{0.8pt}}\\[4mm]
+{\color{sgublue}\large\bfseries TÀI LIỆU ASSIGNMENT 1}\\[3mm]
+{\color{sgublue}\Huge\bfseries BrewLite}\\[4mm]
+\parbox{0.94\textwidth}{\centering\color{sgublue}\Large\bfseries Project Charter}\par\vspace{5mm}
+{\color{sgublue}\rule{0.9\textwidth}{0.8pt}}\\[15mm]
+\end{center}
+\begin{flushright}
+\begin{tabular}{@{}rl@{}}
+\textbf{Giảng viên:} & Từ Lãng Phiêu \\
+\textbf{Nhóm:} & Nhóm 3 \\
+\textbf{Môn học:} & Công nghệ phần mềm \\
+\end{tabular}
+\end{flushright}
+\vfill
+\begin{center}
+{\small\bfseries THÀNH VIÊN THỰC HIỆN}\\[3mm]
+\begin{tabular}{@{}ll@{}}
+ Nguyễn Châu Hoàng Khang & 3124410143 \\
+ Hoàng Văn Lập & 3124410184 \\
+ Nguyễn Khải Hoàng & 3124410106 \\
+ Nguyễn Đăng Thụy & 3124410352 \\
+ Cao Nguyễn Quốc Khánh & 3124410149 \\
+ Lâm Chí Khang & 3124410142 \\
+
+\end{tabular}
+\vfill
+{\small TP. HỒ CHÍ MINH, THÁNG 10/2026}
+\end{center}
+\end{titlepage}
+\pagenumbering{roman}
+\chapter*{DANH SÁCH THÀNH VIÊN VÀ PHÂN CÔNG}
+\noindent Nhóm 3 -- Trường Đại học Sài Gòn -- Môn Công nghệ phần mềm.
+\par\smallskip
+\textit{Cột Phân công để Chưa cập nhật khi chưa có phân nhiệm chính thức; vai trò lấy theo Project Charter.}
+\vspace{4mm}
+\begingroup\small
+\begin{longtable}{|>{\centering\arraybackslash}p{8mm}|p{41mm}|p{25mm}|p{36mm}|p{36mm}|}
+\hline
+\rowcolor{blue!9}\textbf{STT} & \textbf{Họ và tên} & \textbf{MSSV} & \textbf{Vai trò} & \textbf{Phân công} \\ \hline
+\endfirsthead
+\hline\rowcolor{blue!9}\textbf{STT} & \textbf{Họ và tên} & \textbf{MSSV} & \textbf{Vai trò} & \textbf{Phân công} \\ \hline
+\endhead
+1 & Nguyễn Châu Hoàng Khang & 3124410143 & Team Leader / Developer & \textit{Chưa cập nhật} \\ \hline
+2 & Hoàng Văn Lập & 3124410184 & Developer & \textit{Chưa cập nhật} \\ \hline
+3 & Nguyễn Khải Hoàng & 3124410106 & Developer & \textit{Chưa cập nhật} \\ \hline
+4 & Nguyễn Đăng Thụy & 3124410352 & Developer & \textit{Chưa cập nhật} \\ \hline
+5 & Cao Nguyễn Quốc Khánh & 3124410149 & Developer & \textit{Chưa cập nhật} \\ \hline
+6 & Lâm Chí Khang & 3124410142 & Developer & \textit{Chưa cập nhật} \\ \hline
+\end{longtable}
+\endgroup
+\clearpage
+\tableofcontents
+\clearpage
+\pagenumbering{arabic}
+\chapter{Project Charter}
+% Auto-converted from BrewLite_Project_Charter.docx via pandoc 3.1.11.1.
+% Original wording and table data are retained.
+BrewLite \textbar{} Ứng dụng đặt cà phê và thanh toán không tiền mặt
+
+Phiên bản: v1.0 \textbar{} Ngày lập: 08/10/2026 \textbar{} Trạng thái: Hoàn thành
+
+\section{\texorpdfstring{\textbf{1. Thông tin dự án}}{1. Thông tin dự án}}\label{01-project-charter:thuxf4ng-tin-dux1ef1-uxe1n}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.2968}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.7032}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Tên trường thông tin}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Chi tiết}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Tên dự án
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+BrewLite - Ứng dụng đặt cà phê và thanh toán không tiền mặt
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Đơn vị / học phần
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Khoa CNTT, Trường Đại học Sài Gòn \textbar{} Công nghệ phần mềm \textbar{} HKI (2026-2027)
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Người nghiệm thu
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Giảng viên phụ trách môn học - thầy Từ Lãng Phiêu
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+PM / Team Leader
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Nguyễn Châu Hoàng Khang
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Phương pháp
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Agile Scrum; Sprint 0 nội bộ + 3 Sprint trong đề bài
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Ngày bắt đầu / kết thúc
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+12/10/2026 - 25/11/2026 (dự kiến)
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Nguồn yêu cầu
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+BrewLite VER 1.0 - đề bài Công nghệ phần mềm (2026)
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{1.1. Danh sách thành viên}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.0822}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.3876}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.1963}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.3339}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+STT
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Họ và tên
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MSSV
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Vai trò
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+1
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Nguyễn Châu Hoàng Khang
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+3124410143
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Team Leader / Developer
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+2
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Cao Nguyễn Quốc Khánh
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+3124410149
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Developer
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+3
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Nguyễn Khải Hoàng
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+3124410106
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Developer
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+4
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Nguyễn Đăng Thụy
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+3124410352
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Developer
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+5
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Hoàng Văn Lập
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+3124410184
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Developer
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+6
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Lâm Chí Khang
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+3124410142
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Developer
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\section{\texorpdfstring{\textbf{2. Mục tiêu dự án}}{2. Mục tiêu dự án}}\label{01-project-charter:mux1ee5c-tiuxeau-dux1ef1-uxe1n}
+
+Xây dựng web app BrewLite giúp khách hàng duyệt menu đồ uống, tùy chọn size/topping, quản lý giỏ hàng, đăng nhập, đặt đơn và thanh toán không tiền mặt giả lập; sau đó nhận mã đơn và xem lịch sử đơn. Song song, nhóm thực hành quy trình Scrum từ phân tích yêu cầu đến nghiệm thu một sản phẩm chạy được.
+
+\begin{itemize}
+\item
+  Bắt buộc: Next.js frontend + NestJS backend, giao tiếp REST/JSON.
+\item
+  Hoàn thiện 10 task trong Product Backlog của đề, gồm Task 10 về nghiệp vụ backend và kiểm thử.
+\item
+  Giao nộp mã nguồn, cấu hình chạy và tài liệu bàn giao; demo luồng end-to-end.
+\end{itemize}
+
+\section{\texorpdfstring{\textbf{3. Phạm vi dự án}}{3. Phạm vi dự án}}\label{01-project-charter:phux1ea1m-vi-dux1ef1-uxe1n}
+
+\subsection{\texorpdfstring{\textbf{3.1. Trong phạm vi (In-Scope)}}{3.1. Trong phạm vi (In-Scope)}}\label{01-project-charter:trong-phux1ea1m-vi-in-scope}
+
+\begin{quote}
+· Menu: hiển thị ảnh, tên, giá; API danh sách và chi tiết sản phẩm.
+
+· Chi tiết sản phẩm: size S/M/L, topping, tính giá theo tùy chọn.
+
+· Giỏ hàng: thêm, cập nhật số lượng, xóa, tự tính tổng; giữ trạng thái cơ bản.
+
+· Tài khoản: đăng ký, đăng nhập, mật khẩu băm, JWT và bảo vệ API cần xác thực.
+
+· Đơn hàng: tạo từ giỏ, kiểm tra dữ liệu, lưu trạng thái PENDING và trả mã đơn.
+
+· Thanh toán: phương thức Ví/Thẻ bằng mock gateway; xử lý thành công/thất bại, xác nhận và lịch sử đơn.
+
+· Nghiệp vụ nâng cao: state machine, idempotent payment, chống oversell khi đặt đồng thời, khuyến mãi/điểm tích lũy theo Task 10.
+
+· Kiểm thử, docker-compose cho frontend/backend/database, README và demo nghiệm thu.
+\end{quote}
+
+\subsection{\texorpdfstring{\textbf{3.2. Ngoài phạm vi MVP (Out-of-Scope)}}{3.2. Ngoài phạm vi MVP (Out-of-Scope)}}\label{01-project-charter:ngouxe0i-phux1ea1m-vi-mvp-out-of-scope}
+
+\begin{quote}
+· Microservices, multi-vendor, kênh Seller/Admin phức tạp hoặc ứng dụng mobile native.
+
+· Tích hợp giao dịch tiền thật với ví điện tử/thẻ; đề chỉ yêu cầu mock payment gateway.
+
+· Hệ thống vận chuyển, giao hàng, định vị thời gian thực.
+
+· Giao diện barista nhận/pha chế đơn là phần mở rộng, không phải chức năng MVP cốt lõi; Task 10 vẫn phải mô hình hóa trạng thái đơn.
+
+· Hệ thống ERP/POS quản lý nguyên liệu đầy đủ; chỉ cần cơ chế tồn kho và kiểm thử theo tiêu chí Task 10.
+\end{quote}
+
+\subsection{\texorpdfstring{\textbf{3.3. Quy tắc kiểm soát thay đổi}}{3.3. Quy tắc kiểm soát thay đổi}}\label{01-project-charter:quy-tux1eafc-kiux1ec3m-souxe1t-thay-ux111ux1ed5i}
+
+Yêu cầu bổ sung cần được ghi vào Product Backlog, nêu mức ưu tiên, ước lượng và ảnh hưởng tới 10 task bắt buộc. Nhóm chỉ nhận scope mới khi không đe dọa mốc nghiệm thu.
+
+\section{\texorpdfstring{\textbf{4. Các bên liên quan chính}}{4. Các bên liên quan chính}}\label{01-project-charter:cuxe1c-buxean-liuxean-quan-chuxednh}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.4183}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5817}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Các bên liên quan (Stakeholders)}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Vai trò / trách nhiệm}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Giảng viên
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Đưa đề bài, tiêu chí chấm, nghiệm thu và phản hồi
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Khách hàng (vai trò nghiệp vụ)
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Đặt nước, chọn tùy chọn, thanh toán mock và xem lịch sử
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Quản lý cửa hàng / Product Owner mô phỏng
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Xác định giá trị, ưu tiên backlog, chấp nhận increment
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Nhóm phát triển 6 người
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+PO/SM/Developers theo phân công nội bộ; phân tích, thiết kế, code, review, test
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Nhân viên quầy / Barista
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Stakeholder nghiệp vụ; giao diện tác nghiệp là phần mở rộng
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mock payment provider
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Đơn vị được mô phỏng khi kiểm thử luồng thanh toán
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\section{\texorpdfstring{\textbf{5. Kế hoạch sơ bộ}}{5. Kế hoạch sơ bộ}}\label{01-project-charter:kux1ebf-houx1ea1ch-sux1a1-bux1ed9}
+
+Các mốc bên dưới là kế hoạch đề xuất 7 tuần, không phải lịch cố định do giảng viên công bố. Đề gợi ý 3 Sprint, nhóm chủ động thêm Sprint 0 để chuẩn bị tài liệu và repo.
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Giai đoạn}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thời gian đề xuất}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Mục tiêu / kết quả}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Sprint 0}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+12/10 - 18/10
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Charter, requirements, use case cơ bản, ERD, Techstack, backlog/Jira, README, các diagram cần thiết
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Sprint 1}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+19/10 - 01/11
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Task 1-4: nền tảng; API sản phẩm; trang menu; chi tiết + size/topping
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Sprint 2}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+2/11-15/11
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Task 5-7: giỏ hàng, tạo đơn, đăng ký/đăng nhập JWT
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Sprint 3}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+16/11-29/11
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Task 8-10: mock payment; xác nhận/lịch sử/compose/demo và backend nâng cao
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+Milestones: (M1) chốt tài liệu đầu vào; (M2) xem menu/chọn sản phẩm; (M3) tạo đơn được; (M4) thanh toán giả lập + test nâng cao + bàn giao.
+
+\section{\texorpdfstring{\textbf{6. Rủi ro và giả định ban đầu}}{6. Rủi ro và giả định ban đầu}}\label{01-project-charter:rux1ee7i-ro-vuxe0-giux1ea3-ux111ux1ecbnh-ban-ux111ux1ea7u}
+
+\subsection{\texorpdfstring{\textbf{6.1. Giả định (Assumptions)}}{6.1. Giả định (Assumptions)}}\label{01-project-charter:giux1ea3-ux111ux1ecbnh-assumptions}
+
+\begin{itemize}
+\item
+  Nhóm có 6 thành viên, có quyền sử dụng GitHub/Jira và máy phát triển chạy được Next.js/NestJS.
+\item
+  Dữ liệu sản phẩm và thanh toán được mô phỏng trong môi trường học tập.
+\item
+  Công nghệ cơ sở dữ liệu và ORM đề xuất sẽ được nhóm chốt tại tài liệu Techstack.
+\end{itemize}
+
+\subsection{\texorpdfstring{\textbf{6.2. Rủi ro và xử lý}}{6.2. Rủi ro và xử lý}}\label{01-project-charter:rux1ee7i-ro-vuxe0-xux1eed-luxfd}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{ID / Rủi ro}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Tác động}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Hướng xử lý}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{R1 -- Scope creep}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Trễ nhiệm vụ 10 task
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Khóa MVP theo đề; đưa chức năng khác vào backlog sau
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{R2 -- Tài liệu phụ thuộc nhau}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+ERD/use case sai lệch
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Chốt glossary, review requirement trước khi baseline API/DB
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{R3 -- Tích hợp frontend/backend}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Sai contract, gián đoạn demo
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Thống nhất REST DTO, .env.example, test API sớm
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{R4 -- Mock payment bị gọi lặp}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Tạo/trừ tiền giả lập 2 lần
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Idempotency-Key + unique constraint + test lặp
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{R5 -- Đặt đồng thời vượt stock}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Dữ liệu âm/sai
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Transaction + optimistic locking hoặc giải pháp nguyên tử tương đương; concurrency test
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{R6 -- Dồn Task 10 cuối kỳ}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Không đủ thời gian test
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Thiết kế order states và tồn kho từ Sprint 1--2; dành buffer Sprint 3
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\section{\texorpdfstring{\textbf{7. Tiêu chí thành công}}{7. Tiêu chí thành công}}\label{01-project-charter:tiuxeau-chuxed-thuxe0nh-cuxf4ng}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.2467}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.7533}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nhóm tiêu chí}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thước đo nghiệm thu}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Chức năng}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Đáp ứng đủ 10 task theo tiêu chí trong đề; luồng khách hàng chạy end-to-end
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Chất lượng}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+API mục tiêu \textless{} 500 ms với dữ liệu mẫu; validate input, hash mật khẩu, JWT
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thanh toán}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+PAID nếu thành công; PAYMENT\_FAILED và giữ giỏ khi lỗi; lặp key không tạo giao dịch kép
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Đơn / tồn kho}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Chặn transition sai; concurrency test không vượt tồn kho
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Scrum}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Có backlog, Sprint Planning, Review, Retrospective và minh chứng Git/Jira
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Bàn giao}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Docker Compose chạy đủ frontend/backend/DB, README và demo nghiệm thu
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\section{\texorpdfstring{\textbf{8. Phê duyệt}}{8. Phê duyệt}}\label{01-project-charter:phuxea-duyux1ec7t}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.2139}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.3277}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.2105}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.2479}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Người lập}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Vai trò}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Ký tên}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Ngày}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Nguyễn Châu Hoàng Khang
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Project Manager / Team Leader
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+-\/-\/-\/-\/-\/-\/-\/-\/-\/-\/-\/-\/-\/-\/-\/-
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\_\_/\_\_/2026
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Cao Nguyễn Quốc Khánh
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Đại diện nhóm / Product Owner (nội bộ)
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+-\/-\/-\/-\/-\/-\/-\/-\/-\/-\/-\/-\/-\/-\/-\/-
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\_\_/\_\_/2026
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.3221}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.2310}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.1990}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.2479}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Người phê duyệt}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Vai trò}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Ký tên}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Ngày}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+thầy Từ Lãng Phiêu
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Giảng viên / Reviewer
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+-\/-\/-\/-\/-\/-\/-\/-\/-\/-\/-\/-\/-\/-\/-
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\_\_/\_\_/2026
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\end{document}

@@ -1,0 +1,2481 @@
+\documentclass[11pt,a4paper,oneside]{report}
+% Layout adapted from the supplied SGU Assignment_report.tex.
+% XeLaTeX supports native Vietnamese text and modern Unicode fonts.
+\usepackage[a4paper,left=24mm,right=22mm,top=33mm,bottom=28mm,headheight=40pt,headsep=9mm,footskip=13mm]{geometry}
+\usepackage{fontspec}
+\setmainfont{Tinos}
+\setsansfont{Noto Sans}
+\setmonofont{DejaVu Sans Mono}[Scale=0.85]
+\usepackage{amsmath,amssymb}
+\usepackage{longtable,booktabs,array,calc,tabularx,multirow}
+\usepackage{graphicx,pdfpages,rotating}
+\usepackage[table]{xcolor}
+\usepackage{float}
+\usepackage{enumitem}
+\usepackage{fancyhdr,lastpage}
+\usepackage{setspace}
+\usepackage{etoolbox}
+\usepackage{caption}
+\usepackage{hyperref}
+\definecolor{sgublue}{HTML}{173FAB}
+\hypersetup{colorlinks=true,linkcolor=black,urlcolor=sgublue,citecolor=black,pdftitle={BrewLite - Assignment 1},pdfauthor={Nhóm 3 - Trường Đại học Sài Gòn}}
+\setcounter{secnumdepth}{0} % Chapter numbers only; preserve source's own section numbering.
+\setcounter{tocdepth}{2}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt}
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.10}
+\setlength{\LTpre}{5pt}
+\setlength{\LTpost}{10pt}
+\AtBeginEnvironment{longtable}{\small}
+\emergencystretch=3em
+\sloppy
+\setlist{itemsep=1pt,parsep=0pt,topsep=4pt}
+\newcommand{\tightlist}{\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{%
+ \begin{tabular}{@{}cl@{}}
+ \includegraphics[width=9mm]{assets/branding/logoITSGUsmall.png} &
+ \begin{tabular}{@{}l@{}}{\scriptsize\sffamily\bfseries Trường Đại học Sài Gòn}\\[-1pt]{\scriptsize\sffamily\bfseries Khoa Công nghệ Thông tin}\end{tabular}
+ \end{tabular}}
+\fancyfoot[L]{{\scriptsize\sffamily Báo cáo Công nghệ phần mềm -- BrewLite | Nhóm 3}}
+\fancyfoot[R]{{\scriptsize\sffamily Trang \thepage /\pageref{LastPage}}}
+\renewcommand{\headrulewidth}{0.3pt}
+\renewcommand{\footrulewidth}{0.3pt}
+\fancypagestyle{plain}{\fancyhf{}\fancyfoot[L]{\scriptsize\sffamily BrewLite -- Assignment 1 | Nhóm 3}\fancyfoot[R]{\scriptsize\sffamily Trang \thepage /\pageref{LastPage}}\renewcommand{\headrulewidth}{0pt}\renewcommand{\footrulewidth}{0.3pt}}
+\captionsetup{font=small,labelfont=bf}
+
+\renewcommand{\contentsname}{Mục lục}
+
+\begin{document}
+\begin{titlepage}
+\begin{center}
+{\bfseries\small TRƯỜNG ĐẠI HỌC SÀI GÒN}\\[2pt]
+{\bfseries\small KHOA CÔNG NGHỆ THÔNG TIN}\\[16mm]
+\includegraphics[width=33mm]{assets/branding/logoITSGU.png}\\[17mm]
+{\color{sgublue}\LARGE\bfseries CÔNG NGHỆ PHẦN MỀM}\\[7mm]
+{\color{sgublue}\rule{0.9\textwidth}{0.8pt}}\\[4mm]
+{\color{sgublue}\large\bfseries TÀI LIỆU ASSIGNMENT 1}\\[3mm]
+{\color{sgublue}\Huge\bfseries BrewLite}\\[4mm]
+\parbox{0.94\textwidth}{\centering\color{sgublue}\Large\bfseries User Stories \& Acceptance Criteria}\par\vspace{5mm}
+{\color{sgublue}\rule{0.9\textwidth}{0.8pt}}\\[15mm]
+\end{center}
+\begin{flushright}
+\begin{tabular}{@{}rl@{}}
+\textbf{Giảng viên:} & Từ Lãng Phiêu \\
+\textbf{Nhóm:} & Nhóm 3 \\
+\textbf{Môn học:} & Công nghệ phần mềm \\
+\end{tabular}
+\end{flushright}
+\vfill
+\begin{center}
+{\small\bfseries THÀNH VIÊN THỰC HIỆN}\\[3mm]
+\begin{tabular}{@{}ll@{}}
+ Nguyễn Châu Hoàng Khang & 3124410143 \\
+ Hoàng Văn Lập & 3124410184 \\
+ Nguyễn Khải Hoàng & 3124410106 \\
+ Nguyễn Đăng Thụy & 3124410352 \\
+ Cao Nguyễn Quốc Khánh & 3124410149 \\
+ Lâm Chí Khang & 3124410142 \\
+
+\end{tabular}
+\vfill
+{\small TP. HỒ CHÍ MINH, THÁNG 10/2026}
+\end{center}
+\end{titlepage}
+\pagenumbering{roman}
+\chapter*{DANH SÁCH THÀNH VIÊN VÀ PHÂN CÔNG}
+\noindent Nhóm 3 -- Trường Đại học Sài Gòn -- Môn Công nghệ phần mềm.
+\par\smallskip
+\textit{Cột Phân công để Chưa cập nhật khi chưa có phân nhiệm chính thức; vai trò lấy theo Project Charter.}
+\vspace{4mm}
+\begingroup\small
+\begin{longtable}{|>{\centering\arraybackslash}p{8mm}|p{41mm}|p{25mm}|p{36mm}|p{36mm}|}
+\hline
+\rowcolor{blue!9}\textbf{STT} & \textbf{Họ và tên} & \textbf{MSSV} & \textbf{Vai trò} & \textbf{Phân công} \\ \hline
+\endfirsthead
+\hline\rowcolor{blue!9}\textbf{STT} & \textbf{Họ và tên} & \textbf{MSSV} & \textbf{Vai trò} & \textbf{Phân công} \\ \hline
+\endhead
+1 & Nguyễn Châu Hoàng Khang & 3124410143 & Team Leader / Developer & \textit{Chưa cập nhật} \\ \hline
+2 & Hoàng Văn Lập & 3124410184 & Developer & \textit{Chưa cập nhật} \\ \hline
+3 & Nguyễn Khải Hoàng & 3124410106 & Developer & \textit{Chưa cập nhật} \\ \hline
+4 & Nguyễn Đăng Thụy & 3124410352 & Developer & \textit{Chưa cập nhật} \\ \hline
+5 & Cao Nguyễn Quốc Khánh & 3124410149 & Developer & \textit{Chưa cập nhật} \\ \hline
+6 & Lâm Chí Khang & 3124410142 & Developer & \textit{Chưa cập nhật} \\ \hline
+\end{longtable}
+\endgroup
+\clearpage
+\tableofcontents
+\clearpage
+\pagenumbering{arabic}
+\chapter{User Stories \& Acceptance Criteria}
+% Auto-converted from BrewLite_User_Stories_Acceptance_Criteria.docx via pandoc 3.1.11.1.
+% Original wording and table data are retained.
+USER STORIES \& ACCEPTANCE CRITERIA
+
+BrewLite \textbar{} Tài liệu User Story \& Tiêu chí chấp nhận
+
+Phiên bản: v2.2 \textbar{} Ngày cập nhật: 13/10/2026 \textbar{} Trạng thái: Đã chốt
+
+\textbf{Mục tiêu}
+
+Chuyển yêu cầu đã đặc tả thành các User Story theo vai trò và Acceptance Criteria (AC) có thể kiểm thử, phục vụ Product Backlog, Sprint Planning, phát triển FE/BE, kiểm thử và nghiệm thu BrewLite.
+
+\textbf{Document Control}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thông tin}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Giá trị}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Tên tài liệu
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+User Stories \& Acceptance Criteria
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Dự án
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+BrewLite - Ứng dụng đặt đồ uống và thanh toán không tiền mặt
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Phiên bản
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+v2.2
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Ngày cập nhật
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+13/10/2026
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Trạng thái
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Đã chốt
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Nguồn đầu vào
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+BrewLite-CongNghePhanMem.pdf (đề bài); BrewLite\_Requirements\_Specification.docx (v2.0)
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Quy mô
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+41 User Stories nghiệp vụ truy vết 40 FR + 2 Technical Enablers = 43 Stories
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{1. Phạm vi, căn cứ và phương pháp}
+
+Phạm vi chức năng bám theo Specification v2.0: Guest và Customer trên web Next.js; backend NestJS; PostgreSQL/Prisma; mock payment Ví/Thẻ; một cửa hàng (single-vendor). Nội dung ``MUST'' là yêu cầu bắt buộc; ``SHOULD'' ghi nhận mức ưu tiên thấp hơn nhưng không tự loại bỏ khỏi tài liệu.
+
+Quy tắc soạn: mỗi yêu cầu chức năng FR-\ldots{} có một User Story cùng nhóm mã; AC được chuyển thành điều kiện có thể kiểm thử. Bổ sung riêng US-PRO-07 cho chức năng xem trước mã giảm giá (SHOULD) vốn nằm trong FR-PRO-001, không tạo FR mới. Các Story kỹ thuật US-OPS không gắn với FR, được bổ sung riêng theo 10 task và Definition of Done trong đề bài PDF.
+
+Ngoài phạm vi: thanh toán tiền thật, trang Admin/Seller phức tạp, màn hình Barista, ship hàng, ứng dụng mobile native và microservices. Chuyển trạng thái sau PAID chỉ dùng thao tác nội bộ bảo vệ bằng khóa để demo Task 10.
+
+\textbf{2. Quy ước đọc User Story và AC}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thành phần}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Quy ước}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+User Story
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+``Là {[}actor{]}, tôi muốn {[}khả năng{]}, để {[}giá trị{]}''. Với Story kỹ thuật dùng vai trò nhóm phát triển thay vì giả định actor người dùng không tồn tại.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Acceptance Criteria
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+AC-\{ID Story\}-\{số\}: tình huống/điều kiện → hành động → kết quả mong đợi; ghi rõ HTTP, trạng thái và bất biến khi cần.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+MUST / SHOULD
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Giữ nguyên ưu tiên trong Requirement Specification; phần mở rộng SHOULD không bị lẫn với core MUST.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+CONFIRMED / DERIVED
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Giữ loại nguồn của Specification; trường hợp hỗn hợp ghi cả hai.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+FR nguồn / Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Giúp truy vết tới Specification v2.0 và 10 task chính của đề bài (gợi ý liên hệ triển khai, không phải danh sách task mới).
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{3. Tổng quan danh mục User Stories}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.2500}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.2500}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.2500}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.2500}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Epic}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nhóm chức năng}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Số Story}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Căn cứ / Mục đích}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+AUTH
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Identity \& Account
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+4
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+F01 - Xác thực và tài khoản
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+AUTHZ
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Authorization \& Ownership
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+3
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+F01 - Quyền truy cập và sở hữu
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+CAT
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Menu \& Catalog
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+5
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+F02 - Danh sách, chi tiết, giá
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+CART
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Shopping Cart
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+5
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+F03 - Giỏ hàng
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+ORD
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Order Management
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+7
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+F04 - Đơn hàng
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+INV
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Inventory
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+4
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+F05 - Tồn kho
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+PAY
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Payment
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+6
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+F06 - Thanh toán mock
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+PRO
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Loyalty \& Promotion
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+7
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+F07 - Giảm giá và điểm
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+OPS
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Technical Enablers \& Delivery
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+2
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Task kỹ thuật từ đề bài PDF
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+Tổng cộng: 43 Story; trong đó 41 Story chức năng truy vết đầy đủ 40 FR-AUTH, AUTHZ, CAT, CART, ORD, INV, PAY, PRO của Specification (riêng FR-PRO-001 có 2 Story: áp mã và xem trước mã) và 2 Story kỹ thuật phục vụ hạ tầng/bàn giao theo đề bài. US-PRO-07 thuộc phạm vi SHOULD, không phát sinh FR hay task bắt buộc mới.
+
+\textbf{4. Chi tiết User Stories \& Acceptance Criteria}
+
+\textbf{4.1 Identity \& Account}
+
+\textbf{US-AUTH-01 - Đăng ký tài khoản}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST \textbar{} CONFIRMED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Guest \textbar{} FR-AUTH-001
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+7
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là một khách chưa đăng nhập (Guest), tôi muốn đăng ký bằng email và mật khẩu, để tôi có tài khoản để đặt và thanh toán đồ uống.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-AUTH-01-01.} Với email đúng định dạng chưa tồn tại và mật khẩu ít nhất 8 ký tự, khi đăng ký thì tạo một Customer, chuẩn hóa email (trim/lowercase), điểm ban đầu bằng 0.
+
+\textbf{AC-US-AUTH-01-02.} Khi email đã được sử dụng, hệ thống trả 409 EMAIL\_ALREADY\_EXISTS và không tạo tài khoản thứ hai.
+
+\textbf{AC-US-AUTH-01-03.} Khi email sai định dạng, thiếu trường bắt buộc hoặc mật khẩu dưới 8 ký tự, hệ thống trả 400 VALIDATION\_ERROR và chỉ rõ trường lỗi.
+
+\textbf{AC-US-AUTH-01-04.} Khi gửi thêm role hoặc loyaltyPoints, backend bỏ qua; tài khoản mới vẫn chỉ là Customer với 0 điểm.
+
+\textbf{AC-US-AUTH-01-05.} Sau đăng ký, cơ sở dữ liệu chỉ chứa hash bcrypt của mật khẩu, API và log không trả mật khẩu gốc.
+
+\textbf{US-AUTH-02 - Đăng nhập}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST \textbar{} CONFIRMED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Customer \textbar{} FR-AUTH-002
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+7
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là một khách hàng (Customer), tôi muốn đăng nhập bằng email và mật khẩu, để tôi có thể thực hiện các hành động đặt món cần xác thực.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-AUTH-02-01.} Với thông tin hợp lệ, khi đăng nhập thì nhận JWT có định danh (sub), thời hạn 60 phút.
+
+\textbf{AC-US-AUTH-02-02.} Khi email không tồn tại hoặc mật khẩu sai, hai trường hợp đều trả 401 INVALID\_CREDENTIALS cùng nội dung thông báo, không cấp JWT.
+
+\textbf{AC-US-AUTH-02-03.} Sau đăng nhập thành công, các dòng và số lượng trong giỏ đã có trước đó được giữ nguyên.
+
+\textbf{AC-US-AUTH-02-04.} Khi token hết hạn và yêu cầu API cần xác thực, giao diện yêu cầu đăng nhập lại nhưng không xóa giỏ.
+
+\textbf{US-AUTH-03 - Truy cập API với JWT}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST \textbar{} CONFIRMED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Customer \textbar{} FR-AUTH-003
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+7
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là một khách hàng (Customer), tôi muốn dùng phiên đăng nhập hợp lệ, để tôi chỉ sử dụng được các chức năng được bảo vệ khi đã xác thực.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-AUTH-03-01.} Guest gọi danh sách/chi tiết sản phẩm hoặc đăng ký/đăng nhập được mà không gửi JWT.
+
+\textbf{AC-US-AUTH-03-02.} Khi POST /orders, POST /payments hoặc GET /orders/me không có JWT, sai chữ ký hoặc đã hết hạn thì trả 401 UNAUTHORIZED.
+
+\textbf{AC-US-AUTH-03-03.} Khi nhận 401 do hết hạn, frontend chuyển đến đăng nhập và giữ nguyên giỏ hàng.
+
+\textbf{AC-US-AUTH-03-04.} Backend lấy userId từ JWT đã xác thực, không sử dụng userId do client tự gửi.
+
+\textbf{US-AUTH-04 - Đăng xuất chủ động}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+SHOULD \textbar{} DERIVED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Customer \textbar{} FR-AUTH-004
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+7 (mở rộng)
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là một khách hàng (Customer), tôi muốn đăng xuất trên trình duyệt hiện tại, để tôi không để lại giỏ và thông tin phiên cho người dùng sau.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-AUTH-04-01.} Khi chọn đăng xuất, frontend xóa access token và toàn bộ giỏ (kể cả localStorage), rồi hiển thị trạng thái Guest.
+
+\textbf{AC-US-AUTH-04-02.} Sau đăng xuất, tải lại trang hoặc đăng nhập bằng tài khoản khác thì giỏ vẫn rỗng.
+
+\textbf{AC-US-AUTH-04-03.} Khi giỏ có món, hệ thống nên hỏi xác nhận trước khi xóa giỏ.
+
+\textbf{AC-US-AUTH-04-04.} Khi JWT chỉ hết hạn hoặc nhận 401, giỏ phải được giữ, không áp dụng quy tắc xóa của đăng xuất chủ động.
+
+\textbf{4.2 Authorization \& Ownership}
+
+\textbf{US-AUTHZ-01 - Phân quyền endpoint mặc định từ chối}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST \textbar{} CONFIRMED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Guest / Customer \textbar{} FR-AUTHZ-001
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+7, 10
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là người dùng (Guest/Customer), tôi muốn được truy cập đúng những API dành cho mình, để thông tin và thao tác có xác thực được bảo vệ.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-AUTHZ-01-01.} Các endpoint được công khai tường minh: GET /products, GET /products/:id, POST /auth/register, POST /auth/login.
+
+\textbf{AC-US-AUTHZ-01-02.} Endpoint nghiệp vụ mới không được gắn nhãn public mặc định yêu cầu JWT; gọi không token trả 401.
+
+\textbf{AC-US-AUTHZ-01-03.} Customer có JWT vẫn không được gọi endpoint chuyển trạng thái nội bộ nếu thiếu/sai X-Internal-Key; trả 403 FORBIDDEN.
+
+\textbf{AC-US-AUTHZ-01-04.} Khi backend không xác định được quyền hợp lệ, yêu cầu bị từ chối thay vì mở quyền.
+
+\textbf{US-AUTHZ-02 - Bảo vệ quyền sở hữu đơn}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST \textbar{} DERIVED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Customer \textbar{} FR-AUTHZ-002
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+7, 9, 10
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là một khách hàng (Customer), tôi muốn chỉ xem và thao tác trên các đơn của mình, để đơn hàng và dữ liệu cá nhân không bị người khác truy cập.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-AUTHZ-02-01.} Customer A gọi xem, thanh toán hoặc hủy đơn của Customer B thì nhận 404 NOT\_FOUND, kể cả khi biết chính xác mã đơn.
+
+\textbf{AC-US-AUTHZ-02-02.} Mã đơn không tồn tại và mã đơn thuộc người khác phải có cùng mã lỗi và thông báo, không để lộ trạng thái đơn.
+
+\textbf{AC-US-AUTHZ-02-03.} GET /orders/me chỉ trả các đơn có userId bằng chủ thể trong JWT; thay userId trong body/query không mở rộng kết quả.
+
+\textbf{AC-US-AUTHZ-02-04.} Backend kiểm tra sở hữu trước khi kiểm tra trạng thái đơn; đơn của người khác không bao giờ nhận lỗi trạng thái 409.
+
+\textbf{US-AUTHZ-03 - Kiểm tra quyền và trạng thái ở backend}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST \textbar{} DERIVED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Customer \textbar{} FR-AUTHZ-003
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+7, 8, 10
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là một khách hàng (Customer), tôi muốn được từ chối an toàn khi thao tác không hợp lệ, để các thao tác không thể bị lách bằng cách sửa giao diện.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-AUTHZ-03-01.} Khi gọi API trực tiếp qua Postman mà thiếu JWT, sai chủ đơn hoặc sai trạng thái thì backend vẫn từ chối.
+
+\textbf{AC-US-AUTHZ-03-02.} Với thao tác trên đơn, backend kiểm tra theo thứ tự: xác thực → quyền sở hữu → trạng thái nghiệp vụ → xử lý.
+
+\textbf{AC-US-AUTHZ-03-03.} Yêu cầu thanh toán mới cho đơn của mình đã PAID trả 409 INVALID\_TRANSITION; cùng yêu cầu cho đơn người khác trả 404.
+
+\textbf{AC-US-AUTHZ-03-04.} Client không thể tự gửi trạng thái đích để ép Order đổi trạng thái ngoài luồng State Machine.
+
+\textbf{4.3 Menu \& Catalog}
+
+\textbf{US-CAT-01 - Xem menu đồ uống}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST (+ SHOULD: phân trang) \textbar{} CONFIRMED / DERIVED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Guest / Customer \textbar{} FR-CAT-001
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+2, 3
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là người dùng (Guest/Customer), tôi muốn xem menu kèm ảnh, tên, giá cơ bản và tình trạng còn/hết hàng, để tôi chọn được món trước khi đăng nhập.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-CAT-01-01.} Không có token, GET /products vẫn trả danh sách sản phẩm và các trường hiển thị: mã, tên, ảnh, giá cơ bản, còn/hết hàng.
+
+\textbf{AC-US-CAT-01-02.} Danh sách có thứ tự ổn định theo tên rồi mã sản phẩm; không trả số lượng tồn kho chính xác qua API công khai.
+
+\textbf{AC-US-CAT-01-03.} Khi danh sách rỗng, đang tải hoặc có lỗi, giao diện lần lượt hiển thị trạng thái phù hợp và ảnh lỗi có hình thay thế.
+
+\textbf{AC-US-CAT-01-04.} (SHOULD) Không có page/limit trả toàn bộ danh sách; có tham số trả cấu trúc thống nhất kèm total, page, limit, totalPages.
+
+\textbf{AC-US-CAT-01-05.} (SHOULD) page=0 hoặc limit ngoài 1--50 trả 400; page vượt tổng số trang trả 200 với danh sách rỗng.
+
+\textbf{AC-US-CAT-01-06.} Với dữ liệu mẫu, GET /products phản hồi dưới 500 ms.
+
+\textbf{US-CAT-02 - Xem chi tiết và tùy chọn món}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST \textbar{} CONFIRMED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Guest / Customer \textbar{} FR-CAT-002
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+2, 4
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là người dùng (Guest/Customer), tôi muốn xem chi tiết món với size và topping, để tôi biết các lựa chọn trước khi thêm giỏ.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-CAT-02-01.} Không cần đăng nhập, GET /products/:id trả thông tin món, size S/M/L với hệ số 100/120/140\% và danh sách topping kèm giá.
+
+\textbf{AC-US-CAT-02-02.} Khi mở chi tiết, size S mặc định được chọn.
+
+\textbf{AC-US-CAT-02-03.} Chỉ chọn tối đa 3 loại topping khác nhau cho một ly; mỗi loại tối đa 1 lần.
+
+\textbf{AC-US-CAT-02-04.} Khi mã sản phẩm không tồn tại, backend trả 404 và giao diện hiển thị thông báo không tìm thấy món.
+
+\textbf{US-CAT-03 - Tính giá theo size và topping}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST \textbar{} CONFIRMED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Guest / Customer \textbar{} FR-CAT-003
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+4, 6
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là người dùng (Guest/Customer), tôi muốn thấy giá thay đổi đúng theo size và topping, để tôi biết số tiền tạm tính trước khi mua.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-CAT-03-01.} Đơn giá mỗi ly = round\_half\_up(giá cơ bản × hệ số size /100) + tổng giá topping; thành tiền dòng = đơn giá × số lượng.
+
+\textbf{AC-US-CAT-03-02.} Món 45.000đ size L không topping có đơn giá 63.000đ.
+
+\textbf{AC-US-CAT-03-03.} Món 45.000đ size M, topping 5.000đ và 7.000đ, số lượng 2 cho đơn giá 66.000đ, thành tiền 132.000đ.
+
+\textbf{AC-US-CAT-03-04.} Backend tính lại giá tại tạo đơn; giá/lineTotal giả do client gửi không làm thay đổi giá cuối.
+
+\textbf{AC-US-CAT-03-05.} Size không hợp lệ, quá 3 topping, topping trùng hoặc số lượng ngoài 1--10 bị từ chối 400; tiền tính theo VND nguyên/Decimal và làm tròn half-up.
+
+\textbf{US-CAT-04 - Nhận biết món hết hàng}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+SHOULD \textbar{} DERIVED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Guest / Customer \textbar{} FR-CAT-004
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+3, 4, 6
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là người dùng (Guest/Customer), tôi muốn biết món nào còn hoặc hết, để tôi không thêm món không có sẵn vào giỏ.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-CAT-04-01.} Khi stock = 0, menu và chi tiết hiển thị hết hàng và chặn thao tác thêm vào giỏ trên UI.
+
+\textbf{AC-US-CAT-04-02.} Khi stock \textgreater{} 0, món được hiển thị là còn hàng, không cần công bố số tồn chính xác.
+
+\textbf{AC-US-CAT-04-03.} Ngay cả khi client cố tạo đơn với món hết hàng, backend từ chối 409 INSUFFICIENT\_STOCK.
+
+\textbf{US-CAT-05 - Có menu mẫu để chạy và kiểm thử}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST \textbar{} DERIVED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Nhóm phát triển \textbar{} FR-CAT-005
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+2, 3, 10
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là một thành viên nhóm phát triển, tôi muốn khởi tạo dữ liệu mẫu nhất quán, để có thể demo và kiểm thử ứng dụng ngay sau khi cài đặt.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-CAT-05-01.} Chạy seed tạo được danh sách món, topping chung và giá, tồn kho phục vụ trang menu.
+
+\textbf{AC-US-CAT-05-02.} Bộ seed có ít nhất một món hết hàng và một món tồn thấp để thử oversell.
+
+\textbf{AC-US-CAT-05-03.} Chạy seed hai lần không làm tăng số bản ghi sản phẩm/topping trùng lặp.
+
+\textbf{AC-US-CAT-05-04.} README mô tả cách nạp seed; giá cơ bản trong seed là bội số của 5.000đ.
+
+\textbf{4.4 Shopping Cart}
+
+\textbf{US-CART-01 - Thêm đồ uống vào giỏ}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST \textbar{} CONFIRMED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Guest / Customer \textbar{} FR-CART-001
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+4, 5
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là người dùng (Guest/Customer), tôi muốn thêm món theo size, topping và số lượng, để tôi chuẩn bị được đơn hàng trước lúc thanh toán.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-CART-01-01.} Guest chưa đăng nhập vẫn thêm được sản phẩm còn hàng vào giỏ.
+
+\textbf{AC-US-CART-01-02.} Hai lần thêm cùng sản phẩm, cùng size và cùng tập topping (không phân biệt thứ tự) được gộp một dòng, cộng số lượng.
+
+\textbf{AC-US-CART-01-03.} Thêm cùng sản phẩm nhưng size hoặc tập topping khác tạo dòng mới.
+
+\textbf{AC-US-CART-01-04.} Mỗi dòng tối đa 10 ly; nếu cộng dồn vượt 10, giữ ở 10 và thông báo.
+
+\textbf{AC-US-CART-01-05.} Giỏ không quá 20 dòng; thêm cấu hình mới khi đủ 20 dòng thì bị từ chối và có thông báo.
+
+\textbf{AC-US-CART-01-06.} Size chỉ S/M/L; topping tối đa 3 loại không trùng và không thêm món hết hàng qua UI.
+
+\textbf{US-CART-02 - Sửa số lượng và xóa dòng}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST \textbar{} CONFIRMED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Guest / Customer \textbar{} FR-CART-002
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+5
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là người dùng (Guest/Customer), tôi muốn chỉnh số lượng hoặc bỏ món khỏi giỏ, để giỏ phản ánh lựa chọn mới nhất.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-CART-02-01.} Nút tăng dừng tại 10, không lưu dòng có số lượng ngoài khoảng 1--10.
+
+\textbf{AC-US-CART-02-02.} Giảm số lượng từ 3 xuống 2 chỉ cập nhật dòng đang chọn.
+
+\textbf{AC-US-CART-02-03.} Giảm từ 1 xuống 0 hoặc bấm xóa loại bỏ hẳn dòng và cập nhật tổng tạm tính.
+
+\textbf{AC-US-CART-02-04.} Sửa/xóa một dòng không làm thay đổi cấu hình và số lượng của dòng khác.
+
+\textbf{AC-US-CART-02-05.} Khi giỏ rỗng, UI hiển thị giỏ trống và không cho tạo đơn.
+
+\textbf{US-CART-03 - Xem tổng tạm tính}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST \textbar{} CONFIRMED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Guest / Customer \textbar{} FR-CART-003
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+5, 6
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là người dùng (Guest/Customer), tôi muốn xem thành tiền từng món và tổng giỏ, để tôi có thể cân nhắc chi phí trước khi đặt.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-CART-03-01.} Tổng tạm tính bằng tổng của (đơn giá cấu hình × số lượng) cho mọi dòng, ghi nhãn ``Tạm tính'' và định dạng VND.
+
+\textbf{AC-US-CART-03-02.} Giỏ gồm 66.000đ × 2 và 45.000đ × 1 hiển thị tổng 177.000đ.
+
+\textbf{AC-US-CART-03-03.} Tăng/giảm số lượng hoặc đổi cấu hình món làm tổng cập nhật tức thời và chính xác.
+
+\textbf{AC-US-CART-03-04.} Với cùng catalog, tổng tạm tính phía client bằng kết quả server tính trước giảm giá; khi catalog đổi, server vẫn quyết định giá cuối.
+
+\textbf{US-CART-04 - Giữ giỏ theo vòng đời phiên}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST \textbar{} CONFIRMED / DERIVED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Guest / Customer \textbar{} FR-CART-004
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+5, 7, 8
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là người dùng (Guest/Customer), tôi muốn giữ giỏ khi chuyển trang, tải lại hoặc cần đăng nhập lại, để tôi không phải chọn lại món ngoài những trường hợp đã quy định.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-CART-04-01.} Tải lại trang hoặc chuyển trang vẫn khôi phục được giỏ hợp lệ từ localStorage.
+
+\textbf{AC-US-CART-04-02.} Đăng nhập, JWT hết hạn/nhận 401, tạo đơn PENDING hoặc thanh toán PAYMENT\_FAILED đều không làm mất giỏ.
+
+\textbf{AC-US-CART-04-03.} Sau đơn PAID hoặc đăng xuất chủ động, toàn bộ giỏ bị xóa, kể cả sau khi tải lại.
+
+\textbf{AC-US-CART-04-04.} Nếu dữ liệu localStorage bị sửa thành dòng sai hoặc số lượng ≤ 0, khi khôi phục phải loại bỏ dòng sai.
+
+\textbf{AC-US-CART-04-05.} Khi localStorage không hoạt động, vẫn thao tác được với giỏ trong bộ nhớ mà không gây lỗi UI.
+
+\textbf{US-CART-05 - Được báo giỏ lỗi thời khi đặt}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST \textbar{} DERIVED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Customer \textbar{} FR-CART-005
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+5, 6
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là một khách hàng (Customer), tôi muốn được hệ thống kiểm tra lại giỏ khi tạo đơn, để tôi không bị đặt món với giá hoặc tồn kho sai.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-CART-05-01.} Giỏ rỗng, hơn 20 dòng, hai dòng cùng cấu hình, mã sản phẩm/size/topping sai, topping trùng hoặc qty ngoài 1--10 bị từ chối 400 INVALID\_CART kèm dòng lỗi.
+
+\textbf{AC-US-CART-05-02.} Giỏ hợp lệ nhưng thiếu tồn kho bị từ chối 409 INSUFFICIENT\_STOCK.
+
+\textbf{AC-US-CART-05-03.} Khi một request có cả lỗi cấu trúc giỏ và thiếu tồn kho, hệ thống trả 400 trước.
+
+\textbf{AC-US-CART-05-04.} Client gửi price, total hay lineTotal sai không thay đổi giá cuối do backend lấy từ catalog.
+
+\textbf{AC-US-CART-05-05.} Sau lỗi tạo đơn, giỏ ở trình duyệt vẫn còn để khách sửa; lời gọi trực tiếp API không thể bỏ qua validation.
+
+\textbf{AC-US-CART-05-06.} (SHOULD) Trước checkout, UI làm mới catalog và cảnh báo lựa chọn đã lỗi thời.
+
+\textbf{4.5 Order Management}
+
+\textbf{US-ORD-01 - Tạo đơn từ giỏ hợp lệ}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST \textbar{} CONFIRMED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Customer \textbar{} FR-ORD-001
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+6, 10
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là một khách hàng (Customer), tôi muốn tạo đơn từ các món đã chọn, để tôi có mã đơn để tiến hành thanh toán.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-ORD-01-01.} Với JWT và giỏ hợp lệ, POST /orders tạo duy nhất một Order PENDING, trả mã đơn không dễ đoán, các dòng snapshot, tạm tính, giảm giá, tổng và thời điểm.
+
+\textbf{AC-US-ORD-01-02.} Trong cùng transaction, hệ thống tính lại giá, trừ tồn kho đủ và giữ lượt coupon (nếu có); lỗi ở bước nào rollback toàn bộ.
+
+\textbf{AC-US-ORD-01-03.} Giỏ hai món có món thứ hai thiếu tồn trả 409 INSUFFICIENT\_STOCK; không tạo Order và không trừ món thứ nhất.
+
+\textbf{AC-US-ORD-01-04.} Không có JWT trả 401; giỏ sai trả 400 INVALID\_CART; khách đã có đơn chờ trả 409 PENDING\_ORDER\_EXISTS.
+
+\textbf{AC-US-ORD-01-05.} Khi client gửi giá hoặc tổng giả, phản hồi và đơn đã lưu vẫn dùng giá do server tính.
+
+\textbf{AC-US-ORD-01-06.} Tổng cuối do backend trả về được UI hiển thị trước khi khách bắt đầu thanh toán.
+
+\textbf{US-ORD-02 - Giữ snapshot món đã mua}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST \textbar{} CONFIRMED / DERIVED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Customer \textbar{} FR-ORD-002
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+6, 9
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là một khách hàng (Customer), tôi muốn xem thông tin đơn cố định từ lúc tạo, để giá và lựa chọn đã đặt không bị thay đổi hồi tố.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-ORD-02-01.} Khi tạo đơn, lưu mã/tên món, size, topping kèm tên/giá, số lượng, đơn giá và thành tiền của từng dòng.
+
+\textbf{AC-US-ORD-02-02.} Sau khi đổi tên hoặc giá sản phẩm trong catalog, xem đơn cũ vẫn hiển thị dữ liệu snapshot đã lưu.
+
+\textbf{AC-US-ORD-02-03.} Sau khi sửa hoặc xóa topping, đơn cũ vẫn giữ topping và giá tại thời điểm tạo.
+
+\textbf{AC-US-ORD-02-04.} Với mọi Order, tổng các dòng trừ số tiền giảm bằng tổng tiền đơn; không có API sửa/xóa dòng đơn.
+
+\textbf{US-ORD-03 - Quản lý vòng đời trạng thái đơn}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST \textbar{} CONFIRMED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Customer / Nhóm phát triển \textbar{} FR-ORD-003
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+10
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là khách hàng hoặc thành viên nhóm phát triển, tôi muốn nhận trạng thái đơn đúng tiến độ nghiệp vụ, để không có đơn tự ý nhảy bước hay gây sai tài nguyên.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-ORD-03-01.} Luồng hợp lệ: tạo PENDING; thành công PAID → PREPARING → READY → COMPLETED; thất bại PENDING → PAYMENT\_FAILED; thử lại PAYMENT\_FAILED → PENDING; hủy PENDING/PAYMENT\_FAILED → CANCELLED.
+
+\textbf{AC-US-ORD-03-02.} Bất kỳ chuyển trạng thái ngoài ma trận mục 11.2.1 đều trả 409 INVALID\_TRANSITION và không đổi dữ liệu; COMPLETED/CANCELLED là trạng thái cuối.
+
+\textbf{AC-US-ORD-03-03.} Chỉ mock payment đổi PENDING thành PAID hoặc PAYMENT\_FAILED, Customer không tự gán trạng thái đích.
+
+\textbf{AC-US-ORD-03-04.} POST /internal/orders/:id/advance yêu cầu X-Internal-Key; body có from là trạng thái người gọi đang thấy, không nhận trạng thái đích; thiếu khóa trả 403, from sai trả 409.
+
+\textbf{AC-US-ORD-03-05.} Hai thao tác chuyển cùng Order đồng thời chỉ có một thao tác thành công; tồn kho, coupon và điểm được xử lý nguyên tử.
+
+\textbf{AC-US-ORD-03-06.} Không cho PAID → CANCELLED; thanh toán thất bại không tự hoàn tồn kho mà giữ tới lúc hủy.
+
+\textbf{US-ORD-04 - Xem lịch sử đơn của tôi}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST \textbar{} CONFIRMED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Customer \textbar{} FR-ORD-004
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+9
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là một khách hàng (Customer), tôi muốn xem các đơn hàng đã đặt, để tôi biết lịch sử và trạng thái mua đồ uống.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-ORD-04-01.} Với JWT hợp lệ, GET /orders/me trả các đơn chỉ của chính Customer, sắp xếp mới nhất trước.
+
+\textbf{AC-US-ORD-04-02.} Mỗi đơn có mã, thời gian, trạng thái, tổng tiền và chi tiết snapshot đã lưu.
+
+\textbf{AC-US-ORD-04-03.} Không có JWT trả 401; người mới chưa có đơn nhận danh sách rỗng và UI hiển thị empty state.
+
+\textbf{AC-US-ORD-04-04.} Khi catalog thay đổi, lịch sử vẫn phản ánh giá và tên tại thời điểm tạo đơn.
+
+\textbf{AC-US-ORD-04-05.} API lịch sử với dữ liệu mẫu phản hồi dưới 500 ms.
+
+\textbf{US-ORD-05 - Hủy đơn chưa thanh toán}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+SHOULD \textbar{} DERIVED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Customer \textbar{} FR-ORD-005
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+10 (bổ sung)
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là một khách hàng (Customer), tôi muốn hủy đơn PENDING hoặc PAYMENT\_FAILED của mình, để tôi giải phóng đơn không muốn tiếp tục trả tiền.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-ORD-05-01.} Với đơn của mình ở PENDING hoặc PAYMENT\_FAILED, khi gọi hủy thì đơn chuyển CANCELLED, trả tồn kho và lượt coupon HELD đúng một lần.
+
+\textbf{AC-US-ORD-05-02.} Hủy đơn đã PAID hoặc đã CANCELLED trả 409 INVALID\_TRANSITION, không tăng tồn kho lần nữa.
+
+\textbf{AC-US-ORD-05-03.} Hủy đơn của người khác trả 404, giống mã đơn không tồn tại.
+
+\textbf{AC-US-ORD-05-04.} Hai lần hủy liên tiếp hoặc hủy cạnh tranh với thanh toán chỉ một chuyển trạng thái thành công và dữ liệu nhất quán.
+
+\textbf{US-ORD-06 - Không tạo trùng đơn chưa thanh toán}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST \textbar{} CONFIRMED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Customer \textbar{} FR-ORD-006
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+6, 10
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là một khách hàng (Customer), tôi muốn được hướng tới đơn đang chờ thay vì tạo thêm đơn trùng, để tôi không bị giữ hàng và mã giảm giá hai lần.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-ORD-06-01.} Khi đã có Order PENDING hoặc PAYMENT\_FAILED, POST /orders mới trả 409 PENDING\_ORDER\_EXISTS kèm mã đơn đang chờ.
+
+\textbf{AC-US-ORD-06-02.} Hai POST /orders đồng thời của cùng Customer chỉ tạo một Order, trừ tồn và giữ lượt coupon một lần.
+
+\textbf{AC-US-ORD-06-03.} Khi Order hiện tại PAID hoặc CANCELLED, Customer được tạo Order tiếp theo.
+
+\textbf{AC-US-ORD-06-04.} Hai Customer độc lập có thể tạo Order đồng thời mà không bị giới hạn chung.
+
+\textbf{US-ORD-07 - Tự hủy đơn hết hạn}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST \textbar{} DERIVED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Customer \textbar{} FR-ORD-007
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+10 (bổ sung)
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là một khách hàng (Customer), tôi muốn đơn chờ quá lâu được giải phóng an toàn, để tài nguyên đã giữ không bị chiếm vô thời hạn.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-ORD-07-01.} Order PENDING hoặc PAYMENT\_FAILED hết hạn 15 phút kể từ lúc tạo; tác vụ quét mỗi phút và chuyển đơn quá hạn sang CANCELLED.
+
+\textbf{AC-US-ORD-07-02.} Khi tự hủy, hoàn tồn kho và trả lượt coupon đã giữ đúng một lần trong cùng transaction.
+
+\textbf{AC-US-ORD-07-03.} Đơn PAID không bị tác vụ hủy; chạy quét hai lần không hoàn tồn hoặc coupon thêm lần nữa.
+
+\textbf{AC-US-ORD-07-04.} Sau thời điểm expiresAt, thanh toán mới bị từ chối dù tác vụ chưa chuyển đơn sang CANCELLED.
+
+\textbf{AC-US-ORD-07-05.} Có thể cấu hình rút ngắn thời hạn trong môi trường test để kiểm tra được tình huống hết hạn.
+
+\textbf{4.6 Inventory}
+
+\textbf{US-INV-01 - Giữ đúng tồn kho theo số ly}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST \textbar{} CONFIRMED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Customer \textbar{} FR-INV-001
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+6, 10
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là một khách hàng (Customer), tôi muốn đặt các món có sẵn với lượng hàng được kiểm soát, để đơn hàng phản ánh số ly còn có thể phục vụ.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-INV-01-01.} Stock là số nguyên không âm theo Product, không tách theo size hay topping.
+
+\textbf{AC-US-INV-01-02.} Tạo Order thành công có hai dòng cùng sản phẩm với tổng qty = 4 làm stock giảm đúng 4.
+
+\textbf{AC-US-INV-01-03.} Tồn kho tiếp tục giữ ở PENDING và PAYMENT\_FAILED; thử lại thanh toán không trừ thêm.
+
+\textbf{AC-US-INV-01-04.} API công khai chỉ trả trạng thái còn/hết hàng; ràng buộc DB không cho stock âm.
+
+\textbf{US-INV-02 - Không oversell khi đặt đồng thời}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST \textbar{} CONFIRMED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Customer \textbar{} FR-INV-002
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+6, 10
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là một khách hàng (Customer), tôi muốn chỉ tạo đơn khi đủ số ly thực tế, để tôi không nhận xác nhận đặt vượt lượng còn lại.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-INV-02-01.} Stock 5; 10 Customer gửi đồng thời mỗi người mua 1 ly: đúng 5 đơn thành công, 5 đơn trả 409 INSUFFICIENT\_STOCK, stock cuối = 0.
+
+\textbf{AC-US-INV-02-02.} Đơn gồm cùng sản phẩm size S × 3 và size L × 3 khi stock = 5 bị từ chối 409 dù từng dòng riêng đủ.
+
+\textbf{AC-US-INV-02-03.} Đơn nhiều sản phẩm mà một món thiếu tồn bị rollback toàn bộ, các món khác không bị trừ.
+
+\textbf{AC-US-INV-02-04.} Cập nhật tồn kho nguyên tử có điều kiện hoặc optimistic locking đảm bảo không âm, giao dịch nhiều sản phẩm có thứ tự khóa ổn định.
+
+\textbf{AC-US-INV-02-05.} Lỗi thiếu hàng cho biết sản phẩm, lượng yêu cầu và lượng còn có thể đặt theo quy ước Specification.
+
+\textbf{US-INV-03 - Hoàn tồn kho đúng một lần}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST \textbar{} DERIVED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Customer \textbar{} FR-INV-003
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+10
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là một khách hàng (Customer), tôi muốn được giải phóng lượng hàng khi đơn chờ bị hủy, để hệ thống không giữ hàng sai sau khi hủy.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-INV-03-01.} Hủy Order PENDING hoặc PAYMENT\_FAILED làm tồn kho tăng lại đúng tổng qty giữ từ snapshot của Order.
+
+\textbf{AC-US-INV-03-02.} Mock thanh toán FAILED không hoàn tồn; thử lại cùng Order không trừ hoặc hoàn thêm.
+
+\textbf{AC-US-INV-03-03.} Hủy hai lần, tác vụ hết hạn chạy lặp, hoặc hủy cạnh tranh với payment không hoàn tồn quá một lần.
+
+\textbf{AC-US-INV-03-04.} Order PAID/PREPARING/READY/COMPLETED không được hoàn tồn trong phạm vi MVP.
+
+\textbf{AC-US-INV-03-05.} Thay đổi trạng thái CANCELLED và hoàn tồn thực hiện trong cùng transaction.
+
+\textbf{US-INV-04 - Đối soát biến động tồn kho}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+SHOULD \textbar{} DERIVED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Nhóm phát triển \textbar{} FR-INV-004
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+10 (bổ sung)
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là một thành viên nhóm phát triển, tôi muốn xem dấu vết giữ và hoàn tồn kho của đơn, để có thể kiểm tra nguyên nhân sai lệch tồn.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-INV-04-01.} Mỗi lần giữ hoặc hoàn tồn tạo log biến động gồm Product, Order, loại, qty và thời điểm trong cùng transaction.
+
+\textbf{AC-US-INV-04-02.} Mỗi cặp (Order, Product, loại biến động) xuất hiện tối đa một lần.
+
+\textbf{AC-US-INV-04-03.} Tồn cuối khớp tồn đầu cộng tổng biến động; không có API công khai sửa hoặc xóa bản ghi biến động.
+
+\textbf{4.7 Payment}
+
+\textbf{US-PAY-01 - Thanh toán mock qua Ví hoặc Thẻ}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST (MOCK) \textbar{} CONFIRMED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Customer \textbar{} FR-PAY-001
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+8
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là một khách hàng (Customer), tôi muốn thanh toán đơn chưa trả bằng Ví hoặc Thẻ mô phỏng, để tôi hoàn tất đặt đồ uống không dùng tiền mặt.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-PAY-01-01.} Với JWT, Order của mình chưa hết hạn ở PENDING, phương thức WALLET/CARD và Idempotency-Key hợp lệ, POST /payments trả kết quả có số tiền đúng tổng Order.
+
+\textbf{AC-US-PAY-01-02.} Thiếu JWT trả 401; thiếu Idempotency-Key, dữ liệu test sai hoặc phương thức lạ trả 400.
+
+\textbf{AC-US-PAY-01-03.} Thanh toán Order của người khác trả 404; Order đã PAID/CANCELLED hoặc quá hạn từ chối giao dịch mới với 409.
+
+\textbf{AC-US-PAY-01-04.} Client gửi thêm amount hoặc kết quả giả không thay đổi giá trị hay SUCCESS/FAILED do Mock Payment quyết định.
+
+\textbf{AC-US-PAY-01-05.} Payment FAILED khi đơn còn hạn có thể được thử lại bằng Idempotency-Key mới trên chính Order cũ.
+
+\textbf{AC-US-PAY-01-06.} Phản hồi nghiệp vụ SUCCESS/FAILED dùng HTTP 200 với paymentStatus/orderStatus; lỗi request dùng 4xx; với dữ liệu mẫu phản hồi dưới 500 ms.
+
+\textbf{US-PAY-02 - Xử lý thành công và thất bại đúng tác động}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST \textbar{} CONFIRMED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Customer \textbar{} FR-PAY-002
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+8, 10
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là một khách hàng (Customer), tôi muốn nhận kết quả thanh toán rõ ràng, để giỏ, điểm và tồn kho nhất quán với số tiền đã trả.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-PAY-02-01.} Khi Mock Payment SUCCESS: tạo Payment SUCCESS, Order PAID, coupon chuyển CONSUMED, cộng loyalty đúng một lần và frontend xóa giỏ.
+
+\textbf{AC-US-PAY-02-02.} Khi FAILED: tạo Payment FAILED, Order PAYMENT\_FAILED, giữ tồn kho/coupon HELD, không cộng điểm và giữ giỏ.
+
+\textbf{AC-US-PAY-02-03.} Sau PAYMENT\_FAILED chưa hết hạn, thử lại với khóa mới tạo Payment mới trên cùng Order, không trừ tồn và coupon lần nữa.
+
+\textbf{AC-US-PAY-02-04.} Lỗi kỹ thuật giữa transaction không để lại Payment/Order/điểm nửa vời; thao tác đồng thời hủy/thanh toán chỉ có một nhánh thắng.
+
+\textbf{AC-US-PAY-02-05.} Khi đơn đã quá hạn, lần thanh toán mới bị chặn và tài nguyên được trả khi đơn thật sự chuyển CANCELLED.
+
+\textbf{US-PAY-03 - Không bị thanh toán lặp}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST \textbar{} CONFIRMED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Customer \textbar{} FR-PAY-003
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+8, 10
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là một khách hàng (Customer), tôi muốn gửi lại cùng một lần thanh toán khi mạng chậm hoặc bấm đúp, để tôi không bị ghi nhận giao dịch hai lần.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-PAY-03-01.} Idempotency-Key dài 8--64 ký tự, duy nhất theo (userId, key); cùng khóa và nội dung trả lại đúng phản hồi gốc, kèm dấu hiệu replay, chỉ một Payment.
+
+\textbf{AC-US-PAY-03-02.} 10 request song song cùng khóa chỉ tạo một Payment; request chờ có thể nhận PAYMENT\_IN\_PROGRESS rồi gửi lại cùng khóa.
+
+\textbf{AC-US-PAY-03-03.} Cùng khóa nhưng khác Order, method hoặc dữ liệu test trả 409 IDEMPOTENCY\_KEY\_CONFLICT và không thay đổi dữ liệu.
+
+\textbf{AC-US-PAY-03-04.} Replay kết quả FAILED vẫn trả FAILED; không hoàn tồn hoặc cộng điểm lần nữa.
+
+\textbf{AC-US-PAY-03-05.} Lỗi kỹ thuật chưa ghi kết quả không chiếm vĩnh viễn khóa; client dùng lại khóa cũ khi retry cùng lần thử.
+
+\textbf{AC-US-PAY-03-06.} Một lần thử mới sau PAYMENT\_FAILED dùng khóa mới; đơn đã PAID với khóa mới bị từ chối 409.
+
+\textbf{US-PAY-04 - Lưu từng lần thử thanh toán}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST \textbar{} DERIVED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Nhóm phát triển \textbar{} FR-PAY-004
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+8, 10
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là một thành viên nhóm phát triển, tôi muốn lưu dấu vết mỗi Payment không nhầm với Order, để có thể đối soát chính xác nhiều lần thanh toán thất bại.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-PAY-04-01.} Mỗi lần thử có kết quả mock tạo một Payment gắn Order, số tiền bằng tổng Order tại thời điểm thanh toán.
+
+\textbf{AC-US-PAY-04-02.} Một Order có thể có nhiều Payment FAILED nhưng tối đa một Payment SUCCESS ngay cả khi dùng nhiều khóa khác nhau đồng thời.
+
+\textbf{AC-US-PAY-04-03.} Payment đã có kết quả là bất biến; không có API sửa/xóa kết quả.
+
+\textbf{AC-US-PAY-04-04.} Cơ sở dữ liệu và log không chứa số thẻ đầy đủ, mã CVV hoặc bí mật thanh toán.
+
+\textbf{AC-US-PAY-04-05.} Order CANCELLED có thể lưu FAILED trước đó nhưng không thể có SUCCESS.
+
+\textbf{US-PAY-05 - Xem xác nhận đặt hàng}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST \textbar{} CONFIRMED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Customer \textbar{} FR-PAY-005
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+9
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là một khách hàng (Customer), tôi muốn nhận màn hình xác nhận sau thanh toán, để tôi có đủ thông tin khi tới quầy nhận nước.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-PAY-05-01.} Sau PAID, màn hình xác nhận hiển thị mã đơn, trạng thái, các món snapshot, số tiền, phương thức đã che và thời điểm.
+
+\textbf{AC-US-PAY-05-02.} Tải lại màn hình xác nhận hoặc mở từ lịch sử không tạo thêm Payment.
+
+\textbf{AC-US-PAY-05-03.} Sau thanh toán FAILED, hiển thị lý do chung, hướng dẫn thử lại và giữ giỏ.
+
+\textbf{AC-US-PAY-05-04.} Chỉ chủ sở hữu mở được xác nhận của Order; người khác nhận 404.
+
+\textbf{US-PAY-06 - Có dữ liệu thanh toán mock kiểm chứng được}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST (MOCK) \textbar{} CONFIRMED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Nhóm phát triển \textbar{} FR-PAY-006
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+8, 9
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là một thành viên nhóm phát triển, tôi muốn tái hiện được cả thanh toán thành công và thất bại, để demo ổn định mà không dùng tiền thật.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-PAY-06-01.} Dữ liệu thẻ kết thúc 0002 luôn trả FAILED; thẻ hợp lệ khác trả SUCCESS, không thay đổi qua 10 lần gọi cùng dữ liệu.
+
+\textbf{AC-US-PAY-06-02.} Ví kết thúc 0000 luôn trả FAILED; ví hợp lệ khác trả SUCCESS.
+
+\textbf{AC-US-PAY-06-03.} Dữ liệu test không đúng định dạng bị từ chối 400, không tạo Payment.
+
+\textbf{AC-US-PAY-06-04.} Client gửi thêm cờ kết quả không thể ép mock SUCCESS hoặc FAILED.
+
+\textbf{AC-US-PAY-06-05.} README ghi đủ dữ liệu test cho cả hai nhánh của Ví và Thẻ.
+
+\textbf{4.8 Loyalty \& Promotion}
+
+\textbf{US-PRO-01 - Áp một mã giảm giá hợp lệ}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST \textbar{} CONFIRMED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Customer \textbar{} FR-PRO-001
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+10
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là một khách hàng (Customer), tôi muốn nhập mã giảm giá khi tạo Order, để tôi biết mã được chấp nhận trước lúc thanh toán.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-PRO-01-01.} Khi mã hợp lệ (tồn tại, trong thời hạn, đạt mức đơn tối thiểu), POST /orders chấp nhận một coupon; chuẩn hóa trim và không phân biệt chữ hoa/thường.
+
+\textbf{AC-US-PRO-01-02.} Khi mã sai, chưa hiệu lực, hết hạn hoặc không đạt đơn tối thiểu, trả 400 INVALID\_COUPON kèm lý do và không tạo Order.
+
+\textbf{AC-US-PRO-01-03.} Khi request chứa hơn một coupon, trả 400; không âm thầm loại mã sai rồi tạo đơn giá gốc.
+
+\textbf{AC-US-PRO-01-04.} Client gửi discountAmount bất kỳ không thay đổi mức giảm do backend tính; lỗi coupon không làm thay đổi stock.
+
+\textbf{US-PRO-02 - Tính giảm giá chính xác}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST \textbar{} CONFIRMED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Customer \textbar{} FR-PRO-002
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+10
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là một khách hàng (Customer), tôi muốn được áp đúng mức giảm giá FIXED/PERCENT, để tổng tiền trên đơn không vượt mong đợi.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-PRO-02-01.} Mã FIXED 20.000đ với tạm tính 100.000đ giảm 20.000đ; tổng 80.000đ.
+
+\textbf{AC-US-PRO-02-02.} Mã FIXED 20.000đ với tạm tính 15.000đ chỉ giảm tối đa 15.000đ; tổng bằng 0đ theo công thức.
+
+\textbf{AC-US-PRO-02-03.} Mã PERCENT 10\% với tạm tính 100.000đ giảm 10.000đ; PERCENT 10\% tối đa 30.000đ với tạm tính 500.000đ chỉ giảm 30.000đ.
+
+\textbf{AC-US-PRO-02-04.} Với tạm tính 12.345đ và PERCENT 15\%, giảm 1.852đ theo half-up, tổng 10.493đ.
+
+\textbf{AC-US-PRO-02-05.} Với mọi đơn: total = subtotal − discount, discount không âm/không vượt subtotal; coupon/discount đã lưu là snapshot bất biến.
+
+\textbf{AC-US-PRO-02-06}. Khi áp dụng mã giảm giá hợp lệ khiến tổng thanh toán bằng 0 VND, hệ thống vẫn cho phép tạo đơn PENDING và thực hiện thanh toán qua Mock Payment với số tiền 0 VND. Khi thanh toán thành công, đơn chuyển sang PAID và được cộng 0 điểm tích lũy. Tổng thanh toán không được âm.
+
+\textbf{US-PRO-03 - Nhận điểm sau thanh toán}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST \textbar{} CONFIRMED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Customer \textbar{} FR-PRO-003
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+10
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là một khách hàng (Customer), tôi muốn được tích điểm cho đơn đã PAID, để tôi có điểm thưởng đúng với số tiền đã trả.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-PRO-03-01.} Khi Order chuyển PAID, điểm cộng = floor(tổng tiền sau giảm ÷ 10.000) và lưu pointsEarned vào Order.
+
+\textbf{AC-US-PRO-03-02.} Đơn 125.000đ cộng 12 điểm; đơn 9.999đ cộng 0; đơn 10.000đ cộng 1.
+
+\textbf{AC-US-PRO-03-03.} Đơn 100.000đ giảm 20.000đ khi PAID cộng 8 điểm, không cộng theo subtotal.
+
+\textbf{AC-US-PRO-03-04.} PAYMENT\_FAILED, CANCELLED hoặc hết hạn không cộng điểm; replay hoặc thanh toán song song chỉ cộng một lần.
+
+\textbf{AC-US-PRO-03-05.} Điểm tăng trong cùng transaction với PAID; lỗi transaction rollback cả trạng thái và điểm.
+
+\textbf{AC-US-PRO-03-06.} Client không thể gửi loyaltyPoints để trực tiếp thay đổi điểm.
+
+\textbf{US-PRO-04 - Giữ và giới hạn lượt dùng coupon}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST \textbar{} DERIVED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Customer \textbar{} FR-PRO-004
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+10
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là một khách hàng (Customer), tôi muốn sử dụng coupon còn lượt hợp lệ, để mã giảm giá không bị dùng quá số lượt.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-PRO-04-01.} Mã chỉ 3 lượt tổng, 10 khách đặt đồng thời: đúng 3 Order dùng mã thành công, 7 request trả 409 COUPON\_UNAVAILABLE.
+
+\textbf{AC-US-PRO-04-02.} Hạn mức trên từng Customer kiểm cả lượt HELD của PENDING/PAYMENT\_FAILED và CONSUMED của PAID; lượt RELEASED không tính.
+
+\textbf{AC-US-PRO-04-03.} Khi tạo Order thành công, giữ lượt coupon HELD; khi PAYMENT\_FAILED hoặc thử lại, lượt vẫn HELD, không giữ thêm.
+
+\textbf{AC-US-PRO-04-04.} Khi PAID, lượt chuyển CONSUMED; khi CANCELLED do hủy hoặc quá hạn, lượt chuyển RELEASED đúng một lần.
+
+\textbf{AC-US-PRO-04-05.} Lỗi tồn kho đồng thời hết lượt mã ưu tiên trả INSUFFICIENT\_STOCK; transaction rollback không giữ coupon.
+
+\textbf{AC-US-PRO-04-06.} Hủy hai lần hoặc tác vụ chạy lại không trả lượt quá một lần.
+
+\textbf{US-PRO-05 - Xem điểm và ưu đãi trên lịch sử}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+SHOULD \textbar{} DERIVED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Customer \textbar{} FR-PRO-005
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+9, 10 (mở rộng)
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là một khách hàng (Customer), tôi muốn xem điểm hiện tại và coupon đã dùng, để tôi đối chiếu được ưu đãi của từng đơn.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-PRO-05-01.} Điểm hiện có được đọc từ backend bằng JWT, không trả điểm của tài khoản khác.
+
+\textbf{AC-US-PRO-05-02.} GET /orders/me hiển thị coupon, số tiền giảm và pointsEarned của từng đơn.
+
+\textbf{AC-US-PRO-05-03.} Sau thanh toán PAID, khi làm mới tài khoản hoặc trang xác nhận, điểm được cập nhật theo số server lưu.
+
+\textbf{AC-US-PRO-05-04.} Không có API client tự sửa điểm tích lũy.
+
+\textbf{US-PRO-06 - Chuẩn bị mã giảm giá seed để demo}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST \textbar{} DERIVED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Nhóm phát triển \textbar{} FR-PRO-006
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+10
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là một thành viên nhóm phát triển, tôi muốn có bộ coupon mẫu đầy đủ, để tôi kiểm chứng được mọi trường hợp hợp lệ và lỗi.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-PRO-06-01.} Seed có mã FIXED, PERCENT có trần, mã yêu cầu đơn tối thiểu, mã chưa hiệu lực, mã hết hiệu lực và mã giới hạn 1/3 lượt.
+
+\textbf{AC-US-PRO-06-02.} Coupon dùng để demo còn hiệu lực theo ngày nạp, không bị hết hạn do dữ liệu cố định cũ.
+
+\textbf{AC-US-PRO-06-03.} Seed chạy hai lần không nhân đôi mã và không đặt lại lượt đã dùng ngoài ý muốn.
+
+\textbf{AC-US-PRO-06-04.} README ghi từng mã mẫu và điều kiện dùng để chạy kiểm thử.
+
+\textbf{US-PRO-07 - Xem trước mã giảm giá trước khi tạo đơn}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+SHOULD \textbar{} DERIVED (nhánh xem trước của FR-PRO-001)
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Customer \textbar{} FR-PRO-001 (SHOULD), FR-PRO-002
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+10 (mở rộng SHOULD)
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là một khách hàng (Customer), tôi muốn xem trước số tiền được giảm và tổng tiền dự kiến khi nhập mã ưu đãi, để tôi biết mã có áp dụng được cho giỏ hiện tại hay không trước khi tạo đơn hàng.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-PRO-07-01.} Khi Customer có JWT hợp lệ gửi POST /coupons/preview kèm các dòng giỏ và một mã giảm giá, backend xử lý yêu cầu xem trước; Guest không có JWT hợp lệ bị từ chối 401 UNAUTHORIZED.
+
+\textbf{AC-US-PRO-07-02.} Với giỏ hợp lệ và coupon đáp ứng các điều kiện áp dụng, kết quả trả về thể hiện tạm tính, số tiền giảm và tổng thanh toán dự kiến; tất cả được backend tính theo FR-CAT-003 và FR-PRO-002, dùng VND nguyên/Decimal và quy tắc làm tròn đã chốt.
+
+\textbf{AC-US-PRO-07-03.} Mã được chuẩn hóa trim, không phân biệt hoa/thường; backend xác minh mã tồn tại, thời gian hiệu lực theo giờ máy chủ (UTC), giá trị đơn tối thiểu theo subtotal trước giảm và các điều kiện áp dụng hiện hành.
+
+\textbf{AC-US-PRO-07-04.} Khi mã không tồn tại, chưa có hiệu lực, đã hết hạn hoặc chưa đạt mức đơn tối thiểu, hệ thống trả kết quả không áp dụng được kèm lý do; không tự bỏ mã và hiển thị tổng như thể mã hợp lệ.
+
+\textbf{AC-US-PRO-07-05.} Khi coupon đã hết hạn mức tổng hoặc hạn mức của Customer, xem trước phải phản ánh rằng mã hiện không thể áp dụng; không hứa hẹn ưu đãi hoặc giữ thêm lượt sử dụng.
+
+\textbf{AC-US-PRO-07-06.} Gọi xem trước dù thành công, thất bại hay lặp lại nhiều lần đều không tạo Order/Payment, không đặt CouponRedemption ở trạng thái HELD/CONSUMED và không làm thay đổi tồn kho, điểm tích lũy hoặc lượt sử dụng coupon.
+
+\textbf{AC-US-PRO-07-07.} Khi client gửi kèm giá, tổng tiền hay discountAmount tự sửa, backend không dùng các giá trị đó để quyết định kết quả; chỉ lấy dữ liệu catalog và quy tắc giảm giá phía server để tính lại.
+
+\textbf{AC-US-PRO-07-08.} Kết quả preview chỉ mang tính tham khảo: khi Customer gọi POST /orders sau đó, backend kiểm tra lại giỏ, giá, thời hạn, tồn kho và quota coupon; kết quả cuối khi tạo Order có thể khác hoặc bị từ chối nếu điều kiện đã thay đổi.
+
+\textbf{AC-US-PRO-07-09.} Nếu coupon hợp lệ làm tổng dự kiến bằng 0 VND, endpoint trả tổng dự kiến bằng 0 VND và số tiền giảm không vượt tạm tính; xem trước không tạo đơn PAID hoặc cộng điểm. Việc tạo đơn và thanh toán 0 VND tuân theo AC-US-PRO-02-06.
+
+\textbf{4.9 Technical Enablers \& Delivery}
+
+Hai Story dưới đây là Technical Enablers, không phải yêu cầu nghiệp vụ khách hàng và không thay thế 40 FR của Specification.
+
+\textbf{US-OPS-01 - Khởi tạo hạ tầng phát triển}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST (Task 1) \textbar{} CONFIRMED (PDF)
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Nhóm phát triển \textbar{} PDF §8 / Specification NFR-OPS
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+1
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là một thành viên nhóm phát triển, tôi muốn có project Next.js + NestJS và cấu hình chung, để các thành viên bắt đầu tích hợp được trong Sprint 1.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-OPS-01-01.} Repository có frontend Next.js và backend NestJS, chạy được ví dụ hello của từng phần.
+
+\textbf{AC-US-OPS-01-02.} Có Git, README chỉ dẫn chạy, .env.example không chứa secrets.
+
+\textbf{AC-US-OPS-01-03.} Source theo cấu trúc có thể tích hợp REST API giữa Next.js và NestJS.
+
+\textbf{US-OPS-02 - Chạy và bàn giao demo end-to-end}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thuộc tính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nội dung}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mức ưu tiên / Nguồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST (Task 1, 9; DoD) \textbar{} CONFIRMED (PDF) / DERIVED
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Actor / FR
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Nhóm phát triển / Giảng viên \textbar{} PDF §8 / Specification NFR-OPS
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task liên quan
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+1, 9, 10
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{User Story:} Là thành viên nhóm phát triển hoặc giảng viên nghiệm thu, tôi muốn chạy được toàn bộ hệ thống theo hướng dẫn, để có thể nghiệm thu luồng chọn món tới xác nhận thanh toán.
+
+\textbf{Acceptance Criteria (AC):}
+
+\textbf{AC-US-OPS-02-01.} Docker Compose chạy frontend, backend và PostgreSQL; hướng dẫn khởi động và seed có trong README.
+
+\textbf{AC-US-OPS-02-02.} Có Postman collection để thử API; dữ liệu mock trả SUCCESS và FAILED theo README.
+
+\textbf{AC-US-OPS-02-03.} Demo end-to-end: menu → chi tiết → giỏ → đăng nhập → tạo Order → mock thanh toán → xác nhận/lịch sử.
+
+\textbf{AC-US-OPS-02-04.} Mã nguồn build thành công; task có commit và review; các chức năng MUST có test luồng chính, lỗi và trường hợp âm tính.
+
+\textbf{5. Đối chiếu 10 task của đề bài với User Stories}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Task}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Yêu cầu theo PDF}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Story liên quan}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task 1
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Khởi tạo dự án
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+US-OPS-01
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task 2
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+API danh sách sản phẩm
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+US-CAT-01, US-CAT-02, US-CAT-05
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task 3
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Trang Menu Next.js
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+US-CAT-01, US-CAT-04
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task 4
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Chi tiết / Size / Topping
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+US-CAT-02, US-CAT-03, US-CART-01
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task 5
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Cart
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+US-CART-01 → US-CART-04
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task 6
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+API tạo Order
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+US-CART-05, US-ORD-01, US-ORD-02, US-ORD-06, US-INV-01
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task 7
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Đăng ký / Đăng nhập JWT
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+US-AUTH-01 → US-AUTH-03, US-AUTHZ-01 → US-AUTHZ-03
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task 8
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Mock Payment
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+US-PAY-01 → US-PAY-04, US-PAY-06
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task 9
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Xác nhận, lịch sử, bàn giao
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+US-PAY-05, US-ORD-04, US-OPS-02
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Task 10
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Nghiệp vụ backend nâng cao
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+US-ORD-03/05/07, US-INV-02/03, US-PAY-03/04, US-PRO-01 → US-PRO-06, US-PRO-07 (SHOULD: preview)
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+Lưu ý: mối liên hệ Task ↔ Story phục vụ Sprint Planning; một Story có thể cần phối hợp nhiều Task hoặc Sprint và được nghiệm thu theo AC, không được tính thêm ``task'' so với 10 hạng mục của đề.
+
+\textbf{6. Điều kiện chất lượng và Definition of Done}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nhóm}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Điều kiện nghiệm thu chéo}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nguồn}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Bảo mật
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+JWT/ownership phải được xác minh ở backend; password bcrypt; .env không commit secret; chỉ mock payment, không lưu thẻ đầy đủ.
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+NFR-SEC-001→009
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Tính toàn vẹn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Transaction cho Order, stock, coupon, Payment, điểm; dữ liệu tiền là VND nguyên/Decimal; snapshot đơn không đổi.
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+NFR-DATA-001→005
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Tin cậy / Đua nhau
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Test đồng thời chống oversell, thanh toán trùng, hoàn tồn/coupon/điểm hai lần; rollback khi có lỗi kỹ thuật.
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+NFR-REL-001→004
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Hiệu năng và UX
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Các luồng chính phản hồi dưới 500 ms trên dữ liệu mẫu; UI có loading/empty/error; mã lỗi đủ rõ để sửa.
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+NFR-PERF-001; NFR-UX-001→003
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Kiểm thử
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Mỗi MUST có happy/alternative/negative; unit test giá, coupon, điểm, state; integration/concurrency/idempotency test; Postman.
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+NFR-TEST-001→005
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Vận hành/bàn giao
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Docker Compose khởi chạy đủ ba dịch vụ; README/seed/mock data; build chạy, Git commit và có review trong nhóm.
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+NFR-OPS-001; PDF §10--11
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{7. Điểm cần nhóm xác nhận trước khi chốt}
+
+Các điểm sau được nêu để tránh tự sửa yêu cầu khi chuyển từ Specification sang User Story:
+
+\textbf{1.} FR-ORD-003 có câu ``PAYMENT\_FAILED và CANCELLED hoàn tồn kho đúng một lần'', khác với FR-PAY-002, FR-INV-003 và mục 11: PAYMENT\_FAILED vẫn giữ tồn, chỉ hoàn khi CANCELLED. User Story theo luồng nhất quán sau; nhóm cần sửa câu khác biệt trong Specification.
+
+\textbf{2.} Chính sách tổng thanh toán 0 VND đã thống nhất theo BR-050: đơn vẫn qua Mock Payment, chuyển PAID khi thành công và nhận 0 điểm tích lũy (AC-US-PRO-02-06).
+
+\textbf{3.} Các chức năng SHOULD như đăng xuất, báo hết hàng, hủy/timeout đơn, nhật ký tồn kho, xem điểm và xem trước coupon là mở rộng, không tự nâng thành MUST. HTTP/schema lỗi của coupon preview cần chốt trong API Design.
+
+\textbf{8. Tài liệu nguồn}
+
+1) BrewLite-CongNghePhanMem.pdf (v1.0): §3--5, §8--12 --- yêu cầu MVP, 10 task, DoD. 2) BrewLite\_Requirements\_Specification.docx (v2.0, 12/10/2026): §4--9, §11, §13, §15 --- 40 FR, state machine, NFR và ma trận lỗi.
+
+\end{document}

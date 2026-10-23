@@ -1,0 +1,2851 @@
+\documentclass[11pt,a4paper,oneside]{report}
+% Layout adapted from the supplied SGU Assignment_report.tex.
+% XeLaTeX supports native Vietnamese text and modern Unicode fonts.
+\usepackage[a4paper,left=24mm,right=22mm,top=33mm,bottom=28mm,headheight=40pt,headsep=9mm,footskip=13mm]{geometry}
+\usepackage{fontspec}
+\setmainfont{Tinos}
+\setsansfont{Noto Sans}
+\setmonofont{DejaVu Sans Mono}[Scale=0.85]
+\usepackage{amsmath,amssymb}
+\usepackage{longtable,booktabs,array,calc,tabularx,multirow}
+\usepackage{graphicx,pdfpages,rotating}
+\usepackage[table]{xcolor}
+\usepackage{float}
+\usepackage{enumitem}
+\usepackage{fancyhdr,lastpage}
+\usepackage{setspace}
+\usepackage{etoolbox}
+\usepackage{caption}
+\usepackage{hyperref}
+\definecolor{sgublue}{HTML}{173FAB}
+\hypersetup{colorlinks=true,linkcolor=black,urlcolor=sgublue,citecolor=black,pdftitle={BrewLite - Assignment 1},pdfauthor={Nhóm 3 - Trường Đại học Sài Gòn}}
+\setcounter{secnumdepth}{0} % Chapter numbers only; preserve source's own section numbering.
+\setcounter{tocdepth}{2}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt}
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.10}
+\setlength{\LTpre}{5pt}
+\setlength{\LTpost}{10pt}
+\AtBeginEnvironment{longtable}{\small}
+\emergencystretch=3em
+\sloppy
+\setlist{itemsep=1pt,parsep=0pt,topsep=4pt}
+\newcommand{\tightlist}{\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{%
+ \begin{tabular}{@{}cl@{}}
+ \includegraphics[width=9mm]{assets/branding/logoITSGUsmall.png} &
+ \begin{tabular}{@{}l@{}}{\scriptsize\sffamily\bfseries Trường Đại học Sài Gòn}\\[-1pt]{\scriptsize\sffamily\bfseries Khoa Công nghệ Thông tin}\end{tabular}
+ \end{tabular}}
+\fancyfoot[L]{{\scriptsize\sffamily Báo cáo Công nghệ phần mềm -- BrewLite | Nhóm 3}}
+\fancyfoot[R]{{\scriptsize\sffamily Trang \thepage /\pageref{LastPage}}}
+\renewcommand{\headrulewidth}{0.3pt}
+\renewcommand{\footrulewidth}{0.3pt}
+\fancypagestyle{plain}{\fancyhf{}\fancyfoot[L]{\scriptsize\sffamily BrewLite -- Assignment 1 | Nhóm 3}\fancyfoot[R]{\scriptsize\sffamily Trang \thepage /\pageref{LastPage}}\renewcommand{\headrulewidth}{0pt}\renewcommand{\footrulewidth}{0.3pt}}
+\captionsetup{font=small,labelfont=bf}
+
+\renewcommand{\contentsname}{Mục lục}
+
+\begin{document}
+\begin{titlepage}
+\begin{center}
+{\bfseries\small TRƯỜNG ĐẠI HỌC SÀI GÒN}\\[2pt]
+{\bfseries\small KHOA CÔNG NGHỆ THÔNG TIN}\\[16mm]
+\includegraphics[width=33mm]{assets/branding/logoITSGU.png}\\[17mm]
+{\color{sgublue}\LARGE\bfseries CÔNG NGHỆ PHẦN MỀM}\\[7mm]
+{\color{sgublue}\rule{0.9\textwidth}{0.8pt}}\\[4mm]
+{\color{sgublue}\large\bfseries TÀI LIỆU ASSIGNMENT 1}\\[3mm]
+{\color{sgublue}\Huge\bfseries BrewLite}\\[4mm]
+\parbox{0.94\textwidth}{\centering\color{sgublue}\Large\bfseries Use Case Specification}\par\vspace{5mm}
+{\color{sgublue}\rule{0.9\textwidth}{0.8pt}}\\[15mm]
+\end{center}
+\begin{flushright}
+\begin{tabular}{@{}rl@{}}
+\textbf{Giảng viên:} & Từ Lãng Phiêu \\
+\textbf{Nhóm:} & Nhóm 3 \\
+\textbf{Môn học:} & Công nghệ phần mềm \\
+\end{tabular}
+\end{flushright}
+\vfill
+\begin{center}
+{\small\bfseries THÀNH VIÊN THỰC HIỆN}\\[3mm]
+\begin{tabular}{@{}ll@{}}
+ Nguyễn Châu Hoàng Khang & 3124410143 \\
+ Hoàng Văn Lập & 3124410184 \\
+ Nguyễn Khải Hoàng & 3124410106 \\
+ Nguyễn Đăng Thụy & 3124410352 \\
+ Cao Nguyễn Quốc Khánh & 3124410149 \\
+ Lâm Chí Khang & 3124410142 \\
+
+\end{tabular}
+\vfill
+{\small TP. HỒ CHÍ MINH, THÁNG 10/2026}
+\end{center}
+\end{titlepage}
+\pagenumbering{roman}
+\chapter*{DANH SÁCH THÀNH VIÊN VÀ PHÂN CÔNG}
+\noindent Nhóm 3 -- Trường Đại học Sài Gòn -- Môn Công nghệ phần mềm.
+\par\smallskip
+\textit{Cột Phân công để Chưa cập nhật khi chưa có phân nhiệm chính thức; vai trò lấy theo Project Charter.}
+\vspace{4mm}
+\begingroup\small
+\begin{longtable}{|>{\centering\arraybackslash}p{8mm}|p{41mm}|p{25mm}|p{36mm}|p{36mm}|}
+\hline
+\rowcolor{blue!9}\textbf{STT} & \textbf{Họ và tên} & \textbf{MSSV} & \textbf{Vai trò} & \textbf{Phân công} \\ \hline
+\endfirsthead
+\hline\rowcolor{blue!9}\textbf{STT} & \textbf{Họ và tên} & \textbf{MSSV} & \textbf{Vai trò} & \textbf{Phân công} \\ \hline
+\endhead
+1 & Nguyễn Châu Hoàng Khang & 3124410143 & Team Leader / Developer & \textit{Chưa cập nhật} \\ \hline
+2 & Hoàng Văn Lập & 3124410184 & Developer & \textit{Chưa cập nhật} \\ \hline
+3 & Nguyễn Khải Hoàng & 3124410106 & Developer & \textit{Chưa cập nhật} \\ \hline
+4 & Nguyễn Đăng Thụy & 3124410352 & Developer & \textit{Chưa cập nhật} \\ \hline
+5 & Cao Nguyễn Quốc Khánh & 3124410149 & Developer & \textit{Chưa cập nhật} \\ \hline
+6 & Lâm Chí Khang & 3124410142 & Developer & \textit{Chưa cập nhật} \\ \hline
+\end{longtable}
+\endgroup
+\clearpage
+\tableofcontents
+\clearpage
+\pagenumbering{arabic}
+\chapter{Use Case Specification}
+% Auto-converted from BrewLite_Use_Case_Specification.docx via pandoc 3.1.11.1.
+% Original wording and table data are retained.
+\textbf{USE CASE SPECIFICATION}
+
+BrewLite \textbar{} Tài liệu Đặc tả Use Case
+
+Phiên bản: v3.0 \textbar{} Ngày cập nhật: 14/10/2026 \textbar{} Trạng thái: Đã chốt
+
+\textbf{Mục tiêu}
+
+Mô tả đầy đủ các tương tác giữa actor và hệ thống BrewLite từ xem menu, chọn đồ uống, quản lý giỏ, đặt đơn, thanh toán mock đến xem lịch sử; làm cơ sở xây dựng Use Case Diagram, Activity Diagram, Sequence Diagram, API/UI và kịch bản kiểm thử.
+
+\textbf{Document Control}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.2699}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.7301}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thông tin}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Giá trị}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Tên tài liệu}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+BrewLite -- Use Case Specification
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Dự án}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+BrewLite -- Ứng dụng đặt đồ uống và thanh toán không tiền mặt
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Phiên bản}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+v3.0 -- Đặc tả chi tiết 14 Use Case
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Ngày lập / cập nhật}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+13/10/2026
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Trạng thái}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Đã chốt
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nguồn yêu cầu}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+BrewLite\_Requirements\_Specification.docx v2.0; BrewLite\_User\_Stories\_Acceptance\_Criteria\_v2.1.docx
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nguồn khung danh mục}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+BrewLite\_Use\_Case\_Catalog\_v1.0.docx (14 UC đã duyệt)
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nguồn kỹ thuật trình bày}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Tham khảo cấu trúc từ nhiều nguồn bài ở Internet
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Phạm vi}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+14 Use Case, gồm 10 UC chỉ có MUST, 3 UC chỉ có SHOULD và 1 UC hỗn hợp MUST/SHOULD (UC-ORD-003); Guest / Customer / thao tác nội bộ demo
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{1. Mục đích và phạm vi tài liệu}
+
+Use Case mô tả mục tiêu tương tác có ý nghĩa của actor. Không tự chuyển mỗi User Story/Functional Requirement thành một Use Case riêng. Các chức năng nền như JWT, kiểm soát quyền sở hữu, tính giá server-side, idempotency, chống oversell, seed và đối soát được mô tả trong flow, business/security rules hoặc technical notes của UC liên quan.
+
+BrewLite là hệ thống single-vendor, Next.js (web) -- NestJS (backend) -- PostgreSQL/Prisma và Mock Payment Ví/Thẻ nội bộ. Không đưa vào Seller/Admin phức tạp, giao diện Barista, vận chuyển, thanh toán thật hay microservices.
+
+Mọi hành vi đã được chốt đều truy ngược về Requirements Specification v2.0 và US \& AC v2.1. Nếu phần mô tả API chưa được xác định trong hai nguồn, tài liệu nêu ``cần chốt ở API Design'', không tự đặt response schema hoặc cơ chế chưa xác nhận.
+
+\textbf{2. Nguồn tham chiếu và thứ tự ưu tiên}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.3068}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.6932}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nguồn}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Vai trò}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Requirements Specification v2.0}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Nguồn chính cho FR, Business Rules, state machine, quyền, API được đề xuất và ràng buộc dữ liệu.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{US \& AC v2.1}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Nguồn chốt User Story, mức MUST/SHOULD, mã AC, tình huống và kết quả có thể kiểm thử.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Use Case Catalog v1.0}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Danh mục 14 UC và việc nhóm/tách UC đã được người dùng chấp thuận.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{BrewLite-CongNghePhanMem.pdf}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Mục tiêu MVP, 10 task, công nghệ bắt buộc và Definition of Done.
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{3. Quy ước đặc tả}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.3252}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.6748}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thành phần}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Ý nghĩa / Cách áp dụng}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Use Case ID / Name}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Mã duy nhất UC-\textless NHÓM\textgreater-nnn và tên mục tiêu tương tác.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Priority / Scope}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST = bắt buộc; SHOULD = bổ sung theo nguồn (không tự nâng lên MUST).
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Goal / Brief Description}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Giá trị người dùng hoặc thao tác demo nội bộ cần đạt.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Primary / Secondary Actor}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Primary Actor là vai trò bên ngoài hệ thống trực tiếp khởi tạo Use Case. Secondary Actor là vai trò hoặc hệ thống bên ngoài có tham gia hỗ trợ thực hiện Use Case (nếu có). Các module thuộc nội bộ BrewLite không được xem là Actor UML.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Internal Supporting Components}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Các thành phần nội bộ tham gia xử lý Use Case, bao gồm module NestJS, dịch vụ nghiệp vụ, trạng thái Frontend và tác vụ định kỳ. Chúng nằm bên trong system boundary, không phải Actor khi vẽ Use Case Diagram cho toàn bộ BrewLite.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Trigger / Preconditions}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Sự kiện kích hoạt và các điều kiện cần trước khi thực hiện.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Postconditions -- Success / Failure}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Kết quả thành công và bất biến không được vi phạm khi thất bại.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Main Success Flow}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Các bước đánh số theo thứ tự actor ↔ hệ thống.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Alternative Flows (AF)}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Các nhánh hợp lệ: AF-01, AF-02\ldots, không nhất thiết là lỗi.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Exception Flows (EF)}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Các trường hợp thất bại/lỗi: EF-01, EF-02\ldots, mô tả phản hồi khi nguồn đã chốt.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Business Rules (BR)}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Điều kiện nghiệp vụ xuyên suốt UC; BR-xx là nhãn nội bộ trong UC, không thay mã BR toàn hệ thống.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Authorization / Security Rules (SEC)}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Xác thực, quyền sở hữu, default-deny và bảo vệ dữ liệu/API.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Related US / FR / AC / UC}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Truy vết về story, requirement, AC và UC khác.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Special Requirements / Notes}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+NFR, quyết định triển khai/điểm mở và giới hạn scope.
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+Quy ước lỗi: 401 thiếu/sai JWT; 404 Order không tồn tại hoặc không thuộc người gọi; 403 thiếu/sai khóa nội bộ; 409 khi transition, stock, quota hoặc xung đột đơn/khóa theo mã nguồn. Các mã lỗi chỉ ghi khi có trong Specification/US-AC. AF/EF được đánh số cục bộ cho từng UC.
+
+\textbf{4. Actor Catalog}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.2209}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.2454}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.5337}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Actor}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Loại}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Vai trò trong BrewLite}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Guest
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Human / Primary
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Người dùng đang truy cập hệ thống ở trạng thái chưa đăng nhập. Có thể xem menu, chi tiết đồ uống, lựa chọn cấu hình, quản lý giỏ hàng, đăng ký và truy cập chức năng đăng nhập.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Customer
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Human / Primary
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Người dùng đã có tài khoản BrewLite, có thể đang đăng nhập hoặc chưa đăng nhập. Customer thực hiện đăng nhập để nhận JWT. Các nghiệp vụ được bảo vệ như tạo Order, thanh toán, xem lịch sử và quản lý đơn yêu cầu JWT hợp lệ.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Người vận hành demo nội bộ
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Human / Primary (giới hạn)
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Thao tác POST internal advance với X-Internal-Key để minh họa State Machine sau PAID; không có giao diện Barista/Admin.
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{4.1. Internal Supporting Components -- Thành phần hỗ trợ nội bộ}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.3252}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.6748}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thành phần nội bộ}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Vai trò trong BrewLite}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Client Cart State (Zustand/Context)
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Quản lý trạng thái giỏ hàng phía frontend, duy trì danh sách món, số lượng, size, topping và tính tổng tiền tạm tính. Phục hồi giỏ từ localStorage khi tải lại trang và xóa giỏ khi thanh toán thành công hoặc đăng xuất chủ động.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Backend Catalog API
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Cung cấp dữ liệu danh sách đồ uống, thông tin chi tiết sản phẩm, hệ số giá theo size và danh sách topping kèm giá. Cung cấp dữ liệu công khai cho Guest và Customer mà không yêu cầu JWT.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Backend Order/Inventory/Promotion Services
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Xử lý nghiệp vụ tạo đơn, revalidate giỏ hàng, tính giá server-side, trừ/hoàn tồn kho nguyên tử, kiểm tra và giữ/tiêu thụ/giải phóng lượt coupon, bảo đảm tính nhất quán dữ liệu qua database transaction.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mock Payment Service
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Module nội bộ NestJS giả lập xử lý thanh toán đồng bộ cho phương thức WALLET và CARD. Quyết định kết quả SUCCESS hoặc FAILED dựa trên dữ liệu test mà không kết nối cổng thanh toán thật.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Order Expiration Task (Scheduled Job)
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Tác vụ định kỳ chạy tự động mỗi phút phía backend, quét các đơn hàng PENDING hoặc PAYMENT\_FAILED đã quá thời hạn 15 phút (expiresAt) để tự động chuyển sang CANCELLED, hoàn tồn kho và giải phóng lượt coupon trong cùng transaction.
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\emph{Ghi chú: Các thành phần hỗ trợ nội bộ trên đóng vai trò quan trọng trong việc vận hành hệ thống BrewLite nhưng nằm hoàn toàn bên trong ranh giới hệ thống (system boundary), không phải là Actor UML khi biểu diễn Use Case Diagram cho toàn bộ hệ thống.}
+
+\textbf{5. Use Case Overview}
+
+Các Use Case dưới đây kế thừa nguyên vẹn mã, tên, actor và mức ưu tiên từ Use Case Catalog v1.0 đã được nhóm duyệt.
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.1894}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.4382}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.2191}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.1534}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{UC ID}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Use Case Name}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Primary Actor}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Ưu tiên}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+UC-AUTH-001
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Đăng ký tài khoản Customer
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Guest
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+UC-AUTH-002
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Đăng nhập bằng Email/Password
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Customer
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+UC-AUTH-003
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Đăng xuất chủ động
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Customer
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+SHOULD
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+UC-CAT-001
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Xem danh sách đồ uống (Menu)
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Guest / Customer
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+UC-CAT-002
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Xem chi tiết và lựa chọn Size/Topping
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Guest / Customer
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+UC-CART-001
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Quản lý giỏ hàng
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Guest / Customer
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+UC-ORD-001
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Tạo đơn hàng từ giỏ hàng
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Customer
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+UC-ORD-002
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Xem lịch sử và chi tiết đơn hàng
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Customer
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+UC-ORD-003
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Hủy đơn hàng chưa thanh toán
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Customer
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST (tự hết hạn) / SHOULD (hủy chủ động)
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+UC-ORD-004
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Chuyển trạng thái xử lý đơn hàng (nội bộ/demo)
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Người vận hành demo nội bộ
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+UC-PAY-001
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Thanh toán đơn hàng bằng Ví/Thẻ giả lập
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Customer
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+UC-PAY-002
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Xem kết quả và xác nhận thanh toán
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Customer
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+MUST
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+UC-PRO-001
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Xem điểm tích lũy và thông tin ưu đãi
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Customer
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+SHOULD
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+UC-PRO-002
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Xem trước mã giảm giá trước khi tạo đơn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Customer
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+SHOULD
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+Tổng cộng 14 Use Case, gồm 10 UC chỉ chứa chức năng MUST, 3 UC chỉ chứa chức năng SHOULD và 1 UC chứa cả chức năng MUST/SHOULD (UC-ORD-003). Trong UC-ORD-003, tự động hủy đơn quá hạn theo FR-ORD-007 là MUST; hủy đơn chủ động theo FR-ORD-005 vẫn là SHOULD.
+
+\textbf{6. Detailed Use Case Specifications}
+
+Mỗi bảng được xây dựng theo 16 trường từ các tài liệu mẫu được sử dụng để tham khảo, bổ sung Priority, Related User Stories/Acceptance Criteria và Endpoint để bảo đảm truy vết trực tiếp sang US--AC và thiết kế API.
+
+\textbf{6.1. UC-AUTH-001 -- Đăng ký tài khoản Customer}
+
+
+% Breakable representation of source 22-row 2-column Use Case table.
+
+\par\noindent\textit{Thuộc tính / Nội dung}\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Use Case ID}}\par\nobreak
+UC-AUTH-001
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Use Case Name}}\par\nobreak
+Đăng ký tài khoản Customer
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Priority / Scope}}\par\nobreak
+MUST \textbar{} Nhóm Identity \& Account
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Goal / Brief Description}}\par\nobreak
+Guest tạo tài khoản Customer bằng email và mật khẩu để có thể sử dụng các chức năng đặt món cần xác thực.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Primary Actor}}\par\nobreak
+Guest
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Secondary Actor}}\par\nobreak
+Không có
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Internal Supporting Components}}\par\nobreak
+Authentication Service, User Database
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Trigger}}\par\nobreak
+Guest chọn Đăng ký và gửi thông tin tài khoản.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Preconditions}}\par\nobreak
+\textbf{•} Guest chưa đăng nhập; có email và mật khẩu để nhập.
+
+\textbf{•} Dịch vụ xác thực và CSDL có thể kiểm tra dữ liệu và ghi tài khoản.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Postconditions}}\par\nobreak
+Success: Một tài khoản Customer được tạo; email lưu ở dạng chuẩn hóa, passwordHash dùng bcrypt, loyaltyPoints = 0. Việc đăng nhập để đặt hàng được mô tả trong UC-AUTH-002.\\
+Failure: Không tạo User mới, không phát JWT khi dữ liệu không hợp lệ hoặc email trùng.\strut
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Main Success Flow}}\par\nobreak
+\textbf{1.} Guest mở giao diện đăng ký và nhập email, mật khẩu (họ tên nếu có).
+
+\textbf{2.} Hệ thống chuẩn hóa email bằng trim/lowercase và kiểm tra định dạng cùng mật khẩu tối thiểu 8 ký tự.
+
+\textbf{3.} Backend chỉ nhận các trường được phép; bỏ qua role, loyaltyPoints hay thuộc tính ngoài DTO.
+
+\textbf{4.} Backend kiểm tra tính duy nhất email ở ứng dụng và ràng buộc CSDL.
+
+\textbf{5.} Backend băm mật khẩu bằng bcrypt, tạo User có vai trò Customer và 0 điểm.
+
+\textbf{6.} Hệ thống lưu User và trả kết quả đăng ký thành công; Guest có thể chuyển sang UC-AUTH-002.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Alternative Flows}}\par\nobreak
+\textbf{AF-01 --} Email nhập có chữ hoa hoặc khoảng trắng: chuẩn hóa trước khi kiểm tra trùng; quay lại bước 3 của luồng chính.
+
+\textbf{AF-02 --} Có họ tên hợp lệ: lưu trường tùy chọn nếu DTO cho phép mà không thay đổi quyền mặc định.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Exception Flows}}\par\nobreak
+\textbf{EF-01 --} Email trùng (kể cả sau chuẩn hóa): trả HTTP 409 EMAIL\_ALREADY\_EXISTS; không tạo User thứ hai.
+
+\textbf{EF-02 --} Email sai định dạng, thiếu trường hoặc mật khẩu dưới 8 ký tự: HTTP 400 VALIDATION\_ERROR, nêu trường sai.
+
+\textbf{EF-03 --} Client gửi role hoặc loyaltyPoints giả: bỏ qua; tài khoản được tạo vẫn là Customer với điểm 0.
+
+\textbf{EF-04 --} Lỗi lưu tài khoản: không trả kết quả thành công nếu CSDL không tạo được User.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Business Rules}}\par\nobreak
+\textbf{BR-01 --} Email chuẩn hóa và duy nhất; mật khẩu ít nhất 8 ký tự.
+
+\textbf{BR-02 --} Không cho tự chỉ định vai trò; điểm khởi tạo bằng 0.
+
+\textbf{BR-03 --} Đăng ký thành công không đồng nghĩa với đã đăng nhập.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Authorization / Security Rules}}\par\nobreak
+\textbf{SEC-01 --} Mật khẩu chỉ lưu hash bcrypt; không trả hoặc log mật khẩu gốc.
+
+\textbf{SEC-02 --} Backend whitelist DTO và áp unique constraint; thông báo trùng email 409 được chấp nhận cho MVP.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Requirements}}\par\nobreak
+FR-AUTH-001; FR-AUTHZ-001, 003 (quy tắc)
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related User Stories}}\par\nobreak
+US-AUTH-01
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Acceptance Criteria}}\par\nobreak
+AC-US-AUTH-01-01..05
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Use Cases}}\par\nobreak
+UC-AUTH-002
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Endpoint / Interaction}}\par\nobreak
+POST /auth/register
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Special Requirements / Notes}}\par\nobreak
+Đăng ký là endpoint public, không yêu cầu JWT. \textbar{} Đề bài: Task 7
+\par
+
+% End of breakable Use Case table.
+
+
+\textbf{6.2. UC-AUTH-002 -- Đăng nhập bằng Email/Password}
+
+
+% Breakable representation of source 22-row 2-column Use Case table.
+
+\par\noindent\textit{Thuộc tính / Nội dung}\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Use Case ID}}\par\nobreak
+UC-AUTH-002
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Use Case Name}}\par\nobreak
+Đăng nhập bằng Email/Password
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Priority / Scope}}\par\nobreak
+MUST \textbar{} Nhóm Identity \& Account
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Goal / Brief Description}}\par\nobreak
+Customer xác minh thông tin đăng nhập để nhận JWT và tiếp tục đặt món mà không mất giỏ hàng đã chọn.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Primary Actor}}\par\nobreak
+Customer
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Secondary Actor}}\par\nobreak
+Không có
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Internal Supporting Components}}\par\nobreak
+Authentication Service (NestJS/JWT)
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Trigger}}\par\nobreak
+Customer gửi email và mật khẩu tại màn hình đăng nhập.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Preconditions}}\par\nobreak
+\textbf{•} Đã có User Customer và credential được lưu an toàn.
+
+\textbf{•} Hệ thống có thể kiểm tra hash mật khẩu và ký JWT.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Postconditions}}\par\nobreak
+Success: Customer nhận JWT với sub định danh và thời hạn 60 phút; phiên xác thực phía client được cập nhật; giỏ trước đăng nhập giữ nguyên.\\
+Failure: Không phát token, không thay đổi giỏ hàng hay quyền truy cập nếu đăng nhập thất bại.\strut
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Main Success Flow}}\par\nobreak
+\textbf{1.} Customer mở trang đăng nhập, nhập email và mật khẩu.
+
+\textbf{2.} Backend tìm User theo email và đối chiếu mật khẩu với bcrypt hash.
+
+\textbf{3.} Khi xác thực hợp lệ, hệ thống cấp access token JWT chứa sub và thời hạn 60 phút.
+
+\textbf{4.} Client ghi nhận trạng thái đăng nhập mà không reset Cart hiện tại.
+
+\textbf{5.} Hệ thống đưa Customer về luồng mua hàng và cho phép gọi các API cần JWT.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Alternative Flows}}\par\nobreak
+\textbf{AF-01 --} Giỏ đã có trước khi đăng nhập: toàn bộ cấu hình món và số lượng được giữ lại.
+
+\textbf{AF-02 --} JWT hết hạn khi đang đặt món: client yêu cầu đăng nhập lại; sau đăng nhập hợp lệ người dùng tiếp tục với giỏ được giữ.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Exception Flows}}\par\nobreak
+\textbf{EF-01 --} Email không tồn tại: HTTP 401 INVALID\_CREDENTIALS, thông báo chung.
+
+\textbf{EF-02 --} Sai mật khẩu: HTTP 401 INVALID\_CREDENTIALS giống hệt trường hợp email không tồn tại, không phát token.
+
+\textbf{EF-03 --} JWT hết hạn/sai chữ ký khi gọi nghiệp vụ sau đăng nhập: API trả 401; frontend không xem đây là đăng xuất chủ động.
+
+\textbf{EF-04 --} Dịch vụ cấp token lỗi: không thông báo đăng nhập thành công giả.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Business Rules}}\par\nobreak
+\textbf{BR-01 --} JWT có sub lấy từ User, hết hạn sau 60 phút.
+
+\textbf{BR-02 --} Đăng nhập không xóa hay thay đổi giỏ; logout chủ động xử lý khác với hết hạn token.
+
+\textbf{BR-03 --} Đăng nhập chỉ xác nhận danh tính; quyền sở hữu từng Order vẫn kiểm tra tại UC nghiệp vụ.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Authorization / Security Rules}}\par\nobreak
+\textbf{SEC-01 --} Backend xác minh bcrypt và giữ JWT\_SECRET trong .env.
+
+\textbf{SEC-02 --} API cần JWT kiểm tra chữ ký, thời hạn; lấy userId từ token, không từ body/query.
+
+\textbf{SEC-03 --} Thông báo sai email và sai password không giúp dò tài khoản.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Requirements}}\par\nobreak
+FR-AUTH-002, 003; FR-AUTHZ-001..003
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related User Stories}}\par\nobreak
+US-AUTH-02; US-AUTH-03 (hỗ trợ)
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Acceptance Criteria}}\par\nobreak
+AC-US-AUTH-02-01..04; AC-US-AUTH-03-01..04
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Use Cases}}\par\nobreak
+UC-AUTH-001; UC-AUTH-003; UC-ORD-001; UC-PAY-001
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Endpoint / Interaction}}\par\nobreak
+POST /auth/login
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Special Requirements / Notes}}\par\nobreak
+Rate limit đăng nhập được nêu ở mức SHOULD trong nguồn; không coi là MUST của UC. \textbar{} Đề bài: Task 7
+\par
+
+% End of breakable Use Case table.
+
+
+\textbf{6.3. UC-AUTH-003 -- Đăng xuất chủ động}
+
+
+% Breakable representation of source 22-row 2-column Use Case table.
+
+\par\noindent\textit{Thuộc tính / Nội dung}\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Use Case ID}}\par\nobreak
+UC-AUTH-003
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Use Case Name}}\par\nobreak
+Đăng xuất chủ động
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Priority / Scope}}\par\nobreak
+SHOULD \textbar{} Nhóm Identity \& Account
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Goal / Brief Description}}\par\nobreak
+Customer kết thúc đăng nhập trên trình duyệt hiện tại và xóa giỏ để không lộ dữ liệu lựa chọn trên thiết bị dùng chung.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Primary Actor}}\par\nobreak
+Customer
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Secondary Actor}}\par\nobreak
+Không có
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Internal Supporting Components}}\par\nobreak
+Frontend Auth State, Client Cart State, localStorage
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Trigger}}\par\nobreak
+Customer chọn Đăng xuất.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Preconditions}}\par\nobreak
+\textbf{•} Client đang giữ access token/trạng thái đã đăng nhập.
+
+\textbf{•} Có thể truy cập thao tác đăng xuất trên giao diện.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Postconditions}}\par\nobreak
+Success: Access token và Cart (gồm localStorage nếu có) bị xóa; giao diện trở về Guest, kể cả khi tải lại.\\
+Failure: Nếu Customer không xác nhận thao tác (khi được hỏi), trạng thái đăng nhập và giỏ giữ nguyên.\strut
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Main Success Flow}}\par\nobreak
+\textbf{1.} Customer chọn Đăng xuất trên giao diện.
+
+\textbf{2.} Nếu giỏ có món và chức năng xác nhận được triển khai, hệ thống cảnh báo sẽ xóa giỏ.
+
+\textbf{3.} Customer xác nhận đăng xuất.
+
+\textbf{4.} Client xóa access token và reset Cart trong bộ nhớ và localStorage.
+
+\textbf{5.} Giao diện chuyển về trạng thái Guest/menu; chức năng cần JWT buộc đăng nhập lại.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Alternative Flows}}\par\nobreak
+\textbf{AF-01 --} Giỏ rỗng: có thể đăng xuất trực tiếp, không cần cảnh báo xóa giỏ.
+
+\textbf{AF-02 --} Customer từ chối hộp xác nhận (SHOULD): hủy thao tác đăng xuất, giỏ/token không bị xóa.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Exception Flows}}\par\nobreak
+\textbf{EF-01 --} Chỉ hết hạn JWT hoặc backend trả 401: không thực hiện quy tắc xóa giỏ của đăng xuất chủ động.
+
+\textbf{EF-02 --} Xóa dữ liệu persist có lỗi: client cần tránh tái hiện giỏ/token cũ trên màn hình sau khi đã xác nhận đăng xuất.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Business Rules}}\par\nobreak
+\textbf{BR-01 --} Logout chủ động: xóa token và toàn bộ Cart; token hết hạn/401: xóa token nhưng giữ Cart.
+
+\textbf{BR-02 --} Không có refresh session phía server cho MVP.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Authorization / Security Rules}}\par\nobreak
+\textbf{SEC-01 --} Đăng xuất hiện tại là thao tác xóa token phía client; JWT cũ chưa bị thu hồi phía server và có thể dùng đến khi hết hạn.
+
+\textbf{SEC-02 --} Cart trên localStorage cũng phải xóa để tránh người dùng sau thấy dữ liệu trước.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Requirements}}\par\nobreak
+FR-AUTH-004; FR-CART-004
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related User Stories}}\par\nobreak
+US-AUTH-04; US-CART-04
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Acceptance Criteria}}\par\nobreak
+AC-US-AUTH-04-01..04; AC-US-CART-04-02..03
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Use Cases}}\par\nobreak
+UC-AUTH-002; UC-CART-001
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Endpoint / Interaction}}\par\nobreak
+Thao tác client; không có endpoint đăng xuất
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Special Requirements / Notes}}\par\nobreak
+Không bổ sung logout-all-devices, refresh token, thu hồi JWT phía server hoặc endpoint logout mới vì ngoài phạm vi nguồn. \textbar{} Đề bài: Task 7 (mở rộng)
+\par
+
+% End of breakable Use Case table.
+
+
+\textbf{6.4. UC-CAT-001 -- Xem danh sách đồ uống (Menu)}
+
+
+% Breakable representation of source 22-row 2-column Use Case table.
+
+\par\noindent\textit{Thuộc tính / Nội dung}\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Use Case ID}}\par\nobreak
+UC-CAT-001
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Use Case Name}}\par\nobreak
+Xem danh sách đồ uống (Menu)
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Priority / Scope}}\par\nobreak
+MUST \textbar{} Nhóm Menu \& Catalog
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Goal / Brief Description}}\par\nobreak
+Người dùng xem danh sách đồ uống, giá cơ bản, hình ảnh và trạng thái còn/hết hàng trước khi quyết định mua.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Primary Actor}}\par\nobreak
+Guest / Customer
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Secondary Actor}}\par\nobreak
+Không có
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Internal Supporting Components}}\par\nobreak
+Backend Catalog API / Catalog Service
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Trigger}}\par\nobreak
+Guest hoặc Customer mở trang Menu.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Preconditions}}\par\nobreak
+\textbf{•} Web Client kết nối được API Catalog.
+
+\textbf{•} Hệ thống có dữ liệu menu (có thể được seed cho demo).
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Postconditions}}\par\nobreak
+Success: Giao diện hiển thị các món với tên, hình, giá size S và cờ còn/hết; người dùng có thể chọn món để xem chi tiết.\\
+Failure: Không làm thay đổi Order, Payment, Cart hoặc stock nếu trang tải lỗi/rỗng.\strut
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Main Success Flow}}\par\nobreak
+\textbf{1.} Người dùng truy cập trang Menu mà không cần đăng nhập.
+
+\textbf{2.} Frontend gọi GET /products.
+
+\textbf{3.} Backend trả danh sách theo thứ tự ổn định: tên món, sau đó mã sản phẩm.
+
+\textbf{4.} Giao diện hiển thị tên, ảnh, giá cơ bản (size S) và trạng thái còn/hết; không lộ số tồn chính xác.
+
+\textbf{5.} Người dùng chọn một sản phẩm để thực hiện UC-CAT-002.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Alternative Flows}}\par\nobreak
+\textbf{AF-01 --} Danh sách rỗng: hiển thị empty state, không tạo sản phẩm giả.
+
+\textbf{AF-02 --} Đang tải/lỗi tải: hiển thị loading/error state; ảnh lỗi dùng ảnh thay thế.
+
+\textbf{AF-03 --} Phân trang (SHOULD): khi có page/limit hợp lệ, API trả metadata total/page/limit/totalPages; không truyền tham số thì trả toàn menu.
+
+\textbf{AF-04 --} Trang vượt tổng số trang: HTTP 200 với danh sách rỗng và lựa chọn về trang đầu.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Exception Flows}}\par\nobreak
+\textbf{EF-01 --} page = 0, limit = 0, limit \textgreater{} 50 hoặc tham số sai: HTTP 400.
+
+\textbf{EF-02 --} API lỗi: thông báo lỗi và cho người dùng tải lại, không phá giao diện.
+
+\textbf{EF-03 --} Đường dẫn ảnh không dùng được: hiện ảnh thay thế, không làm mất thông tin sản phẩm.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Business Rules}}\par\nobreak
+\textbf{BR-01 --} Giá danh sách là giá cơ bản = giá size S; VND nguyên/Decimal.
+
+\textbf{BR-02 --} Sắp xếp cố định theo tên rồi mã; không trả trường nội bộ/số tồn thật.
+
+\textbf{BR-03 --} Phân trang là SHOULD; page bắt đầu 1, limit 1..50; backend hỗ trợ cấu trúc response ổn định.
+
+\textbf{BR-04 --} Dữ liệu seed demo phải có món hết hàng và món tồn thấp; chạy lại không trùng.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Authorization / Security Rules}}\par\nobreak
+\textbf{SEC-01 --} Endpoint GET /products công khai.
+
+\textbf{SEC-02 --} Client không được nhận dữ liệu bảo mật hay tồn kho chính xác qua public DTO.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Requirements}}\par\nobreak
+FR-CAT-001, 004, 005
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related User Stories}}\par\nobreak
+US-CAT-01; US-CAT-04; US-CAT-05 (seed)
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Acceptance Criteria}}\par\nobreak
+AC-US-CAT-01-01..06; AC-US-CAT-04-01..03; AC-US-CAT-05-01..04
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Use Cases}}\par\nobreak
+UC-CAT-002; UC-CART-001
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Endpoint / Interaction}}\par\nobreak
+GET /products
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Special Requirements / Notes}}\par\nobreak
+Yêu cầu phản hồi API với dữ liệu mẫu dưới 500 ms (NFR). Trạng thái hết hàng chỉ là biểu diễn; backend vẫn kiểm tra stock khi tạo Order. \textbar{} Đề bài: Task 2, 3
+\par
+
+% End of breakable Use Case table.
+
+
+\textbf{6.5. UC-CAT-002 -- Xem chi tiết và lựa chọn Size/Topping}
+
+
+% Breakable representation of source 22-row 2-column Use Case table.
+
+\par\noindent\textit{Thuộc tính / Nội dung}\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Use Case ID}}\par\nobreak
+UC-CAT-002
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Use Case Name}}\par\nobreak
+Xem chi tiết và lựa chọn Size/Topping
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Priority / Scope}}\par\nobreak
+MUST \textbar{} Nhóm Menu \& Catalog
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Goal / Brief Description}}\par\nobreak
+Người dùng xem thông tin chi tiết đồ uống và chọn size, topping để thấy giá cấu hình trước khi thêm vào Cart.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Primary Actor}}\par\nobreak
+Guest / Customer
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Secondary Actor}}\par\nobreak
+Không có
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Internal Supporting Components}}\par\nobreak
+Backend Catalog API / Catalog Service
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Trigger}}\par\nobreak
+Người dùng chọn một món trên Menu.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Preconditions}}\par\nobreak
+\textbf{•} Có mã Product từ danh sách/menu.
+
+\textbf{•} API chi tiết Product có thể truy cập công khai.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Postconditions}}\par\nobreak
+Success: Người dùng xem chi tiết và giá tạm tính theo cấu hình hợp lệ; lựa chọn có thể dùng trong UC-CART-001.\\
+Failure: Không thêm item vào giỏ nếu món không tồn tại, hết hàng trên UI hoặc lựa chọn không hợp lệ.\strut
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Main Success Flow}}\par\nobreak
+\textbf{1.} Người dùng mở món đã chọn.
+
+\textbf{2.} Frontend gọi GET /products/:id; backend trả Product, hệ số size S/M/L và topping kèm giá.
+
+\textbf{3.} Giao diện chọn sẵn size S (100\%) và hiển thị các topping có thể chọn.
+
+\textbf{4.} Người dùng đổi size hoặc chọn tối đa 3 loại topping khác nhau.
+
+\textbf{5.} Giao diện tính lại đơn giá = round\_half\_up(basePrice × sizeFactor/100) + tổng giá topping.
+
+\textbf{6.} Khi món còn hàng và lựa chọn hợp lệ, người dùng có thể thêm vào giỏ thông qua UC-CART-001.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Alternative Flows}}\par\nobreak
+\textbf{AF-01 --} Đổi size S/M/L: dùng hệ số 100\% / 120\% / 140\%; cập nhật ngay giá.
+
+\textbf{AF-02 --} Chọn/bỏ topping: mỗi loại tối đa một lần và tổng không quá 3; giá topping cộng sau nhân hệ số size.
+
+\textbf{AF-03 --} Product stock = 0: hiển thị hết hàng, không cho thêm giỏ ở UI.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Exception Flows}}\par\nobreak
+\textbf{EF-01 --} Product ID không tồn tại: API trả 404; frontend hiển thị không tìm thấy món.
+
+\textbf{EF-02 --} Yêu cầu quá 3 topping, topping trùng, size ngoài S/M/L: giao diện ngăn; khi gửi tạo đơn backend vẫn trả lỗi validation.
+
+\textbf{EF-03 --} Catalog và Cart khác thời điểm: giá cuối cùng phải kiểm tra lại lúc tạo đơn, không chốt giá chỉ bởi client.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Business Rules}}\par\nobreak
+\textbf{BR-01 --} S=100\%, M=120\%, L=140\%; mặc định S.
+
+\textbf{BR-02 --} Topping dùng chung cho menu, giá cố định; tối đa 3 loại, không trùng.
+
+\textbf{BR-03 --} Tính tiền bằng VND nguyên/Decimal và làm tròn half-up trên đơn giá một ly.
+
+\textbf{BR-04 --} Client tính giá để hiển thị; backend quyết định giá khi tạo đơn.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Authorization / Security Rules}}\par\nobreak
+\textbf{SEC-01 --} Endpoint chi tiết công khai; không buộc JWT.
+
+\textbf{SEC-02 --} Không tin giá/topping/size do client gửi; backend kiểm tra lại khi tạo Order.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Requirements}}\par\nobreak
+FR-CAT-002, 003, 004
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related User Stories}}\par\nobreak
+US-CAT-02; US-CAT-03; US-CAT-04
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Acceptance Criteria}}\par\nobreak
+AC-US-CAT-02-01..04; AC-US-CAT-03-01..05; AC-US-CAT-04-01..03
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Use Cases}}\par\nobreak
+UC-CAT-001; UC-CART-001; UC-ORD-001
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Endpoint / Interaction}}\par\nobreak
+GET /products/:id
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Special Requirements / Notes}}\par\nobreak
+Một ly 45.000đ size L không topping = 63.000đ; size M + topping 5.000đ và 7.000đ = 66.000đ. Đây là dữ liệu kiểm tra công thức, không phải giá sản phẩm cố định. \textbar{} Đề bài: Task 2, 4
+\par
+
+% End of breakable Use Case table.
+
+
+\textbf{6.6. UC-CART-001 -- Quản lý giỏ hàng}
+
+
+% Breakable representation of source 22-row 2-column Use Case table.
+
+\par\noindent\textit{Thuộc tính / Nội dung}\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Use Case ID}}\par\nobreak
+UC-CART-001
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Use Case Name}}\par\nobreak
+Quản lý giỏ hàng
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Priority / Scope}}\par\nobreak
+MUST \textbar{} Nhóm Shopping Cart
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Goal / Brief Description}}\par\nobreak
+Người dùng thêm, xem, chỉnh số lượng, xóa đồ uống và xem tổng tiền tạm tính trước khi tạo Order.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Primary Actor}}\par\nobreak
+Guest / Customer
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Secondary Actor}}\par\nobreak
+Không có
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Internal Supporting Components}}\par\nobreak
+Client Cart State (Zustand/Context), localStorage
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Trigger}}\par\nobreak
+Người dùng chọn Thêm vào giỏ, mở giỏ hoặc thay đổi một dòng Cart.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Preconditions}}\par\nobreak
+\textbf{•} Ứng dụng đã tải; người dùng có thể xem catalog.
+
+\textbf{•} Đối với thao tác thêm: có cấu hình Product/size/topping hợp lệ.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Postconditions}}\par\nobreak
+Success: Giỏ hiển thị các dòng đúng cấu hình và số lượng, tổng tạm tính cập nhật, duy trì theo quy tắc vòng đời phiên.\\
+Failure: Thao tác không hợp lệ không phá các dòng hợp lệ; nếu tạo Order thất bại, giỏ vẫn được giữ.\strut
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Main Success Flow}}\par\nobreak
+\textbf{1.} Người dùng chọn món/size/topping và số lượng, bấm Thêm vào giỏ.
+
+\textbf{2.} Client kiểm tra size, topping, số lượng từng dòng 1..10 và tối đa 20 dòng Cart.
+
+\textbf{3.} Nếu cùng Product, size và tập topping (không phụ thuộc thứ tự), client gộp vào dòng cũ; cấu hình khác tạo dòng mới.
+
+\textbf{4.} Client lưu Cart hiện hành và cập nhật số món trên badge.
+
+\textbf{5.} Người dùng mở giỏ xem từng dòng, tăng/giảm số lượng hoặc xóa dòng.
+
+\textbf{6.} Client cập nhật các dòng và tổng tạm tính = tổng (đơn giá cấu hình × qty); hiển thị VND và nhãn ``Tạm tính''.
+
+\textbf{7.} Giỏ được duy trì qua chuyển trang/tải lại và phục hồi từ localStorage nếu khả dụng.
+
+\textbf{8.} Khi tiếp tục đặt món, hệ thống yêu cầu đăng nhập nếu chưa có JWT; chuyển UC-ORD-001.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Alternative Flows}}\par\nobreak
+\textbf{AF-01 --} Thêm lại cùng cấu hình: gộp số lượng; nếu vượt 10, giữ 10 và thông báo.
+
+\textbf{AF-02 --} Cấu hình size/topping khác: tạo dòng riêng nếu còn dưới 20 dòng.
+
+\textbf{AF-03 --} Giảm quantity từ 1 xuống 0 hoặc bấm Xóa: loại hẳn dòng; tổng cập nhật.
+
+\textbf{AF-04 --} Sau khi tải lại trang: khôi phục giỏ hợp lệ từ localStorage; dữ liệu persist lỗi bị lọc bỏ.
+
+\textbf{AF-05 --} Chưa có localStorage: giỏ vẫn hoạt động trong bộ nhớ; không làm UI sập.
+
+\textbf{AF-06 --} JWT hết hạn, đăng nhập, tạo Order PENDING hoặc PAYMENT\_FAILED: giữ nguyên giỏ; khi PAID hoặc logout chủ động: xóa giỏ.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Exception Flows}}\par\nobreak
+\textbf{EF-01 --} Thêm cấu hình mới khi đã có 20 dòng: từ chối và thông báo.
+
+\textbf{EF-02 --} Qty ngoài 1..10, topping trùng/quá 3 hoặc size sai: không lưu giá trị trái quy tắc.
+
+\textbf{EF-03 --} Giỏ rỗng: hiện empty state và khóa thao tác tạo Order.
+
+\textbf{EF-04 --} Cart cũ có món không còn bán/giá đổi: ở bước tạo Order backend phát hiện, UI giữ giỏ để sửa.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Business Rules}}\par\nobreak
+\textbf{BR-01 --} Một dòng được định danh bởi Product + size + tập topping; vị trí topping không quan trọng.
+
+\textbf{BR-02 --} Mỗi dòng tối đa 10 ly; toàn Cart không quá 20 dòng.
+
+\textbf{BR-03 --} Tính tổng chỉ là tạm tính; tạo Order server tính lại từ catalog.
+
+\textbf{BR-04 --} Giỏ client được giữ qua tải lại, 401, PENDING, PAYMENT\_FAILED; xóa sau PAID hoặc logout chủ động.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Authorization / Security Rules}}\par\nobreak
+\textbf{SEC-01 --} Guest được quản lý giỏ trên client, không cần JWT.
+
+\textbf{SEC-02 --} Dữ liệu localStorage có thể bị sửa, cần lọc khi phục hồi; tuyệt đối không xem client Cart/price là giá cuối.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Requirements}}\par\nobreak
+FR-CART-001..005; FR-CAT-003
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related User Stories}}\par\nobreak
+US-CART-01..04; US-CART-05 (kiểm tra khi đặt)
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Acceptance Criteria}}\par\nobreak
+AC-US-CART-01-01..06; AC-US-CART-02-01..05; AC-US-CART-03-01..04; AC-US-CART-04-01..05; AC-US-CART-05-01..06
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Use Cases}}\par\nobreak
+UC-CAT-002; UC-AUTH-002; UC-ORD-001
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Endpoint / Interaction}}\par\nobreak
+Client state; tạo đơn qua POST /orders
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Special Requirements / Notes}}\par\nobreak
+Kiểm tra cấu trúc giỏ cuối cùng thuộc UC-ORD-001; chi tiết lưu state có thể dùng Zustand/Context theo công nghệ đã chọn. \textbar{} Đề bài: Task 5
+\par
+
+% End of breakable Use Case table.
+
+
+\textbf{6.7. UC-ORD-001 -- Tạo đơn hàng từ giỏ hàng}
+
+
+% Breakable representation of source 22-row 2-column Use Case table.
+
+\par\noindent\textit{Thuộc tính / Nội dung}\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Use Case ID}}\par\nobreak
+UC-ORD-001
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Use Case Name}}\par\nobreak
+Tạo đơn hàng từ giỏ hàng
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Priority / Scope}}\par\nobreak
+MUST \textbar{} Nhóm Order Management
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Goal / Brief Description}}\par\nobreak
+Customer chuyển giỏ hợp lệ thành một Order PENDING với snapshot, số tiền cuối và lượng hàng/coupon được giữ an toàn.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Primary Actor}}\par\nobreak
+Customer
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Secondary Actor}}\par\nobreak
+Không có
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Internal Supporting Components}}\par\nobreak
+Order Service, Inventory Service, Promotion Service
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Trigger}}\par\nobreak
+Customer chọn Đặt hàng sau khi xem giỏ và chọn mã giảm giá (nếu có).
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Preconditions}}\par\nobreak
+\textbf{•} Customer có phiên xác thực hợp lệ và có dữ liệu giỏ hàng hiện tại để gửi yêu cầu tạo Order.
+
+\textbf{•} Backend chịu trách nhiệm xác minh tính hợp lệ của giỏ hàng, quyền truy cập, trạng thái Order đang chờ, tồn kho và coupon (nếu có) trong luồng thực hiện.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Postconditions}}\par\nobreak
+Success: Tạo đúng một Order PENDING không dễ đoán ID, snapshot tất cả OrderItem, subtotal/discount/total; stock được trừ và lượt coupon (nếu có) chuyển HELD trong cùng transaction. Giỏ client vẫn được giữ đến lúc PAID.\\
+Failure: Không tạo Order hoặc giữ/trừ một phần stock/coupon khi validation, quyền, tồn, quota hoặc transaction lỗi.\strut
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Main Success Flow}}\par\nobreak
+\textbf{1.} Customer ở giỏ chọn Đặt hàng; nếu chưa đăng nhập, thực hiện UC-AUTH-002.
+
+\textbf{2.} Client gửi các dòng cấu hình và tối đa một couponCode tới POST /orders bằng JWT; không gửi giá làm căn cứ.
+
+\textbf{3.} Backend kiểm tra JWT → cấu trúc giỏ/mã giảm giá → đơn chưa thanh toán đang có → tồn kho → hạn mức coupon.
+
+\textbf{4.} Backend kiểm tra số dòng ≤ 20, không trùng cấu hình, qty 1..10, Product/size/topping hợp lệ và giá từ catalog hiện tại.
+
+\textbf{5.} Backend tính lại đơn giá, subtotal, discount FIXED/PERCENT (nếu có) và total = subtotal − discount, kể cả total = 0 VND.
+
+\textbf{6.} Trong một transaction: kiểm tra/tăng tính nhất quán khi đặt đồng thời, trừ stock theo tổng số ly từng Product, giữ một lượt coupon HELD, tạo Order PENDING và snapshot OrderItem/giá/topping.
+
+\textbf{7.} Backend trả mã Order duy nhất, trạng thái PENDING, snapshot, subtotal/discount/total và createdAt.
+
+\textbf{8.} Frontend hiển thị tổng cuối do backend trả, giữ Cart để Customer tiếp tục UC-PAY-001.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Alternative Flows}}\par\nobreak
+\textbf{AF-01 --} Không dùng coupon: discount=0, total=subtotal; vẫn kiểm tra toàn bộ Cart và stock.
+
+\textbf{AF-02 --} Coupon hợp lệ: chuẩn hóa trim/không phân biệt chữ hoa; kiểm tra hiệu lực, minSubtotal, quota; lưu snapshot coupon và giảm giá.
+
+\textbf{AF-03 --} Coupon giảm toàn bộ: total=0 VND; vẫn tạo PENDING để thanh toán 0 VND bằng Mock Payment (không tự đánh PAID).
+
+\textbf{AF-04 --} Đã có PENDING/PAYMENT\_FAILED: không tạo thêm; trả 409 PENDING\_ORDER\_EXISTS kèm mã Order đang chờ để UI điều hướng.
+
+\textbf{AF-05 --} Khách đặt đồng thời/nhấn hai lần: chỉ một Order chờ được tạo; nếu hỗ trợ Idempotency-Key cho POST /orders thì áp semantics tùy chọn SHOULD theo FR-ORD-006.
+
+\textbf{AF-06} -- Order cũ đã quá hạn: Khi Customer tạo Order mới nhưng đang có Order PENDING hoặc PAYMENT\_FAILED đã quá \textbf{expiresAt}, backend xử lý chuyển Order cũ sang CANCELLED, hoàn tồn kho và trả lượt coupon đúng một lần theo FR-ORD-007 trước khi kiểm tra điều kiện tạo Order mới. Không được tạo trùng Order chưa thanh toán.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Exception Flows}}\par\nobreak
+\textbf{EF-01 --} Thiếu/sai/hết hạn JWT: 401 UNAUTHORIZED; không động vào giỏ.
+
+\textbf{EF-02 --} Giỏ rỗng, trùng cấu hình, quá 20 dòng, Product/Size/Topping sai, trùng topping, qty ngoài 1..10: 400 INVALID\_CART kèm dòng lỗi.
+
+\textbf{EF-03 --} Coupon không hợp lệ/chưa hiệu lực/hết hạn/không đạt tối thiểu: 400 INVALID\_COUPON; không tự bỏ mã rồi đặt.
+
+\textbf{EF-04 --} Thiếu tồn: 409 INSUFFICIENT\_STOCK; rollback tất cả sản phẩm, ngay cả khi chỉ một món thiếu.
+
+\textbf{EF-05 --} Hết quota coupon: 409 COUPON\_UNAVAILABLE (ưu tiên báo thiếu stock nếu hai điều kiện cùng xảy ra).
+
+\textbf{EF-06 --} Đang có Order chưa thanh toán: 409 PENDING\_ORDER\_EXISTS; không giữ stock/coupon thêm.
+
+\textbf{EF-07 --} Bất kỳ lỗi transaction giữa chừng: rollback Order, tồn kho, CouponRedemption và các log liên quan.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Business Rules}}\par\nobreak
+\textbf{BR-01 --} Thứ tự validation theo FR-ORD-001: xác thực → giỏ/coupon → đơn đang chờ → tồn → coupon quota.
+
+\textbf{BR-02 --} Backend là nguồn authoritative về giá, stock, discount; tiền VND nguyên/Decimal, half-up.
+
+\textbf{BR-03 --} Stock theo Product; cộng qty tất cả dòng cùng Product dù size khác; không bao giờ âm hay oversell.
+
+\textbf{BR-04 --} Mỗi Customer tối đa một Order PENDING hoặc PAYMENT\_FAILED tại thời điểm.
+
+\textbf{BR-05 --} Snapshot món, size, topping, tên/giá và tổng sau giảm không đổi hồi tố.
+
+\textbf{BR-06 --} Giữ lượt coupon HELD khi tạo đơn; PAYMENT\_FAILED không giải phóng; CANCELLED trả, PAID tiêu thụ.
+
+\textbf{BR-07 --} Sau tạo Order PENDING, giữ giỏ phía client; expire và cancel theo UC-ORD-003.
+
+\textbf{BR-08 --} Nếu triển khai chức năng đối soát biến động tồn kho, mỗi thao tác giữ tồn phải ghi nhật ký biến động gồm Order, Product, số lượng, loại biến động và thời điểm trong cùng transaction. Không được ghi trùng theo (Order, Product, loại biến động).
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Authorization / Security Rules}}\par\nobreak
+\textbf{SEC-01 --} Bắt buộc JWT; userId chỉ lấy từ token.
+
+\textbf{SEC-02 --} Từ chối request giả giá, tổng, discountAmount, role hay trạng thái đích; backend dùng DTO whitelist.
+
+\textbf{SEC-03 --} Transaction + kiểm soát cạnh tranh/DB constraints quyết định tính nhất quán; UI disable button không thay thế bảo vệ server.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Requirements}}\par\nobreak
+FR-ORD-001, 002, 006; FR-CART-005; FR-INV-001, 002; FR-PRO-001, 002, 004; FR-AUTHZ-002, 003;FR-INV-004 (SHOULD),
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related User Stories}}\par\nobreak
+US-ORD-01, 02, 06; US-CART-05; US-INV-01, 02; US-PRO-01, 02, 04;US-INV-04
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Acceptance Criteria}}\par\nobreak
+AC-US-ORD-01-01..06; AC-US-ORD-02-01..04; AC-US-ORD-06-01..04; AC-US-CART-05-01..06; AC-US-INV-02-01..05; AC-US-PRO-01-01..04; AC-US-PRO-02-01..06; AC-US-PRO-04-01..06
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Use Cases}}\par\nobreak
+UC-CART-001; UC-AUTH-002; UC-PRO-002; UC-PAY-001; UC-ORD-003
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Endpoint / Interaction}}\par\nobreak
+POST /orders
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Special Requirements / Notes}}\par\nobreak
+FR-ORD-007 (MUST): Mỗi Order PENDING hoặc PAYMENT\_FAILED có thời hạn thanh toán 15 phút kể từ createdAt. Hệ thống thiết lập expiresAt = createdAt + 15 phút khi tạo Order; thời hạn này không được gia hạn khi thử lại thanh toán. Tác vụ nội bộ quét mỗi phút và tự động chuyển Order quá hạn sang CANCELLED, hoàn tồn kho và giải phóng lượt coupon đã giữ đúng một lần trong cùng transaction. Khi Customer yêu cầu tạo Order mới mà Order đang chờ trước đó đã quá hạn nhưng chưa được tác vụ xử lý, backend phải xử lý hủy Order quá hạn theo FR-ORD-007 trước khi cho phép tạo Order mới, bảo đảm không tồn tại hai Order đang chờ đồng thời. Hủy đơn chủ động bởi Customer thuộc FR-ORD-005 (SHOULD). Dữ liệu seed và kiểm thử đồng thời là supporting behavior, không tách thành Use Case riêng. \textbar{} Đề bài: Task 6, 10
+\par
+
+% End of breakable Use Case table.
+
+
+\textbf{6.8. UC-ORD-002 -- Xem lịch sử và chi tiết đơn hàng}
+
+
+% Breakable representation of source 22-row 2-column Use Case table.
+
+\par\noindent\textit{Thuộc tính / Nội dung}\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Use Case ID}}\par\nobreak
+UC-ORD-002
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Use Case Name}}\par\nobreak
+Xem lịch sử và chi tiết đơn hàng
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Priority / Scope}}\par\nobreak
+MUST \textbar{} Nhóm Order Management
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Goal / Brief Description}}\par\nobreak
+Customer truy cập danh sách đơn của chính mình và xem trạng thái, số tiền, món đã đặt theo snapshot lịch sử.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Primary Actor}}\par\nobreak
+Customer
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Secondary Actor}}\par\nobreak
+Không có
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Internal Supporting Components}}\par\nobreak
+Backend Order Read Service
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Trigger}}\par\nobreak
+Customer chọn mục Lịch sử đơn hàng hoặc mở một đơn đã có.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Preconditions}}\par\nobreak
+\textbf{•} Customer đã đăng nhập với JWT hợp lệ.
+
+\textbf{•} Backend có thể xác định userId từ JWT; dữ liệu Order (có thể rỗng).
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Postconditions}}\par\nobreak
+Success: Hiển thị đúng danh sách đơn thuộc Customer, theo thứ tự mới nhất trước; thông tin từng đơn phản ánh snapshot tại thời điểm tạo.\\
+Failure: Không lộ Order hay dữ liệu Payment cá nhân của Customer khác khi không có quyền hoặc truy vấn thất bại.\strut
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Main Success Flow}}\par\nobreak
+\textbf{1.} Customer mở Lịch sử đơn hàng.
+
+\textbf{2.} Frontend gửi GET /orders/me kèm JWT.
+
+\textbf{3.} Backend lấy userId từ JWT và truy vấn chỉ những Order do Customer sở hữu.
+
+\textbf{4.} Backend sắp xếp các Order theo thời điểm tạo mới nhất trước và trả mã, trạng thái, thời gian, tổng tiền, các OrderItem snapshot.
+
+\textbf{5.} Frontend hiển thị danh sách và cho phép người dùng chọn một Order để xem các thông tin đã được trả/thuộc phạm vi của mình.
+
+\textbf{6.} Nếu có coupon đã dùng, số tiền giảm và pointsEarned, giao diện lịch sử thể hiện theo dữ liệu server.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Alternative Flows}}\par\nobreak
+\textbf{AF-01 --} Chưa từng đặt đơn: API trả danh sách rỗng, UI hiển thị empty state.
+
+\textbf{AF-02 --} Mở đơn đã thanh toán hoặc thất bại: hiển thị trạng thái thực tế và các lựa chọn liên quan (xem xác nhận, thử lại/hủy nếu được phép).
+
+\textbf{AF-03 --} Catalog đã đổi tên, giá, topping: dữ liệu Order cũ vẫn lấy snapshot, không tham chiếu giá hiện tại để sửa lịch sử.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Exception Flows}}\par\nobreak
+\textbf{EF-01 --} JWT thiếu hoặc hết hạn: 401; yêu cầu đăng nhập lại, không xóa Cart.
+
+\textbf{EF-02 --} Người dùng cố mở mã Order của người khác hoặc không tồn tại: trả cùng HTTP 404, không lộ dữ liệu.
+
+\textbf{EF-03 --} Lỗi truy vấn: hiện thông báo lỗi, không hiển thị kết quả của tài khoản khác.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Business Rules}}\par\nobreak
+\textbf{BR-01 --} Lịch sử chỉ đọc; OrderItem snapshot và số tiền không bị sửa theo catalog hiện tại.
+
+\textbf{BR-02 --} Danh sách mới nhất trước; danh sách rỗng là kết quả hợp lệ.
+
+\textbf{BR-03 --} Coupon/discount/pointsEarned trong lịch sử phản ánh dữ liệu đã chốt, không phải giá trị dự kiến.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Authorization / Security Rules}}\par\nobreak
+\textbf{SEC-01 --} JWT bắt buộc, query scope theo userId từ token.
+
+\textbf{SEC-02 --} Với truy cập chi tiết từng mã, kiểm tra ownership trước khi trả trạng thái; tài nguyên không tồn tại và không sở hữu đều 404.
+
+\textbf{SEC-03 --} Không expose thông tin nhạy cảm Payment hoặc dữ liệu người khác.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Requirements}}\par\nobreak
+FR-ORD-004, 002; FR-PRO-005; FR-AUTHZ-002
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related User Stories}}\par\nobreak
+US-ORD-04; US-ORD-02; US-PRO-05 (thông tin trong lịch sử)
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Acceptance Criteria}}\par\nobreak
+AC-US-ORD-04-01..05; AC-US-ORD-02-02..04; AC-US-PRO-05-02
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Use Cases}}\par\nobreak
+UC-ORD-001; UC-PAY-002; UC-PRO-001
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Endpoint / Interaction}}\par\nobreak
+GET /orders/me
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Special Requirements / Notes}}\par\nobreak
+Tài liệu chốt GET /orders/me; không tự quy định một URL chi tiết Order mới nếu API Design chưa định nghĩa. NFR API lịch sử \textless{} 500 ms với dữ liệu mẫu. \textbar{} Đề bài: Task 9
+\par
+
+% End of breakable Use Case table.
+
+
+\textbf{6.9. UC-ORD-003 -- Hủy đơn hàng chưa thanh toán}
+
+
+% Breakable representation of source 22-row 2-column Use Case table.
+
+\par\noindent\textit{Thuộc tính / Nội dung}\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Use Case ID}}\par\nobreak
+UC-ORD-003
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Use Case Name}}\par\nobreak
+Hủy đơn hàng chưa thanh toán
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Priority / Scope}}\par\nobreak
+MUST (tự động hủy đơn quá hạn -- FR-ORD-007); SHOULD (Customer chủ động hủy đơn -- FR-ORD-005) \textbar{} Nhóm Order Management
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Goal / Brief Description}}\par\nobreak
+Customer hủy Order PENDING hoặc PAYMENT\_FAILED của chính mình để giải phóng tồn kho và lượt coupon đang giữ.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Primary Actor}}\par\nobreak
+Customer
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Secondary Actor}}\par\nobreak
+Không có
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Internal Supporting Components}}\par\nobreak
+Order Service, Inventory Service, Promotion Service, Order Expiration Scheduler
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Trigger}}\par\nobreak
+Customer yêu cầu hủy Order chưa thanh toán (SHOULD), hoặc tác vụ định kỳ của hệ thống phát hiện Order PENDING/PAYMENT\_FAILED đã hết hạn 15 phút (MUST).
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Preconditions}}\par\nobreak
+\textbf{•} Đối với hủy chủ động (FR-ORD-005 -- SHOULD): Customer gửi yêu cầu hủy một Order và cung cấp JWT để hệ thống xác thực.
+
+\textbf{•} Đối với tự động hủy (FR-ORD-007 -- MUST): Tác vụ định kỳ của hệ thống được kích hoạt để kiểm tra các Order quá hạn.
+
+\textbf{•} Backend xác minh quyền sở hữu (đối với hủy chủ động), trạng thái Order, thời hạn thanh toán và điều kiện chuyển sang CANCELLED trước khi xử lý. Tác vụ tự động không yêu cầu JWT của Customer.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Postconditions}}\par\nobreak
+Success: Order chuyển CANCELLED; stock từ snapshot được hoàn và coupon HELD được RELEASED đúng một lần, nguyên tử; giỏ client không bị xóa.\\
+Failure: Không hủy, hoàn tồn hay hoàn coupon nếu Order đã PAID, CANCELLED, không sở hữu hoặc có thao tác cạnh tranh khác đã thắng.\strut
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Main Success Flow}}\par\nobreak
+\textbf{1.} Customer mở đơn chưa thanh toán của mình và chọn Hủy.
+
+\textbf{2.} Frontend gọi API hủy kèm JWT và mã đơn.
+
+\textbf{3.} Backend xác thực Customer, kiểm tra Order thuộc người gọi trước khi kiểm tra trạng thái.
+
+\textbf{4.} Backend xác minh Order PENDING/PAYMENT\_FAILED và chưa có Payment SUCCESS.
+
+\textbf{5.} Trong transaction, đổi sang CANCELLED bằng cập nhật có điều kiện; hoàn lại qty stock theo snapshot và chuyển coupon HELD → RELEASED.
+
+\textbf{6.} Backend trả trạng thái CANCELLED; giao diện giữ Cart và cho phép khách tạo đơn mới.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Alternative Flows}}\par\nobreak
+\textbf{AF-01 --} Hủy đơn PAYMENT\_FAILED: vẫn hoàn stock/coupon một lần, giữ lịch sử các Payment FAILED cũ.
+
+\textbf{AF-02 --} System-initiated Flow -- Tự động hủy đơn quá hạn (MUST -- FR-ORD-007): Tác vụ định kỳ quét mỗi phút các Order PENDING hoặc PAYMENT\_FAILED có expiresAt nhỏ hơn hoặc bằng thời điểm hiện tại của server và chuyển sang CANCELLED, đồng thời hoàn tồn kho và giải phóng coupon đúng một lần trong cùng transaction. Order đã PAID hoặc chuyển sang trạng thái xử lý tiếp theo không được tự hủy.
+
+\textbf{AF-03 --} Hủy đồng thời với thanh toán: chỉ thao tác thắng khóa/transition được phép tạo side effect; nhánh còn lại phải kiểm tra lại trạng thái.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Exception Flows}}\par\nobreak
+\textbf{EF-01 --} Thiếu JWT: 401 UNAUTHORIZED.
+
+\textbf{EF-02 --} Đơn không tồn tại hoặc thuộc Customer khác: cùng phản hồi 404 NOT\_FOUND.
+
+\textbf{EF-03 --} Đơn PAID/đã CANCELLED/trạng thái sau PAID: 409 INVALID\_TRANSITION; không hoàn stock/coupon.
+
+\textbf{EF-04 --} Gửi hủy lần hai: 409, không hoàn tài nguyên thêm.
+
+\textbf{EF-05 --} Lỗi transaction/đồng thời: rollback toàn bộ thay đổi không nguyên tử.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Business Rules}}\par\nobreak
+\textbf{BR-01 --} Chỉ PENDING/PAYMENT\_FAILED → CANCELLED; PAID không được hủy trong MVP.
+
+\textbf{BR-02 --} Hoàn stock và trả lượt coupon chính xác một lần khi thực sự chuyển CANCELLED.
+
+\textbf{BR-03 --} PAYMENT\_FAILED không tự hoàn tồn; chỉ hoàn khi hủy.
+
+\textbf{BR-04 --} Mỗi Order ở trạng thái PENDING hoặc PAYMENT\_FAILED có thời hạn thanh toán 15 phút kể từ thời điểm tạo (expiresAt = createdAt + 15 phút). Hệ thống tự động kiểm tra các đơn quá hạn bằng tác vụ định kỳ mỗi phút. Khi đơn quá hạn và chưa thanh toán thành công, hệ thống chuyển Order sang CANCELLED, hoàn tồn kho và giải phóng lượt coupon đã giữ đúng một lần trong cùng transaction. Sau thời điểm expiresAt, mọi yêu cầu thanh toán mới phải bị từ chối, kể cả khi tác vụ tự hủy chưa thực hiện. Order đã PAID không được tự hủy. Các thao tác đồng thời phải bảo đảm không xảy ra thanh toán thành công sau khi đơn đã CANCELLED hoặc hoàn tài nguyên nhiều lần.
+
+\textbf{BR-05 --} Giỏ client vẫn giữ sau khi hủy, không xóa snapshot hay lịch sử Payment đã lưu.
+
+\textbf{BR-06 --} Nếu triển khai chức năng đối soát biến động tồn kho, mỗi thao tác hoàn tồn phải ghi nhật ký biến động gồm Order, Product, số lượng, loại biến động và thời điểm trong cùng transaction. Không được ghi trùng theo (Order, Product, loại biến động).
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Authorization / Security Rules}}\par\nobreak
+\textbf{SEC-01 --} Chỉ chủ Order hủy; kiểm tra JWT → ownership → state.
+
+\textbf{SEC-02 --} Không tiết lộ trạng thái đơn của người khác; cùng 404 khi không có/không sở hữu.
+
+\textbf{SEC-03 --} Cập nhật có điều kiện ngăn hai thao tác đồng thời cùng tạo side effect.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Requirements}}\par\nobreak
+FR-ORD-005, 007; FR-INV-003; FR-PRO-004; FR-AUTHZ-002, 003;FR-INV-004 (SHOULD),
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related User Stories}}\par\nobreak
+US-ORD-05; US-ORD-07 (hệ thống hỗ trợ); US-INV-03; US-PRO-04;US-INV-04
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Acceptance Criteria}}\par\nobreak
+AC-US-ORD-05-01..04; AC-US-ORD-07-01..05; AC-US-INV-03-01..05; AC-US-PRO-04-04..06
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Use Cases}}\par\nobreak
+UC-ORD-001; UC-PAY-001; UC-ORD-002
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Endpoint / Interaction}}\par\nobreak
+POST /orders/:id/cancel (đề xuất trong Specification)
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Special Requirements / Notes}}\par\nobreak
+FR-ORD-007 (MUST): Order Expiration Scheduler là tác vụ nội bộ của BrewLite, không phải Actor bên ngoài hệ thống. Tác vụ kiểm tra đơn quá hạn theo chu kỳ và kích hoạt nghiệp vụ chuyển Order sang CANCELLED, hoàn tồn kho và giải phóng lượt coupon đúng một lần trong cùng transaction.
+
+FR-ORD-005 (SHOULD): Customer có thể chủ động yêu cầu hủy Order thông qua endpoint POST /orders/:id/cancel nếu chức năng này được triển khai.
+
+Khi xây dựng Use Case Diagram cho toàn bộ BrewLite, không biểu diễn Order Expiration Scheduler như một Actor UML bên ngoài system boundary. Cơ chế tự động hủy được mô tả trong luồng nghiệp vụ và có thể thể hiện chi tiết bằng Activity Diagram hoặc Sequence Diagram.
+\par
+
+% End of breakable Use Case table.
+
+
+\textbf{6.10. UC-ORD-004 -- Chuyển trạng thái xử lý đơn hàng (nội bộ/demo)}
+
+
+% Breakable representation of source 22-row 2-column Use Case table.
+
+\par\noindent\textit{Thuộc tính / Nội dung}\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Use Case ID}}\par\nobreak
+UC-ORD-004
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Use Case Name}}\par\nobreak
+Chuyển trạng thái xử lý đơn hàng (nội bộ/demo)
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Priority / Scope}}\par\nobreak
+MUST \textbar{} Nhóm Order Management
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Goal / Brief Description}}\par\nobreak
+Cho phép người thao tác nội bộ demo tiến Order sau thanh toán đúng tuần tự PAID → PREPARING → READY → COMPLETED, không tạo UI Barista/Admin.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Primary Actor}}\par\nobreak
+Người vận hành demo nội bộ
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Secondary Actor}}\par\nobreak
+Không có
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Internal Supporting Components}}\par\nobreak
+Order State Machine
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Trigger}}\par\nobreak
+Người vận hành nội bộ gửi yêu cầu chuyển Order sang bước kế tiếp qua endpoint có khóa.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Preconditions}}\par\nobreak
+\textbf{•} Order đã PAID/PREPARING/READY hợp lệ.
+
+\textbf{•} Người gọi có X-Internal-Key đúng cấu hình và biết trạng thái hiện tại from của Order.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Postconditions}}\par\nobreak
+Success: Order tiến đúng một bước và chỉ một lần cho mỗi yêu cầu hợp lệ; các trạng thái kết thúc không bị sửa.\\
+Failure: Không đổi trạng thái khi thiếu khóa, from sai, state không hợp lệ, hay request lặp trên trạng thái cũ.\strut
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Main Success Flow}}\par\nobreak
+\textbf{1.} Người vận hành dùng Postman/demo gọi POST /internal/orders/:id/advance kèm X-Internal-Key và from.
+
+\textbf{2.} Backend kiểm tra khóa nội bộ (cơ chế riêng, không phải JWT Customer).
+
+\textbf{3.} Backend tải Order và đối chiếu from của request với trạng thái hiện tại.
+
+\textbf{4.} Backend xác định duy nhất bước kế tiếp hợp lệ: PAID→PREPARING, PREPARING→READY hoặc READY→COMPLETED.
+
+\textbf{5.} Backend thực hiện cập nhật trạng thái có điều kiện trong transaction.
+
+\textbf{6.} API trả trạng thái mới; người vận hành có thể thực hiện một yêu cầu khác với from mới khi cần.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Alternative Flows}}\par\nobreak
+\textbf{AF-01 --} from=PAID: chuyển PREPARING.
+
+\textbf{AF-02 --} from=PREPARING: chuyển READY.
+
+\textbf{AF-03 --} from=READY: chuyển COMPLETED.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Exception Flows}}\par\nobreak
+\textbf{EF-01 --} Thiếu hoặc sai X-Internal-Key: trả 403 FORBIDDEN.
+
+\textbf{EF-02 --} from không bằng state hiện tại (kể cả bấm đúp/gửi lại): 409 INVALID\_TRANSITION, không nhảy hai bước.
+
+\textbf{EF-03 --} Order ở PENDING, PAYMENT\_FAILED, CANCELLED hoặc COMPLETED: 409 INVALID\_TRANSITION.
+
+\textbf{EF-04 --} Client gửi trạng thái đích tùy ý: không sử dụng; chỉ tiến một bước theo state machine.
+
+\textbf{EF-05 --} Hai request đồng thời cùng from: chỉ một request thành công.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Business Rules}}\par\nobreak
+\textbf{BR-01 --} Chỉ các transition đã liệt kê trong ma trận nguồn là hợp lệ; COMPLETED/CANCELLED là terminal.
+
+\textbf{BR-02 --} Không có PAID→CANCELLED hoặc quay về trạng thái trước.
+
+\textbf{BR-03 --} Tham số from chống yêu cầu lặp nhảy nhiều bước.
+
+\textbf{BR-04 --} Thao tác nội bộ không tự thay đổi tiền, giữ/hoàn tồn, coupon hoặc điểm đã chốt khi PAID.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Authorization / Security Rules}}\par\nobreak
+\textbf{SEC-01 --} Endpoint nội bộ tách khỏi quyền Customer; kiểm tra X-Internal-Key trong .env, thiếu/sai trả 403.
+
+\textbf{SEC-02 --} Khóa không commit lên Git; .env.example chỉ chứa placeholder.
+
+\textbf{SEC-03 --} Khóa dùng chung không định danh từng nhân viên, giới hạn đã được chấp nhận ở MVP.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Requirements}}\par\nobreak
+FR-ORD-003; FR-AUTHZ-001, 003
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related User Stories}}\par\nobreak
+US-ORD-03 (nhánh sau PAID); US-AUTHZ-01, 03 (quy tắc)
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Acceptance Criteria}}\par\nobreak
+AC-US-ORD-03-01..06; AC-US-AUTHZ-01-03; AC-US-AUTHZ-03-04
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Use Cases}}\par\nobreak
+UC-PAY-001; UC-ORD-002
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Endpoint / Interaction}}\par\nobreak
+POST /internal/orders/:id/advance; header X-Internal-Key; body from
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Special Requirements / Notes}}\par\nobreak
+Không tạo Customer-initiated setStatus, không làm ứng dụng Seller/Admin/Barista. Nguồn FR có ví dụ PATCH nhưng bản US--AC và mục 11 dùng POST /internal/orders/:id/advance; ở đây sử dụng endpoint chốt trong US--AC. \textbar{} Đề bài: Task 10
+\par
+
+% End of breakable Use Case table.
+
+
+\textbf{6.11. UC-PAY-001 -- Thanh toán đơn hàng bằng Ví/Thẻ giả lập}
+
+
+% Breakable representation of source 22-row 2-column Use Case table.
+
+\par\noindent\textit{Thuộc tính / Nội dung}\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Use Case ID}}\par\nobreak
+UC-PAY-001
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Use Case Name}}\par\nobreak
+Thanh toán đơn hàng bằng Ví/Thẻ giả lập
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Priority / Scope}}\par\nobreak
+MUST \textbar{} Nhóm Payment
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Goal / Brief Description}}\par\nobreak
+Customer thanh toán Order chưa trả bằng WALLET hoặc CARD mô phỏng, nhận kết quả an toàn và có thể thử lại khi thất bại.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Primary Actor}}\par\nobreak
+Customer
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Secondary Actor}}\par\nobreak
+Không có
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Internal Supporting Components}}\par\nobreak
+Payment Service, Mock Payment Service, Order Service
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Trigger}}\par\nobreak
+Customer chọn phương thức Ví/Thẻ và xác nhận thanh toán một Order của mình.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Preconditions}}\par\nobreak
+\textbf{•} Customer có JWT hợp lệ và có mã Order cần thanh toán.
+
+\textbf{•} Đối với lần thanh toán mới, Order phải ở trạng thái PENDING hoặc PAYMENT\_FAILED, chưa có Payment SUCCESS và chưa quá hạn (serverNow \textless{} expiresAt).
+
+\textbf{•} Customer chọn phương thức WALLET hoặc CARD và cung cấp Idempotency-Key hợp lệ.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Postconditions}}\par\nobreak
+Success: Trường hợp SUCCESS: lưu đúng một Payment SUCCESS, Order → PAID, coupon HELD → CONSUMED, cộng loyalty đúng một lần, client xóa Cart. Trường hợp FAILED: lưu Payment FAILED, Order → PAYMENT\_FAILED, giữ stock/coupon/Cart, không cộng điểm.\\
+Failure: Không tạo Payment thành công trùng, không trừ/hoàn stock không đúng, không cộng điểm trùng; lỗi request không tạo Payment.\strut
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Main Success Flow}}\par\nobreak
+\textbf{1.} Customer mở Order PENDING hoặc PAYMENT\_FAILED và chọn WALLET hoặc CARD.
+
+\textbf{2.} Client tạo Idempotency-Key 8..64 ký tự cho lần thử mới; gửi POST /payments kèm JWT, Order và dữ liệu mô phỏng.
+
+\textbf{3.} Backend xác thực JWT → kiểm tra dữ liệu request → xác minh quyền sở hữu Order theo userId từ JWT. .
+
+\textbf{4.} Backend tra cứu Idempotency-Key. Nếu cùng key và cùng nội dung đã có kết quả, trả lại kết quả đã lưu (kể cả khi Order đã hết hạn), không xử lý lại. Với yêu cầu thanh toán mới, backend kiểm tra trạng thái Order và expiresAt trước khi tiếp tục.
+
+\textbf{5.} Nếu Order đang PAYMENT\_FAILED chưa quá hạn, hệ thống chuyển hợp lệ về PENDING; không tạo Order mới, không trừ thêm stock/coupon.
+
+\textbf{6.} Backend lấy amount đúng total của Order (kể cả 0 VND), không tin amount hay kết quả client gửi.
+
+\textbf{7.} Backend gọi đồng bộ Mock Payment Service quyết định SUCCESS/FAILED từ dữ liệu test.
+
+\textbf{8.} Trong transaction, lưu Payment attempt bất biến và cập nhật Order: SUCCESS→PAID hoặc FAILED→PAYMENT\_FAILED; nếu thành công tiêu thụ coupon và cộng floor(total/10.000) điểm đúng một lần.
+
+\textbf{9.} API trả HTTP 200 kèm paymentStatus/orderStatus; frontend hiển thị kết quả và cập nhật Cart theo kết quả.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Alternative Flows}}\par\nobreak
+\textbf{AF-01 --} Thanh toán SUCCESS: Order PAID, coupon CONSUMED, stock đã trừ khi tạo đơn không trừ nữa; giỏ xóa; hiển thị UC-PAY-002.
+
+\textbf{AF-02 --} Thanh toán FAILED: Order PAYMENT\_FAILED, không hoàn stock hoặc coupon, giữ giỏ; cho Customer thử lại bằng Idempotency-Key mới nếu còn hạn.
+
+\textbf{AF-03 --} Replay cùng key và cùng nội dung: trả phản hồi gốc (kể cả FAILED) với dấu hiệu replay, không tạo Payment/điểm lần hai.
+
+\textbf{AF-04 --} Gửi đồng thời cùng key: chỉ một Payment; request chờ có thể nhận PAYMENT\_IN\_PROGRESS rồi gửi lại key đó.
+
+\textbf{AF-05 --} total=0 VND do coupon: vẫn qua Mock Payment; nếu SUCCESS đơn PAID và pointsEarned=0.
+
+\textbf{AF-06 --} Dữ liệu demo: thẻ kết thúc 0002 hoặc ví kết thúc 0000 cho FAILED; dữ liệu hợp lệ khác cho SUCCESS.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Exception Flows}}\par\nobreak
+\textbf{EF-01 --} Thiếu JWT: 401; Order người khác/không tồn tại: cùng 404.
+
+\textbf{EF-02 --} Thiếu/không hợp lệ Idempotency-Key, phương thức lạ, dữ liệu test sai: 400, không tạo Payment.
+
+\textbf{EF-03 --} Cùng key nhưng khác Order, phương thức hoặc dữ liệu test: 409 IDEMPOTENCY\_KEY\_CONFLICT.
+
+\textbf{EF-04 --} Đơn đã PAID/CANCELLED hoặc quá hạn (khi dùng key mới): 409 INVALID\_TRANSITION; không có Payment mới.
+
+\textbf{EF-05 --} Hai key khác nhau cùng Order cạnh tranh: chỉ một Payment SUCCESS được tồn tại.
+
+\textbf{EF-06 --} Lỗi kỹ thuật giữa xử lý: không để Payment/Order/coupon/điểm trạng thái nửa vời; cùng key được retry hợp lệ khi chưa có kết quả.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Business Rules}}\par\nobreak
+\textbf{BR-01 --} Payment nội bộ chỉ MOCK; không có gateway thật, redirect hay callback/IPN.
+
+\textbf{BR-02 --} Idempotency theo (userId,key,payload); cùng key/nội dung trả response cũ, key khác payload trả 409.
+
+\textbf{BR-03 --} Một Order nhiều Payment FAILED, tối đa một SUCCESS; Payment result bất biến.
+
+\textbf{BR-04 --} Khi PAYMENT\_FAILED, tồn kho, lượt coupon và giỏ hàng được giữ nguyên. Hết thời hạn 15 phút không trực tiếp làm thay đổi tồn kho/coupon; tài nguyên chỉ được hoàn hoặc giải phóng khi Order thực sự chuyển sang CANCELLED bởi tác vụ tự động theo FR-ORD-007 (MUST) hoặc bởi yêu cầu hủy hợp lệ của Customer theo FR-ORD-005 (SHOULD). Mỗi tài nguyên chỉ được hoàn hoặc giải phóng đúng một lần.
+
+\textbf{BR-05 --} Điểm = floor(totalAfterDiscount/10.000); cập nhật nguyên tử với PAID và không cộng lặp.
+
+\textbf{BR-06 --} Trừ tồn kho và giữ coupon chỉ lúc tạo Order; retry Payment không thực hiện lại.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Authorization / Security Rules}}\par\nobreak
+\textbf{SEC-01 --} JWT và kiểm tra ownership trước state; đơn người khác trả 404.
+
+\textbf{SEC-02 --} Không tin amount, forcedResult, role, discount hay kết quả client; dữ liệu payment mock được xác minh server.
+
+\textbf{SEC-03 --} Idempotency-Key và transaction/unique constraints ngăn replay, cạnh tranh và double-charge logic.
+
+\textbf{SEC-04 --} Không lưu số thẻ đầy đủ/CVV; giữ bí mật thanh toán khỏi log.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Requirements}}\par\nobreak
+FR-PAY-001..004, 006; FR-PRO-003, 004; FR-INV-003; FR-ORD-003
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related User Stories}}\par\nobreak
+US-PAY-01..04, 06; US-PRO-03, 04; US-INV-03
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Acceptance Criteria}}\par\nobreak
+AC-US-PAY-01-01..06; AC-US-PAY-02-01..05; AC-US-PAY-03-01..06; AC-US-PAY-04-01..05; AC-US-PAY-06-01..05; AC-US-PRO-03-01..06
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Use Cases}}\par\nobreak
+UC-ORD-001; UC-ORD-003; UC-PAY-002; UC-PRO-001
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Endpoint / Interaction}}\par\nobreak
+POST /payments; header Idempotency-Key
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Special Requirements / Notes}}\par\nobreak
+Nguồn quy định Payment SUCCESS/FAILED trả HTTP 200 (kết quả nghiệp vụ); lỗi request trả 4xx. Idempotency-Key không có expiry trong MVP. Mock service nội bộ sync; API NFR \textless{} 500 ms với dữ liệu mẫu. \textbar{} Đề bài: Task 8, 10
+\par
+
+% End of breakable Use Case table.
+
+
+\textbf{6.12. UC-PAY-002 -- Xem kết quả và xác nhận thanh toán}
+
+
+% Breakable representation of source 22-row 2-column Use Case table.
+
+\par\noindent\textit{Thuộc tính / Nội dung}\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Use Case ID}}\par\nobreak
+UC-PAY-002
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Use Case Name}}\par\nobreak
+Xem kết quả và xác nhận thanh toán
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Priority / Scope}}\par\nobreak
+MUST \textbar{} Nhóm Payment
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Goal / Brief Description}}\par\nobreak
+Customer xem kết quả thanh toán và xác nhận đơn có mã, trạng thái, món, tổng tiền để nhận nước tại quầy.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Primary Actor}}\par\nobreak
+Customer
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Secondary Actor}}\par\nobreak
+Không có
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Internal Supporting Components}}\par\nobreak
+Order Read Service, Payment Read Service
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Trigger}}\par\nobreak
+POST /payments hoàn tất hoặc Customer mở lại đơn từ lịch sử.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Preconditions}}\par\nobreak
+\textbf{•} Customer có kết quả thanh toán hoặc có JWT để xem Order thuộc mình.
+
+\textbf{•} Order/Payment đã có dữ liệu kết quả nếu giao dịch được xử lý.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Postconditions}}\par\nobreak
+Success: Màn hình cho biết chính xác thành công PAID hoặc FAILED, mã đơn, snapshot và hướng xử lý; xem lại không phát sinh Payment.\\
+Failure: Không hiển thị dữ liệu đơn người khác và không tạo Payment mới chỉ để xem kết quả.\strut
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Main Success Flow}}\par\nobreak
+\textbf{1.} Sau khi xử lý payment, frontend nhận paymentStatus/orderStatus từ backend.
+
+\textbf{2.} Backend/client xác định Order và số tiền theo snapshot, không lấy từ dữ liệu UI tự sửa.
+
+\textbf{3.} Với PAID, màn hình hiển thị mã đơn, trạng thái, món đã chọn, total, phương thức đã che và thời điểm.
+
+\textbf{4.} Customer có thể tải lại/xem lại từ UC-ORD-002, hệ thống chỉ đọc dữ liệu đã lưu.
+
+\textbf{5.} Nếu kết quả FAILED, giao diện hiển thị thông báo chung và hướng dẫn thử lại khi còn hạn, đồng thời giữ Cart.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Alternative Flows}}\par\nobreak
+\textbf{AF-01 --} Payment SUCCESS: xác nhận PAID và hướng dẫn nhận nước tại quầy.
+
+\textbf{AF-02 --} Payment FAILED: thông báo chung, nút thử lại trên cùng Order với key mới khi còn hạn.
+
+\textbf{AF-03 --} Mở lại xác nhận từ lịch sử: đọc dữ liệu snapshot; không POST /payments hay tạo bản ghi mới.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Exception Flows}}\par\nobreak
+\textbf{EF-01 --} Không có JWT hoặc token hết hạn với dữ liệu cần bảo vệ: 401.
+
+\textbf{EF-02 --} Order không thuộc người gọi hoặc không tồn tại: cùng 404.
+
+\textbf{EF-03 --} Không lấy được dữ liệu Order/Payment: thông báo lỗi, không tự đánh PAID hoặc phát payment mới.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Business Rules}}\par\nobreak
+\textbf{BR-01 --} Chỉ nguồn dữ liệu server quyết định Order/Payment PAID/FAILED.
+
+\textbf{BR-02 --} Xác nhận dùng snapshot, không thay đổi giá/topping theo catalog hiện tại.
+
+\textbf{BR-03 --} Trang kết quả là read-only, không tạo thêm Payment khi tải lại.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Authorization / Security Rules}}\par\nobreak
+\textbf{SEC-01 --} Chỉ chủ sở hữu Order xem xác nhận; kiểm tra JWT/ownership.
+
+\textbf{SEC-02 --} Phương thức thanh toán hiển thị dạng che dữ liệu, không để lộ số thẻ đầy đủ/CVV.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Requirements}}\par\nobreak
+FR-PAY-005; FR-ORD-004; FR-AUTHZ-002
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related User Stories}}\par\nobreak
+US-PAY-05; US-ORD-04
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Acceptance Criteria}}\par\nobreak
+AC-US-PAY-05-01..04; AC-US-ORD-04-01..04
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Use Cases}}\par\nobreak
+UC-PAY-001; UC-ORD-002
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Endpoint / Interaction}}\par\nobreak
+Dữ liệu trả từ POST /payments và GET /orders/me
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Special Requirements / Notes}}\par\nobreak
+Không giả định endpoint receipt mới; trang xác nhận có thể nhận kết quả thanh toán và dữ liệu Order/lịch sử trong API đã có. \textbar{} Đề bài: Task 9
+\par
+
+% End of breakable Use Case table.
+
+
+\textbf{6.13. UC-PRO-001 -- Xem điểm tích lũy và thông tin ưu đãi}
+
+
+% Breakable representation of source 22-row 2-column Use Case table.
+
+\par\noindent\textit{Thuộc tính / Nội dung}\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Use Case ID}}\par\nobreak
+UC-PRO-001
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Use Case Name}}\par\nobreak
+Xem điểm tích lũy và thông tin ưu đãi
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Priority / Scope}}\par\nobreak
+SHOULD \textbar{} Nhóm Loyalty \& Promotion
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Goal / Brief Description}}\par\nobreak
+Customer tra cứu điểm tích lũy hiện có và thông tin coupon/giảm giá/điểm đã được ghi nhận trong các đơn của mình.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Primary Actor}}\par\nobreak
+Customer
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Secondary Actor}}\par\nobreak
+Không có
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Internal Supporting Components}}\par\nobreak
+Account Service, Loyalty Service
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Trigger}}\par\nobreak
+Customer mở mục Tài khoản/Điểm hoặc xem ưu đãi trong lịch sử Order.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Preconditions}}\par\nobreak
+\textbf{•} Customer có JWT hợp lệ.
+
+\textbf{•} Backend có User.loyaltyPoints và các Order snapshot liên quan.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Postconditions}}\par\nobreak
+Success: Hiển thị số điểm thật đang lưu ở backend và thông tin coupon, discount, pointsEarned của Order thuộc chính Customer.\\
+Failure: Không sửa điểm/ưu đãi và không lộ dữ liệu của tài khoản khác.\strut
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Main Success Flow}}\par\nobreak
+\textbf{1.} Customer mở thông tin tài khoản/điểm.
+
+\textbf{2.} Client gọi GET /auth/me với JWT (endpoint đề xuất trong Specification).
+
+\textbf{3.} Backend xác định userId từ JWT, đọc User.loyaltyPoints và chỉ trả dữ liệu thuộc tài khoản.
+
+\textbf{4.} Frontend hiển thị điểm hiện có.
+
+\textbf{5.} Khi Customer mở lịch sử đơn, GET /orders/me hiển thị coupon, discount và pointsEarned từng Order theo snapshot.
+
+\textbf{6.} Sau Payment PAID, làm mới thông tin sẽ phản ánh điểm đã cộng từ backend.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Alternative Flows}}\par\nobreak
+\textbf{AF-01 --} Chưa có Order đã PAID: hiển thị điểm khởi tạo 0 hoặc điểm thực tế; không phát sinh điểm mới.
+
+\textbf{AF-02 --} Order giảm giá nhưng chưa PAID: lịch sử vẫn phản ánh thông tin coupon/discount snapshot; pointsEarned chưa được cộng.
+
+\textbf{AF-03 --} Sau Payment SUCCESS: refresh để lấy số điểm mới, không tự cộng bằng phép tính client.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Exception Flows}}\par\nobreak
+\textbf{EF-01 --} JWT thiếu/hết hạn: 401; UI yêu cầu đăng nhập lại.
+
+\textbf{EF-02 --} Client yêu cầu điểm User khác bằng body/query: không trả dữ liệu người khác.
+
+\textbf{EF-03 --} API đọc dữ liệu lỗi: hiển thị lỗi; không đổi loyaltyPoints.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Business Rules}}\par\nobreak
+\textbf{BR-01 --} Điểm tích lũy chỉ được cộng khi Order chuyển PAID theo FR-PRO-003; không dùng số do frontend tự tính.
+
+\textbf{BR-02 --} Điểm đã cộng = floor(totalAfterDiscount / 10.000), tối đa một lần mỗi Order.
+
+\textbf{BR-03 --} Thông tin coupon/discount/pointsEarned là dữ liệu đọc từ server hoặc snapshot của từng Order.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Authorization / Security Rules}}\par\nobreak
+\textbf{SEC-01 --} Endpoint điểm cần JWT; userId lấy từ token.
+
+\textbf{SEC-02 --} Không có endpoint Customer tự cập nhật loyaltyPoints.
+
+\textbf{SEC-03 --} Chỉ xem thông tin lịch sử Order của chính mình.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Requirements}}\par\nobreak
+FR-PRO-005, 003; FR-ORD-004
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related User Stories}}\par\nobreak
+US-PRO-05; US-PRO-03 (quy tắc tích điểm)
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Acceptance Criteria}}\par\nobreak
+AC-US-PRO-05-01..04; AC-US-PRO-03-01..06
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Use Cases}}\par\nobreak
+UC-ORD-002; UC-PAY-001
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Endpoint / Interaction}}\par\nobreak
+GET /auth/me (SHOULD); GET /orders/me
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Special Requirements / Notes}}\par\nobreak
+GET /auth/me là endpoint SHOULD được gợi ý từ Specification; thông tin coupon trên lịch sử có thể dùng GET /orders/me. \textbar{} Đề bài: Task 9, 10 (mở rộng)
+\par
+
+% End of breakable Use Case table.
+
+
+\textbf{6.14. UC-PRO-002 -- Xem trước mã giảm giá trước khi tạo đơn}
+
+
+% Breakable representation of source 22-row 2-column Use Case table.
+
+\par\noindent\textit{Thuộc tính / Nội dung}\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Use Case ID}}\par\nobreak
+UC-PRO-002
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Use Case Name}}\par\nobreak
+Xem trước mã giảm giá trước khi tạo đơn
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Priority / Scope}}\par\nobreak
+SHOULD \textbar{} Nhóm Loyalty \& Promotion
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Goal / Brief Description}}\par\nobreak
+Customer nhập coupon cho giỏ hiện tại và xem mức giảm/tổng thanh toán dự kiến mà chưa tạo đơn hay giữ tài nguyên.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Primary Actor}}\par\nobreak
+Customer
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Secondary Actor}}\par\nobreak
+Không có
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Internal Supporting Components}}\par\nobreak
+Catalog Service, Coupon / Promotion Service
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Trigger}}\par\nobreak
+Customer chọn Xem trước hoặc Kiểm tra mã giảm giá tại giỏ.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Preconditions}}\par\nobreak
+\textbf{•} Customer có JWT hợp lệ.
+
+\textbf{•} Có các dòng giỏ và một couponCode để gửi đến backend.
+
+\textbf{•} Catalog và dữ liệu coupon có thể được đọc tại thời điểm preview.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Postconditions}}\par\nobreak
+Success: Backend trả subtotal, discount và total dự kiến hoặc lý do mã không áp dụng được; không thay đổi Order/Payment, stock, lượt coupon hay loyalty.\\
+Failure: Không tạo đơn và không phát sinh bất kỳ side effect giữ tài nguyên nào khi giỏ hoặc coupon không hợp lệ.\strut
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Main Success Flow}}\par\nobreak
+\textbf{1.} Customer nhập một coupon tại giỏ và yêu cầu xem trước.
+
+\textbf{2.} Frontend gửi JWT, các dòng giỏ và một mã tới POST /coupons/preview.
+
+\textbf{3.} Backend xác thực JWT và kiểm tra cấu trúc giỏ cùng size/topping/số lượng theo Catalog hiện tại.
+
+\textbf{4.} Backend lấy giá catalog, tính lại subtotal và chuẩn hóa couponCode (trim, không phân biệt hoa thường).
+
+\textbf{5.} Backend kiểm tra coupon tồn tại, hiệu lực theo UTC, minSubtotal, quota tổng và quota riêng của Customer.
+
+\textbf{6.} Nếu hợp lệ, backend tính discount FIXED/PERCENT half-up, giới hạn không vượt subtotal, total dự kiến có thể bằng 0 VND.
+
+\textbf{7.} Hệ thống trả số tiền dự kiến hoặc trạng thái không hợp lệ kèm lý do; không tạo Order/Payment/HELD CouponRedemption.
+
+\textbf{8.} Frontend hiển thị kết quả chỉ là dự kiến; khi Customer đặt hàng, UC-ORD-001 kiểm tra lại toàn bộ.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Alternative Flows}}\par\nobreak
+\textbf{AF-01 --} Coupon FIXED hợp lệ: discount = min(value, subtotal); total = subtotal − discount.
+
+\textbf{AF-02 --} Coupon PERCENT hợp lệ: tính phần trăm, làm tròn half-up, áp mức giảm tối đa nếu có.
+
+\textbf{AF-03 --} total dự kiến = 0 VND: vẫn hiển thị 0, không tự PAID/không cộng điểm.
+
+\textbf{AF-04 --} Nhiều lần preview/đổi lựa chọn: luôn tính mới, không trừ stock hoặc giữ coupon.
+
+\textbf{AF-05 --} Preview hợp lệ nhưng trước khi tạo Order coupon hết lượt/giá đổi: kết quả tạo Order có thể khác hoặc bị từ chối.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Exception Flows}}\par\nobreak
+\textbf{EF-01 --} Không có JWT: 401 UNAUTHORIZED.
+
+\textbf{EF-02 --} Giỏ không hợp lệ (mã Product/size/topping, quantity, trùng cấu hình): từ chối theo quy tắc validation giỏ; không tạo side effect.
+
+\textbf{EF-03 --} Coupon không tồn tại, chưa đến hạn, hết hạn hoặc dưới minSubtotal: trả kết quả không áp dụng được kèm lý do; không tự loại coupon rồi hiển thị như hợp lệ.
+
+\textbf{EF-04 --} Hết quota tổng/người: hiển thị không áp dụng được; không hứa giữ lượt.
+
+\textbf{EF-05 --} Client sửa subtotal/total/discountAmount: server bỏ qua và tính lại từ dữ liệu thật.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Business Rules}}\par\nobreak
+\textbf{BR-01 --} Preview thuộc SHOULD của FR-PRO-001; không tạo FR mới.
+
+\textbf{BR-02 --} Backend tính subtotal, discount, total theo FR-CAT-003/FR-PRO-002; tiền VND nguyên/Decimal, half-up.
+
+\textbf{BR-03 --} Kiểm tra coupon giống khi đặt, nhưng preview không giữ HELD/CONSUMED, không thay đổi stock/loyalty.
+
+\textbf{BR-04 --} Kết quả chỉ là dự kiến; lúc tạo Order kiểm tra lại giá, điều kiện coupon, quota và stock.
+
+\textbf{BR-05 --} Một request chỉ dùng tối đa một coupon; thời hạn kiểm tra theo UTC từ server.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Authorization / Security Rules}}\par\nobreak
+\textbf{SEC-01 --} POST /coupons/preview cần JWT; userId tính quota lấy từ token.
+
+\textbf{SEC-02 --} Client không thể ép discount/amount bằng field tự gửi.
+
+\textbf{SEC-03 --} Mã không tồn tại cần thông báo chung để hạn chế dò mã; rate limiting ở mức SHOULD.
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Requirements}}\par\nobreak
+FR-PRO-001 (nhánh SHOULD), 002, 004; FR-CAT-003; FR-CART-005
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related User Stories}}\par\nobreak
+US-PRO-07; US-PRO-01, 02, 04 (rule dùng lại)
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Acceptance Criteria}}\par\nobreak
+AC-US-PRO-07-01..09; AC-US-PRO-01-01..04; AC-US-PRO-02-01..06; AC-US-PRO-04-01..06
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Related Use Cases}}\par\nobreak
+UC-CART-001; UC-ORD-001; UC-PRO-001
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Endpoint / Interaction}}\par\nobreak
+POST /coupons/preview (SHOULD)
+\par
+
+\par\smallskip\noindent\textcolor{sgublue}{\textbf{Special Requirements / Notes}}\par\nobreak
+Nguồn chưa chốt HTTP status và response schema cho coupon preview không hợp lệ. Không tự quy định 200/400 hay tên field chi tiết; cần thống nhất ở API Design. Preview không cam kết giữ stock/coupon. \textbar{} Đề bài: Task 10 (mở rộng)
+\par
+
+% End of breakable Use Case table.
+
+
+\textbf{7. Ma trận truy vết Use Case ↔ User Story ↔ Functional Requirement}
+
+Bảng ghi US/FR chủ đạo và hỗ trợ; một FR có thể xuất hiện ở nhiều UC nếu là quy tắc xuyên suốt. Bảng này không áp đặt quan hệ UML include/extend chưa được chốt.
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.1902}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3988}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.4110}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Use Case}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{User Stories liên quan}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Functional Requirements liên quan}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+UC-AUTH-001
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+US-AUTH-01
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+FR-AUTH-001; FR-AUTHZ-001, 003 (quy tắc)
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+UC-AUTH-002
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+US-AUTH-02; US-AUTH-03 (hỗ trợ)
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+FR-AUTH-002, 003; FR-AUTHZ-001..003
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+UC-AUTH-003
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+US-AUTH-04; US-CART-04
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+FR-AUTH-004; FR-CART-004
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+UC-CAT-001
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+US-CAT-01; US-CAT-04; US-CAT-05 (seed)
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+FR-CAT-001, 004, 005
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+UC-CAT-002
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+US-CAT-02; US-CAT-03; US-CAT-04
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+FR-CAT-002, 003, 004
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+UC-CART-001
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+US-CART-01..04; US-CART-05 (kiểm tra khi đặt)
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+FR-CART-001..005; FR-CAT-003
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+UC-ORD-001
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+US-ORD-01, 02, 06, 07; US-CART-05; US-INV-01, 02; US-PRO-01, 02, 04
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+FR-ORD-001, 002, 006, 007; FR-CART-005; FR-INV-001, 002; FR-PRO-001, 002, 004; FR-AUTHZ-002, 003
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+UC-ORD-002
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+US-ORD-04; US-ORD-02; US-PRO-05 (thông tin trong lịch sử)
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+FR-ORD-004, 002; FR-PRO-005; FR-AUTHZ-002
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+UC-ORD-003
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+US-ORD-05, 07; US-INV-03; US-PRO-04
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+FR-ORD-005 (SHOULD), 007 (MUST); FR-INV-003; FR-PRO-004; FR-AUTHZ-002, 003
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+UC-ORD-004
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+US-ORD-03 (nhánh sau PAID); US-AUTHZ-01, 03 (quy tắc)
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+FR-ORD-003; FR-AUTHZ-001, 003
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+UC-PAY-001
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+US-PAY-01..04, 06; US-PRO-03, 04; US-INV-03
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+FR-PAY-001..004, 006; FR-PRO-003, 004; FR-INV-003; FR-ORD-003, 007 (MUST)
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+UC-PAY-002
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+US-PAY-05; US-ORD-04
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+FR-PAY-005; FR-ORD-004; FR-AUTHZ-002
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+UC-PRO-001
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+US-PRO-05; US-PRO-03 (quy tắc tích điểm)
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+FR-PRO-005, 003; FR-ORD-004
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+UC-PRO-002
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+US-PRO-07; US-PRO-01, 02, 04 (rule dùng lại)
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+FR-PRO-001 (nhánh SHOULD), 002, 004; FR-CAT-003; FR-CART-005
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{8. Ma trận bao phủ 40 Functional Requirements}
+
+Mọi FR trong Requirements Specification đều có vị trí trong ít nhất một Use Case hoặc supporting behavior; các yêu cầu không đại diện cho mục tiêu actor độc lập không bị biến thành UC riêng.
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.2331}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.7669}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR nguồn}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Được đặc tả tại / hình thức bao phủ}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-AUTH-001}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+UC-AUTH-001
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-AUTH-002}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+UC-AUTH-002
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-AUTH-003}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+UC-AUTH-002 + Security Rules mọi UC cần JWT
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-AUTH-004}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+UC-AUTH-003
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-AUTHZ-001}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Security Rules mọi UC và UC-ORD-004
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-AUTHZ-002}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+UC-ORD-001/002/003; UC-PAY-001/002
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-AUTHZ-003}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Business/Security Rules các UC nghiệp vụ
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-CAT-001}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+UC-CAT-001
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-CAT-002}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+UC-CAT-002
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-CAT-003}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+UC-CAT-002; UC-CART-001; UC-ORD-001; UC-PRO-002
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-CAT-004}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+UC-CAT-001/002
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-CAT-005}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Supporting seed / UC-CAT-001
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-CART-001}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+UC-CART-001
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-CART-002}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+UC-CART-001
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-CART-003}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+UC-CART-001
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-CART-004}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+UC-CART-001; UC-AUTH-003; UC-PAY-001
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-CART-005}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+UC-ORD-001 (revalidate Cart)
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-ORD-001}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+UC-ORD-001
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-ORD-002}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+UC-ORD-001/002
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-ORD-003}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+UC-ORD-004 + state rules UC-PAY-001/UC-ORD-003
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.2331}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.7669}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR nguồn}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Được đặc tả tại / hình thức bao phủ}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-ORD-004}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+UC-ORD-002; UC-PAY-002
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-ORD-005}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+UC-ORD-003
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-ORD-006}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+UC-ORD-001
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-ORD-007}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+FR-ORD-007 (MUST): UC-ORD-001 (thiết lập thời hạn và xử lý đơn cũ quá hạn khi tạo đơn mới); UC-ORD-003 (tác vụ tự động chuyển CANCELLED và giải phóng tài nguyên); UC-PAY-001 (kiểm tra expiresAt trước mỗi lần thanh toán mới).
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-INV-001}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+UC-ORD-001; UC-PAY-001
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-INV-002}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+UC-ORD-001 (atomic stock)
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-INV-003}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+UC-ORD-003; UC-PAY-001
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-INV-004}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Supporting inventory movement / transaction
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-PAY-001}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+UC-PAY-001
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-PAY-002}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+UC-PAY-001
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-PAY-003}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+UC-PAY-001
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-PAY-004}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+UC-PAY-001
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-PAY-005}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+UC-PAY-002
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-PAY-006}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Supporting mock fixtures UC-PAY-001
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-PRO-001}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+UC-ORD-001 (MUST apply); UC-PRO-002 (SHOULD preview)
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-PRO-002}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+UC-ORD-001; UC-PRO-002
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-PRO-003}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+UC-PAY-001; UC-PRO-001 (xem)
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-PRO-004}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+UC-ORD-001; UC-ORD-003; UC-PAY-001
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-PRO-005}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+UC-PRO-001; UC-ORD-002
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{FR-PRO-006}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Supporting coupon seed / UC-ORD-001/UC-PRO-002
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{9. Nguyên tắc nghiệp vụ xuyên suốt và ranh giới Use Case}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.2515}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.7485}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Chủ đề}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Quy ước áp dụng nhất quán}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Actor / quyền}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Guest truy cập endpoint public; Customer dùng JWT. Backend kiểm tra xác thực → sở hữu → trạng thái. Endpoint nội bộ dùng API Key riêng.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Giá / Cart}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+VND nguyên/Decimal, half-up. Client chỉ hiển thị tạm tính; server tính lại ở POST /orders và POST /coupons/preview.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Tồn kho}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Stock ở Product; trừ khi tạo Order PENDING, giữ ở PAYMENT\_FAILED; chỉ hoàn đúng một lần khi CANCELLED; không âm.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{State machine}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+PENDING→PAID/PAYMENT\_FAILED/CANCELLED; PAYMENT\_FAILED→PENDING/CANCELLED; PAID→PREPARING→READY→COMPLETED.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Payment}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Mock đồng bộ; mỗi Order nhiều FAILED nhưng tối đa một SUCCESS; replay cùng key không thực hiện side effect.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Coupon}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Một mã/Order; kiểm tra trước tạo đơn; HELD khi Order PENDING, CONSUMED khi PAID, RELEASED khi CANCELLED. Preview không HELD.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Loyalty}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Chỉ cộng khi PAID: floor(total/10.000), đúng một lần; đơn total=0 VND cộng 0.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Cart lifecycle}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Giữ khi đăng nhập, reload, 401, PENDING, PAYMENT\_FAILED và hủy; xóa sau PAID hoặc đăng xuất chủ động.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Technical Enablers}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Seed Product/Coupon, Docker Compose, README, Postman, Git, unit/integration/concurrency tests không được đưa thành UC actor độc lập.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thời hạn đơn chờ}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+FR-ORD-007 (MUST): Order PENDING/PAYMENT\_FAILED có thời hạn 15 phút từ createdAt, không gia hạn khi retry. Tác vụ quét mỗi phút, tự chuyển CANCELLED khi quá hạn và hoàn tài nguyên đúng một lần. Payment mới bị chặn sau expiresAt, kể cả khi tác vụ chưa chạy.
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{10. Supporting Acceptance Criteria Coverage}
+
+Bảng dưới đây tổng hợp độ bao phủ Acceptance Criteria cho các nhóm yêu cầu hỗ trợ bao gồm Authorization, Inventory và Operations/Seed trong hệ thống BrewLite.
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.2597}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3463}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3940}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nhóm yêu cầu}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Acceptance Criteria}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nơi bao phủ / Đặc tả}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Authorization \& Security}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+AC-US-AUTHZ-01..03
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Tất cả Use Case (Security Rules), UC-AUTH-002, UC-ORD-004
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Inventory \& Stock}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+AC-US-INV-01..04
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+UC-ORD-001, UC-ORD-003, UC-PAY-001
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Operations \& Seed}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+AC-US-CAT-05, AC-US-PRO-06
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+UC-CAT-001, Technical Enablers (Dữ liệu seed Catalog \& Coupon)
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\textbf{11. Điểm cần chốt ở API Design / lưu ý chất lượng đặc tả}
+
+1. POST /coupons/preview là SHOULD: US-PRO-07 chốt các hiệu ứng và kết quả dự kiến, nhưng chưa chốt HTTP status và response schema cho coupon/giỏ không hợp lệ. Không tự đặt tên field hay HTTP status ngoài yêu cầu đã nêu.
+
+2. POST /orders/:id/cancel, GET /auth/me là các endpoint bổ sung/đề xuất trong Requirements. Nếu nhóm bỏ một UC SHOULD, phải đồng bộ Catalog, các FR/US/AC và bảng phân quyền.
+
+3. UC-ORD-004 sử dụng POST /internal/orders/:id/advance + X-Internal-Key + body.from theo bản US--AC v2.1 và mục 11 của Requirements, thay vì ví dụ đường dẫn PATCH xuất hiện trong phần phân tích FR. Cần thống nhất contract cuối ở API Design.
+
+4. Requirements Specification có một câu kiểm chứng trong FR-ORD-003 dễ hiểu là PAYMENT\_FAILED cũng hoàn tồn; trong khi nghiệp vụ chi tiết FR-PAY-002, FR-INV-003, phần 11 và US--AC v2.1 chốt giữ tồn ở PAYMENT\_FAILED, chỉ hoàn khi CANCELLED. Các UC áp dụng quy tắc cụ thể đó; nhóm nên đồng bộ câu khác biệt khi xuất bản lại Requirements.
+
+5. Không tự thêm quy trình hoàn tiền sau PAID, delivery, UI Barista/Admin, OAuth, refresh token/logout-all-devices, payment callback hay gateway thật: tất cả ngoài phạm vi MVP.
+
+\end{document}

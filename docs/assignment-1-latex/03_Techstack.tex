@@ -1,0 +1,315 @@
+\documentclass[11pt,a4paper,oneside]{report}
+% Layout adapted from the supplied SGU Assignment_report.tex.
+% XeLaTeX supports native Vietnamese text and modern Unicode fonts.
+\usepackage[a4paper,left=24mm,right=22mm,top=33mm,bottom=28mm,headheight=40pt,headsep=9mm,footskip=13mm]{geometry}
+\usepackage{fontspec}
+\setmainfont{Tinos}
+\setsansfont{Noto Sans}
+\setmonofont{DejaVu Sans Mono}[Scale=0.85]
+\usepackage{amsmath,amssymb}
+\usepackage{longtable,booktabs,array,calc,tabularx,multirow}
+\usepackage{graphicx,pdfpages,rotating}
+\usepackage[table]{xcolor}
+\usepackage{float}
+\usepackage{enumitem}
+\usepackage{fancyhdr,lastpage}
+\usepackage{setspace}
+\usepackage{etoolbox}
+\usepackage{caption}
+\usepackage{hyperref}
+\definecolor{sgublue}{HTML}{173FAB}
+\hypersetup{colorlinks=true,linkcolor=black,urlcolor=sgublue,citecolor=black,pdftitle={BrewLite - Assignment 1},pdfauthor={Nhóm 3 - Trường Đại học Sài Gòn}}
+\setcounter{secnumdepth}{0} % Chapter numbers only; preserve source's own section numbering.
+\setcounter{tocdepth}{2}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt}
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.10}
+\setlength{\LTpre}{5pt}
+\setlength{\LTpost}{10pt}
+\AtBeginEnvironment{longtable}{\small}
+\emergencystretch=3em
+\sloppy
+\setlist{itemsep=1pt,parsep=0pt,topsep=4pt}
+\newcommand{\tightlist}{\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{%
+ \begin{tabular}{@{}cl@{}}
+ \includegraphics[width=9mm]{assets/branding/logoITSGUsmall.png} &
+ \begin{tabular}{@{}l@{}}{\scriptsize\sffamily\bfseries Trường Đại học Sài Gòn}\\[-1pt]{\scriptsize\sffamily\bfseries Khoa Công nghệ Thông tin}\end{tabular}
+ \end{tabular}}
+\fancyfoot[L]{{\scriptsize\sffamily Báo cáo Công nghệ phần mềm -- BrewLite | Nhóm 3}}
+\fancyfoot[R]{{\scriptsize\sffamily Trang \thepage /\pageref{LastPage}}}
+\renewcommand{\headrulewidth}{0.3pt}
+\renewcommand{\footrulewidth}{0.3pt}
+\fancypagestyle{plain}{\fancyhf{}\fancyfoot[L]{\scriptsize\sffamily BrewLite -- Assignment 1 | Nhóm 3}\fancyfoot[R]{\scriptsize\sffamily Trang \thepage /\pageref{LastPage}}\renewcommand{\headrulewidth}{0pt}\renewcommand{\footrulewidth}{0.3pt}}
+\captionsetup{font=small,labelfont=bf}
+
+\renewcommand{\contentsname}{Mục lục}
+
+\begin{document}
+\begin{titlepage}
+\begin{center}
+{\bfseries\small TRƯỜNG ĐẠI HỌC SÀI GÒN}\\[2pt]
+{\bfseries\small KHOA CÔNG NGHỆ THÔNG TIN}\\[16mm]
+\includegraphics[width=33mm]{assets/branding/logoITSGU.png}\\[17mm]
+{\color{sgublue}\LARGE\bfseries CÔNG NGHỆ PHẦN MỀM}\\[7mm]
+{\color{sgublue}\rule{0.9\textwidth}{0.8pt}}\\[4mm]
+{\color{sgublue}\large\bfseries TÀI LIỆU ASSIGNMENT 1}\\[3mm]
+{\color{sgublue}\Huge\bfseries BrewLite}\\[4mm]
+\parbox{0.94\textwidth}{\centering\color{sgublue}\Large\bfseries Techstack}\par\vspace{5mm}
+{\color{sgublue}\rule{0.9\textwidth}{0.8pt}}\\[15mm]
+\end{center}
+\begin{flushright}
+\begin{tabular}{@{}rl@{}}
+\textbf{Giảng viên:} & Từ Lãng Phiêu \\
+\textbf{Nhóm:} & Nhóm 3 \\
+\textbf{Môn học:} & Công nghệ phần mềm \\
+\end{tabular}
+\end{flushright}
+\vfill
+\begin{center}
+{\small\bfseries THÀNH VIÊN THỰC HIỆN}\\[3mm]
+\begin{tabular}{@{}ll@{}}
+ Nguyễn Châu Hoàng Khang & 3124410143 \\
+ Hoàng Văn Lập & 3124410184 \\
+ Nguyễn Khải Hoàng & 3124410106 \\
+ Nguyễn Đăng Thụy & 3124410352 \\
+ Cao Nguyễn Quốc Khánh & 3124410149 \\
+ Lâm Chí Khang & 3124410142 \\
+
+\end{tabular}
+\vfill
+{\small TP. HỒ CHÍ MINH, THÁNG 10/2026}
+\end{center}
+\end{titlepage}
+\pagenumbering{roman}
+\chapter*{DANH SÁCH THÀNH VIÊN VÀ PHÂN CÔNG}
+\noindent Nhóm 3 -- Trường Đại học Sài Gòn -- Môn Công nghệ phần mềm.
+\par\smallskip
+\textit{Cột Phân công để Chưa cập nhật khi chưa có phân nhiệm chính thức; vai trò lấy theo Project Charter.}
+\vspace{4mm}
+\begingroup\small
+\begin{longtable}{|>{\centering\arraybackslash}p{8mm}|p{41mm}|p{25mm}|p{36mm}|p{36mm}|}
+\hline
+\rowcolor{blue!9}\textbf{STT} & \textbf{Họ và tên} & \textbf{MSSV} & \textbf{Vai trò} & \textbf{Phân công} \\ \hline
+\endfirsthead
+\hline\rowcolor{blue!9}\textbf{STT} & \textbf{Họ và tên} & \textbf{MSSV} & \textbf{Vai trò} & \textbf{Phân công} \\ \hline
+\endhead
+1 & Nguyễn Châu Hoàng Khang & 3124410143 & Team Leader / Developer & \textit{Chưa cập nhật} \\ \hline
+2 & Hoàng Văn Lập & 3124410184 & Developer & \textit{Chưa cập nhật} \\ \hline
+3 & Nguyễn Khải Hoàng & 3124410106 & Developer & \textit{Chưa cập nhật} \\ \hline
+4 & Nguyễn Đăng Thụy & 3124410352 & Developer & \textit{Chưa cập nhật} \\ \hline
+5 & Cao Nguyễn Quốc Khánh & 3124410149 & Developer & \textit{Chưa cập nhật} \\ \hline
+6 & Lâm Chí Khang & 3124410142 & Developer & \textit{Chưa cập nhật} \\ \hline
+\end{longtable}
+\endgroup
+\clearpage
+\tableofcontents
+\clearpage
+\pagenumbering{arabic}
+\chapter{Techstack}
+% Auto-converted from BrewLite_Techstack.docx via pandoc 3.1.11.1.
+% Original wording and table data are retained.
+TECHSTACK DOCUMENTATION
+
+BrewLite \textbar{} Technology Stack \& Engineering Standards
+
+Phiên bản: v1.0 \textbar{} Ngày lập: 08/10/2026 \textbar{} Trạng thái: Hoàn thành
+
+\section{\texorpdfstring{\textbf{1. Mục đích}}{1. Mục đích}}\label{05-techstack:mux1ee5c-ux111uxedch}
+
+Tài liệu này thống nhất công nghệ, cách tổ chức source code và chuẩn phát triển cho nhóm BrewLite. Mục tiêu là triển khai đúng yêu cầu học phần với mức phức tạp vừa đủ: một Next.js web frontend, một NestJS REST backend, một database và cổng thanh toán giả lập. Không thiết kế microservices cho bài tập MVP.
+
+\section{\texorpdfstring{\textbf{2. Mức độ áp dụng công nghệ}}{2. Mức độ áp dụng công nghệ}}\label{05-techstack:mux1ee9c-ux111ux1ed9-uxe1p-dux1ee5ng-cuxf4ng-nghux1ec7}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.2700}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.7300}}@{}}
+\toprule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\textbf{Mức} & \textbf{Ý nghĩa} \\
+REQUIRED & Công nghệ bắt buộc theo đề giảng viên \\
+CORE & Nhóm đề xuất sử dụng ngay sau khi thống nhất \\
+OPTIONAL & Chỉ thêm khi có nhu cầu thực sự, không làm chặn MVP \\
+MOCK & Tích hợp giả lập, không chạy giao dịch thật \\
+FUTURE & Ngoài phạm vi phiên bản môn học \\
+\end{longtable}
+
+\section{\texorpdfstring{\textbf{3. Danh mục Techstack}}{3. Danh mục Techstack}}\label{05-techstack:danh-mux1ee5c-techstack}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.2433}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.2567}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.1812}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.3188}}@{}}
+\toprule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\textbf{Thành phần} & \textbf{Công nghệ / chọn lựa} & \textbf{Mức} & \textbf{Ghi chú} \\
+\textbf{Frontend} & Next.js + React + TypeScript & REQUIRED & Bắt buộc Next.js; React/TS là gợi ý trong đề \\
+\textbf{UI styling} & Tailwind CSS & CORE & Đề gợi ý \\
+\textbf{Client cart state} & Zustand & CORE & Chốt một phương án; đề chấp nhận cả hai \\
+\textbf{Fetch/server state} & Native Fetch API & OPTIONAL & Tránh thêm thư viện nếu chưa cần \\
+\textbf{Backend} & NestJS + TypeScript + REST/JSON & REQUIRED & Backend bắt buộc NestJS \\
+\textbf{Input validation} & class-validator + class-transformer & CORE & DTO và validate đầu vào \\
+\textbf{Authentication} & Passport JWT + bcrypt & CORE & JWT theo task 7; bcrypt hash password \\
+\textbf{Database} & PostgreSQL & CORE & Lựa chọn đề xuất, không phải bắt buộc \\
+\textbf{ORM} & Prisma & CORE & Đề cho Prisma hoặc TypeORM; chọn Prisma làm baseline đề xuất \\
+\textbf{Mock payment} & Mock Ví / Thẻ & MOCK & Không dùng tiền thật \\
+\textbf{Containerization} & Docker, Docker Compose & CORE & Sprint 3 bắt buộc chạy cùng frontend/backend/DB \\
+\textbf{Version control} & Git + GitHub & CORE & Branch protection và PR review \\
+\textbf{Task / Scrum} & Jira & CORE & Task và tiến độ sprint \\
+\textbf{API manual test} & Postman & CORE & Kiểm thử thủ công REST API của NestJS \\
+\textbf{Unit/integration test} & Jest + NestJS Testing Utilities & CORE & Kiểm thử logic nghiệp vụ, đặc biệt Task 10 \\
+\textbf{CI} & GitHub Actions & CORE & Tự động lint, test, build khi tạo/cập nhật PR \\
+\textbf{CD} & GitHub Actions & OPTIONAL & Tự động chuẩn bị bản phát hành sau khi merge vào main \\
+\textbf{Deployment local} & Docker Compose & CORE & Chạy toàn bộ hệ thống để demo và bàn giao \\
+\textbf{Deployment public} & Chưa lựa chọn hosting & FUTURE & Không bắt buộc theo đề \\
+\end{longtable}
+
+\section{\texorpdfstring{\textbf{4. Phiên bản baseline và chính sách}}{4. Phiên bản baseline và chính sách}}\label{05-techstack:phiuxean-bux1ea3n-baseline-vuxe0-chuxednh-suxe1ch}
+
+Các số phiên bản dưới đây là chủ trương cấu hình, chưa phải các phiên bản đã kiểm tra trong repo. Trước khi cài, dùng package.json/package-lock.json hiện có làm nguồn sự thật; không nâng cấp framework chỉ để khớp tài liệu.
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\textbf{Hạng mục} & \textbf{Quy tắc baseline} \\
+Node.js & Dùng bản LTS tương thích với Next.js và NestJS trong repository; ghi exact version vào .nvmrc hoặc README \\
+Next.js / NestJS & Ghi nhận phiên bản hiện có ở frontend/package.json và backend/package.json \\
+TypeScript / Tailwind / Prisma & Pin qua package-lock.json theo từng app \\
+PostgreSQL & Pin Docker image tag trong compose, không dùng latest \\
+CI / Docker & Chốt phiên bản sau khi chạy thử và commit cấu hình \\
+\end{longtable}
+
+\begin{itemize}
+\item
+  Commit lockfile cho từng workspace sử dụng npm; thay đổi major version cần được review.
+\item
+  Không commit file .env thật, mật khẩu, JWT\_SECRET hoặc dữ liệu cá nhân.
+\item
+  Những mục chưa cài đặt chỉ được mô tả là planned/proposed; không trình bày như đã hoạt động.
+\end{itemize}
+
+\section{\texorpdfstring{\textbf{5. Kiến trúc hệ thống}}{5. Kiến trúc hệ thống}}\label{05-techstack:kiux1ebfn-truxfac-hux1ec7-thux1ed1ng}
+
+Client (Next.js) → REST/JSON → NestJS (Auth / Product / Cart-Order / Payment / Loyalty modules) → PostgreSQL qua Prisma. NestJS gọi Mock Payment Service nội bộ. Một backend duy nhất (modular monolith), không có API gateway, event bus hay dịch vụ độc lập.
+
+Luồng nghiệp vụ: Menu → Chi tiết (size/topping) → Cart → JWT login (nếu cần) → POST /orders → mock POST /payments → xác nhận → /orders/me. API trả trạng thái rõ ràng để UI xử lý loading/empty/error.
+
+\section{\texorpdfstring{\textbf{6. API và dữ liệu tối thiểu}}{6. API và dữ liệu tối thiểu}}\label{05-techstack:api-vuxe0-dux1eef-liux1ec7u-tux1ed1i-thiux1ec3u}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+Method / Endpoint & Mô tả \\
+GET /products & Danh sách đồ uống \\
+GET /products/:id & Chi tiết và tùy chọn \\
+POST /auth/register & Đăng ký tài khoản \\
+POST /auth/login & Đăng nhập, cấp JWT \\
+POST /orders & Tạo đơn PENDING (JWT) \\
+POST /payments & Thanh toán mock có Idempotency-Key \\
+GET /orders/me & Lịch sử đơn của tài khoản \\
+\end{longtable}
+
+Thực thể tối thiểu do đề cung cấp: Product(id, name, price, imageUrl, stock); User(id, email, passwordHash, loyaltyPoints); Order(id, userId, status, total, createdAt); OrderItem(id, orderId, productId, size, qty, lineTotal); Payment(id, orderId, idempotencyKey, amount, method). Cần bổ sung bảng/field quan hệ cho topping, coupon và inventory version theo thiết kế ERD, không xem các thuộc tính ví dụ là schema cuối cùng.
+
+\section{\texorpdfstring{\textbf{7. Chuẩn xử lý nghiệp vụ Task 10}}{7. Chuẩn xử lý nghiệp vụ Task 10}}\label{05-techstack:chuux1ea9n-xux1eed-luxfd-nghiux1ec7p-vux1ee5-task-10}
+
+\begin{quote}
+- State machine: PENDING → PAID → PREPARING → READY → COMPLETED; cho phép PAYMENT\_FAILED, CANCELLED theo sơ đồ của đề; mọi transition khác phải bị chặn.
+
+- Idempotency: lưu khóa yêu cầu và enforce uniqueness trong DB; cùng key + cùng payload không tạo giao dịch/đơn kép; khác payload phải bị từ chối an toàn.
+
+- Concurrency: transaction + optimistic locking hoặc atomic stock decrement bảo đảm không bán vượt tồn kho; phải có test đặt song song.
+
+- Promotion/Loyalty: kiểm tra mã giảm giá hợp lệ, cộng điểm chỉ sau khi đơn PAID; không cộng trùng khi retry.
+\end{quote}
+
+\section{\texorpdfstring{\textbf{8. Cấu trúc thư mục dự kiến}}{8. Cấu trúc thư mục dự kiến}}\label{05-techstack:cux1ea5u-truxfac-thux1b0-mux1ee5c-dux1ef1-kiux1ebfn}
+
+brewlite/
+
+frontend/ \# Next.js
+
+backend/ \# NestJS
+
+docs/ \# Charter, requirements, ERD, use cases, Techstack
+
+docker-compose.yml \# Tích hợp 3 dịch vụ ở Sprint 3
+
+.env.example \# Mẫu cấu hình không chứa secrets
+
+README.md
+
+.gitignore
+
+Lưu ý: chỉ thêm folder/file chưa tồn tại khi thực sự dùng; cấu trúc cần phản ánh repository, không tự nhận là đã triển khai.
+
+\section{\texorpdfstring{\textbf{9. Workflow \& engineering standards}}{9. Workflow \& engineering standards}}\label{05-techstack:workflow-engineering-standards}
+
+\begin{quote}
+- Nhánh ổn định: main; nhánh tích hợp: dev; tạo nhánh ngắn hạn từ dev theo issue Jira (ví dụ feat/SCRUM-9-project-docs).
+
+- Commit gắn issue key, ví dụ: SCRUM-9 docs: thêm Project Charter và Techstack. Automation Jira phụ thuộc cấu hình tích hợp hiện có.
+
+- Tạo PR từ feature → dev; ít nhất một thành viên khác review, check build/test trước khi merge; không push trực tiếp main/dev nếu protected.
+
+- Cuối Sprint sau review/QA: PR dev → main để tạo bản bàn giao ổn định.
+
+- Format TypeScript nhất quán, ESLint/Prettier theo repository; DTO/API contract và migration phải review.
+
+- Các pull request thay đổi business logic cần cập nhật test và tài liệu liên quan.
+\end{quote}
+
+\section{\texorpdfstring{\textbf{10. Kiểm thử và Definition of Done}}{10. Kiểm thử và Definition of Done}}\label{05-techstack:kiux1ec3m-thux1eed-vuxe0-definition-of-done}
+
+\begin{quote}
+- Unit tests: giá size/topping, tính total, state transitions, valid coupon/loyalty.
+
+- Integration tests: auth JWT, create order, payment success/failure, order history; validate input.
+
+- Concurrency/idempotency tests: cùng key 2 lần chỉ một kết quả thanh toán; nhiều yêu cầu cùng lúc không vượt stock.
+
+- DoD: code build được; acceptance criteria đạt; Git commit + PR review; API validate, UI loading/error; README có hướng dẫn chạy.
+\end{quote}
+
+\section{\texorpdfstring{\textbf{11. Rủi ro kỹ thuật và quyết định còn mở}}{11. Rủi ro kỹ thuật và quyết định còn mở}}\label{05-techstack:rux1ee7i-ro-kux1ef9-thuux1eadt-vuxe0-quyux1ebft-ux111ux1ecbnh-cuxf2n-mux1edf}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\textbf{Quyết định} & \textbf{Trạng thái} \\
+ORM & Đề xuất Prisma; nhóm có thể chọn TypeORM nếu thống nhất trước khi xây ERD/migration \\
+Cart storage & Đề xuất Zustand; Context là lựa chọn hợp lệ \\
+Loyalty + promotions schema & Sẽ khóa sau Requirements/ERD \\
+Node/Next/Nest exact versions & Cần kiểm tra package.json thực tế \\
+Ngày triển khai Docker và CI & Docker Compose bắt buộc trước bàn giao; CI tùy chọn \\
+\end{longtable}
+
+\section{\texorpdfstring{\textbf{12. Tài liệu liên quan}}{12. Tài liệu liên quan}}\label{05-techstack:tuxe0i-liux1ec7u-liuxean-quan}
+
+\begin{quote}
+- BrewLite -- đề bài Công nghệ phần mềm VER 1.0 (nguồn yêu cầu gốc).
+
+- Project\_Charter\_BrewLite; Requirements/Use Case Specification; ERD (sẽ được cập nhật); README.md.
+\end{quote}
+
+\end{document}

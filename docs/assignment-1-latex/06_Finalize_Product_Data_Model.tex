@@ -1,0 +1,917 @@
+\documentclass[11pt,a4paper,oneside]{report}
+% Layout adapted from the supplied SGU Assignment_report.tex.
+% XeLaTeX supports native Vietnamese text and modern Unicode fonts.
+\usepackage[a4paper,left=24mm,right=22mm,top=33mm,bottom=28mm,headheight=40pt,headsep=9mm,footskip=13mm]{geometry}
+\usepackage{fontspec}
+\setmainfont{Tinos}
+\setsansfont{Noto Sans}
+\setmonofont{DejaVu Sans Mono}[Scale=0.85]
+\usepackage{amsmath,amssymb}
+\usepackage{longtable,booktabs,array,calc,tabularx,multirow}
+\usepackage{graphicx,pdfpages,rotating}
+\usepackage[table]{xcolor}
+\usepackage{float}
+\usepackage{enumitem}
+\usepackage{fancyhdr,lastpage}
+\usepackage{setspace}
+\usepackage{etoolbox}
+\usepackage{caption}
+\usepackage{hyperref}
+\definecolor{sgublue}{HTML}{173FAB}
+\hypersetup{colorlinks=true,linkcolor=black,urlcolor=sgublue,citecolor=black,pdftitle={BrewLite - Assignment 1},pdfauthor={Nhóm 3 - Trường Đại học Sài Gòn}}
+\setcounter{secnumdepth}{0} % Chapter numbers only; preserve source's own section numbering.
+\setcounter{tocdepth}{2}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt}
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.10}
+\setlength{\LTpre}{5pt}
+\setlength{\LTpost}{10pt}
+\AtBeginEnvironment{longtable}{\small}
+\emergencystretch=3em
+\sloppy
+\setlist{itemsep=1pt,parsep=0pt,topsep=4pt}
+\newcommand{\tightlist}{\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{%
+ \begin{tabular}{@{}cl@{}}
+ \includegraphics[width=9mm]{assets/branding/logoITSGUsmall.png} &
+ \begin{tabular}{@{}l@{}}{\scriptsize\sffamily\bfseries Trường Đại học Sài Gòn}\\[-1pt]{\scriptsize\sffamily\bfseries Khoa Công nghệ Thông tin}\end{tabular}
+ \end{tabular}}
+\fancyfoot[L]{{\scriptsize\sffamily Báo cáo Công nghệ phần mềm -- BrewLite | Nhóm 3}}
+\fancyfoot[R]{{\scriptsize\sffamily Trang \thepage /\pageref{LastPage}}}
+\renewcommand{\headrulewidth}{0.3pt}
+\renewcommand{\footrulewidth}{0.3pt}
+\fancypagestyle{plain}{\fancyhf{}\fancyfoot[L]{\scriptsize\sffamily BrewLite -- Assignment 1 | Nhóm 3}\fancyfoot[R]{\scriptsize\sffamily Trang \thepage /\pageref{LastPage}}\renewcommand{\headrulewidth}{0pt}\renewcommand{\footrulewidth}{0.3pt}}
+\captionsetup{font=small,labelfont=bf}
+
+\renewcommand{\contentsname}{Mục lục}
+
+\begin{document}
+\begin{titlepage}
+\begin{center}
+{\bfseries\small TRƯỜNG ĐẠI HỌC SÀI GÒN}\\[2pt]
+{\bfseries\small KHOA CÔNG NGHỆ THÔNG TIN}\\[16mm]
+\includegraphics[width=33mm]{assets/branding/logoITSGU.png}\\[17mm]
+{\color{sgublue}\LARGE\bfseries CÔNG NGHỆ PHẦN MỀM}\\[7mm]
+{\color{sgublue}\rule{0.9\textwidth}{0.8pt}}\\[4mm]
+{\color{sgublue}\large\bfseries TÀI LIỆU ASSIGNMENT 1}\\[3mm]
+{\color{sgublue}\Huge\bfseries BrewLite}\\[4mm]
+\parbox{0.94\textwidth}{\centering\color{sgublue}\Large\bfseries Finalize Product Data Model}\par\vspace{5mm}
+{\color{sgublue}\rule{0.9\textwidth}{0.8pt}}\\[15mm]
+\end{center}
+\begin{flushright}
+\begin{tabular}{@{}rl@{}}
+\textbf{Giảng viên:} & Từ Lãng Phiêu \\
+\textbf{Nhóm:} & Nhóm 3 \\
+\textbf{Môn học:} & Công nghệ phần mềm \\
+\end{tabular}
+\end{flushright}
+\vfill
+\begin{center}
+{\small\bfseries THÀNH VIÊN THỰC HIỆN}\\[3mm]
+\begin{tabular}{@{}ll@{}}
+ Nguyễn Châu Hoàng Khang & 3124410143 \\
+ Hoàng Văn Lập & 3124410184 \\
+ Nguyễn Khải Hoàng & 3124410106 \\
+ Nguyễn Đăng Thụy & 3124410352 \\
+ Cao Nguyễn Quốc Khánh & 3124410149 \\
+ Lâm Chí Khang & 3124410142 \\
+
+\end{tabular}
+\vfill
+{\small TP. HỒ CHÍ MINH, THÁNG 10/2026}
+\end{center}
+\end{titlepage}
+\pagenumbering{roman}
+\chapter*{DANH SÁCH THÀNH VIÊN VÀ PHÂN CÔNG}
+\noindent Nhóm 3 -- Trường Đại học Sài Gòn -- Môn Công nghệ phần mềm.
+\par\smallskip
+\textit{Cột Phân công để Chưa cập nhật khi chưa có phân nhiệm chính thức; vai trò lấy theo Project Charter.}
+\vspace{4mm}
+\begingroup\small
+\begin{longtable}{|>{\centering\arraybackslash}p{8mm}|p{41mm}|p{25mm}|p{36mm}|p{36mm}|}
+\hline
+\rowcolor{blue!9}\textbf{STT} & \textbf{Họ và tên} & \textbf{MSSV} & \textbf{Vai trò} & \textbf{Phân công} \\ \hline
+\endfirsthead
+\hline\rowcolor{blue!9}\textbf{STT} & \textbf{Họ và tên} & \textbf{MSSV} & \textbf{Vai trò} & \textbf{Phân công} \\ \hline
+\endhead
+1 & Nguyễn Châu Hoàng Khang & 3124410143 & Team Leader / Developer & \textit{Chưa cập nhật} \\ \hline
+2 & Hoàng Văn Lập & 3124410184 & Developer & \textit{Chưa cập nhật} \\ \hline
+3 & Nguyễn Khải Hoàng & 3124410106 & Developer & \textit{Chưa cập nhật} \\ \hline
+4 & Nguyễn Đăng Thụy & 3124410352 & Developer & \textit{Chưa cập nhật} \\ \hline
+5 & Cao Nguyễn Quốc Khánh & 3124410149 & Developer & \textit{Chưa cập nhật} \\ \hline
+6 & Lâm Chí Khang & 3124410142 & Developer & \textit{Chưa cập nhật} \\ \hline
+\end{longtable}
+\endgroup
+\clearpage
+\tableofcontents
+\clearpage
+\pagenumbering{arabic}
+\chapter{Finalize Product Data Model}
+% Auto-converted from BrewLite_Finalize_Product_Data_Model.docx via pandoc 3.1.11.1.
+% Original wording and table data are retained.
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thông tin}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Giá trị}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Mục tiêu task
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Đối chiếu ERD, chốt các bảng/field phục vụ Product, Size và Topping
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Loại tài liệu
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Đề xuất thiết kế hoàn chỉnh để nhóm duyệt và triển khai migration
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Ngày rà soát
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+19/10/2026
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Nguồn hiện hành
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+ERD.pdf (3 trang); Requirements Specification v3.0; User Stories \& AC v2.2; Use Case Specification v3.0
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Phạm vi
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Catalog và các điểm liên quan tới Order snapshot / Inventory; chưa tạo Prisma schema, migration hoặc seed
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Tình trạng
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Chốt ở mức phân tích theo nguồn hiện có; nhóm cần xác nhận trước khi đưa vào nhánh chung
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\section{1. Kết luận thiết kế}\label{06-product-data-model:kux1ebft-luux1eadn-thiux1ebft-kux1ebf}
+
+ERD đã có các thực thể đúng cho luồng MVP: products, toppings, order\_items, order\_item\_toppings và inventory\_movements. Không phát hiện nhu cầu nghiệp vụ bắt buộc phải tạo bảng sizes, product\_sizes, product\_toppings, topping\_inventories hoặc carts.
+
+\begin{itemize}
+\item
+  Product là thực thể bán một ly đồ uống; giá cơ bản ứng với size S; stock không âm và đếm theo Product (đơn vị ly).
+\item
+  Size dùng enum drink\_size (S/M/L) với hệ số backend cố định 100/120/140; size S là lựa chọn mặc định ở UI.
+\item
+  Topping là bảng dùng chung toàn menu, có mã duy nhất và giá cộng thêm cố định; không có stock riêng.
+\item
+  OrderItem và OrderItemTopping lưu ảnh chụp bất biến tại thời điểm tạo đơn để không bị ảnh hưởng bởi chỉnh sửa Catalog sau này.
+\item
+  Các chỉnh sửa cần làm rõ chủ yếu là khóa, NOT NULL, CHECK, UNIQUE, FK, quy tắc xóa và validation transaction.
+\end{itemize}
+
+\section{2. Ranh giới nghiệp vụ và những bảng không tạo}\label{06-product-data-model:ranh-giux1edbi-nghiux1ec7p-vux1ee5-vuxe0-nhux1eefng-bux1ea3ng-khuxf4ng-tux1ea1o}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Đối tượng}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Quyết định}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Giải thích}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Product
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Bảng products
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Có định danh, tên, giá cơ bản, ảnh, stock, thời điểm tạo.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Size
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+ENUM drink\_size
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+S/M/L cố định, không có giá riêng cho từng món/size. Hệ số trong backend.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Topping
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Bảng toppings
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Dùng chung toàn menu, giá cộng thêm không nhân size.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+ProductSize / ProductTopping
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Không tạo trong MVP
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Không có yêu cầu quản trị size theo món hay whitelist topping theo món.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Cart / CartItem
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Không tạo trên PostgreSQL
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Giỏ ở client Zustand/localStorage; tạo Order mới gửi cấu hình lên backend.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Category / ToppingStock
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Không bổ sung
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Không được chỉ định trong ERD/nguồn yêu cầu của phạm vi này.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+InventoryMovement
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Bảng tùy phạm vi SHOULD
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+ERD có sẵn, dùng đối soát nếu triển khai FR-INV-004; không phải tồn kho topping.
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\section{3. Data dictionary -- mô hình được chốt}\label{06-product-data-model:data-dictionary-muxf4-huxecnh-ux111ux1b0ux1ee3c-chux1ed1t}
+
+\subsection{3.1 products}\label{06-product-data-model:products}
+
+Bảng nguồn cho giá cơ bản và tồn kho; giữ đúng 6 field như ERD. Các giả định NOT NULL/default nêu dưới đây là đề xuất triển khai phải phản ánh trong migration.
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Field (ERD)}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Kiểu}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Ý nghĩa \& ràng buộc thiết kế}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+id
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+uuid
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+PK, NOT NULL; đồng thời là mã định danh sản phẩm dùng bởi API.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+name
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+varchar(255)
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+NOT NULL; tên đồ uống hiển thị trên menu.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+base\_price\_vnd
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+bigint
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+NOT NULL, CHECK \textgreater= 0; giá size S; VND nguyên, không FLOAT.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+image\_url
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+varchar(2048)
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Đường dẫn ảnh; đề xuất NOT NULL trong dữ liệu seed, FE xử lý lỗi ảnh bằng fallback.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+stock
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+int
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+NOT NULL DEFAULT 0, CHECK \textgreater= 0; khả dụng theo Product, mọi size/topping cùng trừ.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+created\_at
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+timestamptz
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+NOT NULL DEFAULT CURRENT\_TIMESTAMP; lưu thời điểm UTC.
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+Không tự thêm category\_id, sku, status, size\_price hoặc topping\_stock vì chưa có bằng chứng nghiệp vụ cần các field này. Trạng thái còn hàng là giá trị suy ra stock \textgreater{} 0; không cần thêm is\_available độc lập.
+
+\subsection{3.2 toppings}\label{06-product-data-model:toppings}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Field (ERD)}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Kiểu}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Ý nghĩa \& ràng buộc thiết kế}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+id
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+uuid
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+PK, NOT NULL.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+code
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+varchar(50)
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+NOT NULL, UNIQUE; mã nghiệp vụ ổn định để seed và giao tiếp API.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+name
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+varchar(255)
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+NOT NULL; tên topping hiển thị.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+price\_vnd
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+bigint
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+NOT NULL, CHECK \textgreater= 0; khoản cộng thêm / ly; không chịu hệ số size.
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+Khuyến nghị seed chuẩn hóa code và dùng upsert theo code, nhưng cách viết hoa/chữ thường là quy ước kỹ thuật cần nhóm thống nhất; tài liệu chỉ bắt buộc mã duy nhất. Không có stock, product\_id hoặc created\_at trên bảng toppings hiện tại.
+
+\subsection{3.3 drink\_size}\label{06-product-data-model:drink_size}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Enum}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Hệ số giá}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Cơ chế sử dụng}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+S
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+100\%
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Lựa chọn mặc định trên UI; giá bằng base\_price\_vnd.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+M
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+120\%
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Nhân hệ số trên giá cơ bản trước khi cộng topping.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+L
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+140\%
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Nhân hệ số trên giá cơ bản trước khi cộng topping.
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+Hệ số là cấu hình backend; API GET /products/:id cung cấp đủ danh sách size/hệ số cho frontend. Không lưu ba hệ số trong bảng products và không tạo bảng sizes. Khi đặt, OrderItem lưu size cùng size\_percent\_snapshot.
+
+\subsection{3.4 order\_items -- các field liên quan tới Product và Size}\label{06-product-data-model:order_items-cuxe1c-field-liuxean-quan-tux1edbi-product-vuxe0-size}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Field (ERD)}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Kiểu}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Ý nghĩa \& ràng buộc thiết kế}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+id
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+uuid
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+PK.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+order\_id
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+uuid
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+FK → orders.id, NOT NULL.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+product\_id
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+uuid
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+FK → products.id, NOT NULL; hạn chế xóa Product đã được tham chiếu.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+product\_name\_snapshot
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+varchar(255)
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+NOT NULL; tên sản phẩm tại lúc tạo đơn.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+size
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+drink\_size
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+NOT NULL, một trong S/M/L.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+size\_percent\_snapshot
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+int
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+NOT NULL; snapshot 100/120/140 tương ứng size.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+base\_price\_snapshot\_vnd
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+bigint
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+NOT NULL, CHECK \textgreater= 0; giá cơ bản lúc đặt.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+unit\_price\_vnd
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+bigint
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+NOT NULL, CHECK \textgreater= 0; giá cuối của một ly (đã cộng topping).
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+quantity
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+int
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+NOT NULL, CHECK 1..10.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+line\_total\_vnd
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+bigint
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+NOT NULL, CHECK \textgreater= 0; bằng unit\_price\_vnd × quantity.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+created\_at
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+timestamptz
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+NOT NULL DEFAULT CURRENT\_TIMESTAMP.
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+Không áp UNIQUE(product\_id, order\_id): cùng Product được phép có nhiều OrderItem với size hoặc tập topping khác nhau. Việc trùng đúng cấu hình trong một giỏ phải bị loại khi tạo Order, không thể dùng UNIQUE đơn giản khi topping nằm ở bảng con.
+
+\subsection{3.5 order\_item\_toppings -- snapshot topping}\label{06-product-data-model:order_item_toppings-snapshot-topping}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Field (ERD)}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Kiểu}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Ý nghĩa \& ràng buộc thiết kế}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+id
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+uuid
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+PK.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+order\_item\_id
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+uuid
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+FK → order\_items.id, NOT NULL.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+topping\_id
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+uuid
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+FK → toppings.id, NOT NULL.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+topping\_code\_snapshot
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+varchar(50)
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+NOT NULL; mã lúc đặt.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+topping\_name\_snapshot
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+varchar(255)
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+NOT NULL; tên lúc đặt.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+topping\_price\_snapshot\_vnd
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+bigint
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+NOT NULL, CHECK \textgreater= 0; giá topping lúc đặt.
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+UNIQUE(order\_item\_id, topping\_id) chống trùng loại topping. Giới hạn tối đa 3 topping/orderItem cần kiểm tra tại backend khi tạo Order; thao tác ghi OrderItem và OrderItemTopping ở cùng transaction.
+
+\subsection{3.6 inventory\_movements -- quan hệ hỗ trợ}\label{06-product-data-model:inventory_movements-quan-hux1ec7-hux1ed7-trux1ee3}
+
+ERD đã có: id (uuid), product\_id (uuid), order\_id (uuid), type (inventory\_movement\_type), reason (inventory\_movement\_reason), quantity\_delta (int), created\_at (timestamptz). Đối soát biến động tồn kho mang ưu tiên SHOULD (FR-INV-004). Nếu triển khai: UNIQUE(order\_id, product\_id, type), lưu cùng transaction với trừ/hoàn stock, không sửa/xóa lịch sử. Stock chính thức vẫn nằm ở products.stock.
+
+\section{4. Quan hệ ERD và chính sách bảo toàn lịch sử}\label{06-product-data-model:quan-hux1ec7-erd-vuxe0-chuxednh-suxe1ch-bux1ea3o-touxe0n-lux1ecbch-sux1eed}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Quan hệ}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Bội số}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nguyên tắc}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+products → order\_items
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+1 → N
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+OrderItem giữ FK product\_id và product\_name\_snapshot, base\_price\_snapshot\_vnd.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+toppings → order\_item\_toppings
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+1 → N
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Mỗi topping có thể xuất hiện ở nhiều dòng đơn; snapshot code/name/price.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+order\_items → order\_item\_toppings
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+1 → 0..3 theo nghiệp vụ
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Số lượng tối đa 3 được kiểm tra ở backend.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+products → inventory\_movements
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+1 → N (SHOULD)
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Theo dõi số ly giữ và hoàn theo từng sản phẩm.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+orders → order\_items
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+1 → N
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Tạo đơn cùng toàn bộ dòng và snapshot trong một transaction.
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+FK từ OrderItem/OrderItemTopping tới catalog nên dùng hành vi ngăn xóa (RESTRICT/NO ACTION) đối với dữ liệu đã tham chiếu. MVP không cung cấp tính năng xóa Product/Topping; không dùng ON DELETE CASCADE khiến lịch sử mất. Các snapshot không được cập nhật khi tên/giá của catalog thay đổi.
+
+\section{5. Quy tắc tính giá và kiểm tra dữ liệu}\label{06-product-data-model:quy-tux1eafc-tuxednh-giuxe1-vuxe0-kiux1ec3m-tra-dux1eef-liux1ec7u}
+
+unit\_price\_vnd = round\_half\_up(base\_price\_vnd × size\_percent / 100) + Σ(topping.price\_vnd)
+
+line\_total\_vnd = unit\_price\_vnd × quantity; làm tròn trên một ly trước khi nhân số lượng.
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Kịch bản}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Kết quả kỳ vọng}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Base 45.000, S, không topping, qty=1
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+45.000 VND
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Base 45.000, L, không topping, qty=1
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+63.000 VND
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Base 45.000, M, topping 5.000 và 7.000, qty=2
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Đơn giá 66.000; thành tiền 132.000 VND
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+4 topping khác nhau hoặc cùng topping 2 lần
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+400 VALIDATION\_ERROR/INVALID\_CART theo endpoint
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Size ngoài S/M/L hoặc quantity 0, 11
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+400 VALIDATION\_ERROR/INVALID\_CART theo endpoint
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Client sửa giá, đơn giá hoặc tổng tiền
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Backend bỏ qua giá client; lấy catalog và tính lại
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Đổi tên/giá Product hoặc Topping sau tạo đơn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Snapshot đơn cũ và số tiền không đổi
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+Để tránh sai số, tất cả giá VND dùng kiểu nguyên BIGINT; các phép toán trên backend cần thao tác kiểu số chính xác (BigInt/Decimal) và xử lý serialize khi trả JSON, không thực hiện phép nhân/round bằng float. Tài liệu cho phép số nguyên hoặc Decimal; lựa chọn BIGINT là giữ nguyên ERD hiện tại.
+
+\section{6. Ma trận constraint -- tầng dữ liệu và tầng nghiệp vụ}\label{06-product-data-model:ma-trux1eadn-constraint-tux1ea7ng-dux1eef-liux1ec7u-vuxe0-tux1ea7ng-nghiux1ec7p-vux1ee5}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Quy tắc}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Tầng bảo vệ chính}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Yêu cầu triển khai}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Product PK, Topping PK, FK các bảng con
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+PostgreSQL
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+PRIMARY KEY / FOREIGN KEY, cấm xóa cascade dữ liệu lịch sử.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+toppings.code duy nhất
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+PostgreSQL
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+UNIQUE(code); chuẩn hóa mã trước seed nếu nhóm chọn.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Giá và stock không âm
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+PostgreSQL
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+CHECK base\_price\_vnd \textgreater=0, price\_vnd \textgreater=0, stock \textgreater=0; các snapshot tiền \textgreater=0.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Qty 1..10
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+PostgreSQL + NestJS
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+CHECK order\_items.quantity BETWEEN 1 AND 10; validate request.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Không trùng topping trong một OrderItem
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+PostgreSQL + NestJS
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+UNIQUE(order\_item\_id,topping\_id); backend kiểm tra list ID.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Tối đa 3 topping / ly
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+NestJS transaction
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Kiểm tra tổng số ID khác nhau \textless=3, không đủ bằng CHECK đơn giản.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Giá và tổng dòng nhất quán
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+NestJS transaction
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Tính từ catalog trước ghi; snapshot; đối chiếu tổng dòng; khóa bất biến.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Stock không oversell / nhiều size cùng Product
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+UPDATE có điều kiện + transaction
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Gộp quantity theo Product, chỉ trừ khi stock \textgreater= tổng qty; rollback toàn bộ nếu thiếu.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Stock không phân biệt Size/Topping
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+NestJS / domain
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Không tách kho theo variant hoặc topping.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Public API không lộ số tồn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+NestJS DTO
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Trả trạng thái available = stock \textgreater0, không serialize stock trong GET public.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Menu và chi tiết công khai
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+NestJS auth/DTO
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+GET /products và GET /products/:id không yêu cầu JWT.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Seed chạy lặp an toàn
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Seed script
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Mã topping UNIQUE, Product cần ID ổn định hoặc khóa seed xác định để tránh trùng.
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\section{7. Đối chiếu tài liệu và quyết định}\label{06-product-data-model:ux111ux1ed1i-chiux1ebfu-tuxe0i-liux1ec7u-vuxe0-quyux1ebft-ux111ux1ecbnh}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Kết luận}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nguồn đối chiếu}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Product lưu tên, ảnh, base price, stock
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+ERD.pdf tr.1--2; FR-CAT-001, FR-CAT-004; Domain Concept §10.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Enum Size S/M/L, hệ số 100/120/140, không bảng Size
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+ERD.pdf tr.3; FR-CAT-002/003; BR-013; Domain Concept §10; AC-US-CAT-02-01..03.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Topping dùng chung, code unique, không stock
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+ERD.pdf tr.1--2; FR-CAT-002; BR-015; Domain Concept §10.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Giá động do server chốt, rounding half-up
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+FR-CAT-003; BR-014, BR-016; AC-US-CAT-03-01..05; UC-CAT-002.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Snapshot OrderItem / OrderItemTopping
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+ERD.pdf tr.1--2; FR-ORD-002; BR-026; AC-US-ORD-02-01..04; UC-ORD-001.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Stock gộp theo Product, không oversell
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+FR-INV-001/002; BR-031..034; AC-US-INV-01-01..04; UC-ORD-001.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Seed Product/Topping và trường hợp biên
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+FR-CAT-005; AC-US-CAT-05-01..04; UC-CAT-001.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Cart không có bảng tại backend
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+FR-CART-001/004; BR-020/021; UC-CART-001.
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\section{8. Các quyết định được phân loại rõ}\label{06-product-data-model:cuxe1c-quyux1ebft-ux111ux1ecbnh-ux111ux1b0ux1ee3c-phuxe2n-loux1ea1i-ruxf5}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Đã có căn cứ để chốt}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Đề xuất kỹ thuật cần thống nhất khi code}
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+products có 6 field đúng ERD; toppings có 4 field.
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+NOT NULL/default cụ thể cho từng field (ERD PDF chưa thể hiện).
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Size dùng enum; hệ số backend cố định.
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Cú pháp DB CHECK liên kết size với size\_percent\_snapshot.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Topping code duy nhất, dùng chung mọi Product.
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Quy ước chuẩn hóa code để seed upsert chống trùng.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Stock theo Product và không âm.
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Chi tiết UPDATE có điều kiện/transaction trong Prisma.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Snapshot đơn phải bất biến.
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Quy định migration FK ON DELETE RESTRICT/NO ACTION.
+\end{minipage} \\
+\begin{minipage}[b]{\linewidth}\raggedright
+Không có bảng Cart, Size, biến thể hay kho topping.
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Giải pháp serialization BIGINT trong response DTO của NestJS.
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+Ghi chú quản trị tài liệu: Requirements hiện v3.0, US--AC hiện v2.2 và UC hiện v3.0; phần ``nguồn đầu vào'' trong US--AC/UC còn dẫn phiên bản Requirements/US--AC cũ. Đây là điểm cần cập nhật truy vết về sau, không làm thay đổi các quy tắc Catalog đang trùng khớp trên bốn tài liệu.
+
+\section{9. Tiêu chí hoàn thành task \& bàn giao cho task kế tiếp}\label{06-product-data-model:tiuxeau-chuxed-houxe0n-thuxe0nh-task-buxe0n-giao-cho-task-kux1ebf-tiux1ebfp}
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\item
+  Đã đối chiếu ERD với yêu cầu Product, Size, Topping; thống nhất giữ mô hình lõi, không sinh bảng phụ ngoài phạm vi.
+\item
+  Đã chốt data dictionary cho products, toppings, drink\_size và các cột snapshot liên quan.
+\item
+  Đã nhận diện đầy đủ PK/FK, CHECK, UNIQUE, các quy tắc backend-only và bảo toàn lịch sử.
+\item
+  Đã định nghĩa test tính giá, topping, stock, snapshot và seed tối thiểu.
+\item
+  Nhóm review/approve đặc tả này; sau đó mới viết schema.prisma, migration SQL và seed thực tế.
+\end{enumerate}
+
+Phần chưa thực hiện (đúng phạm vi task): thiết kế Prisma schema toàn hệ thống, chạy migrations, seed data, làm API/NestJS và sửa trực tiếp file ERD gốc do chỉ có bản PDF. Tài liệu này là bản chốt thiết kế để duyệt, không phải xác nhận migration đã được thực thi.
+
+\end{document}
