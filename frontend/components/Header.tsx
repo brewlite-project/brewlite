@@ -145,9 +145,9 @@ export default function Header({
             </span>
           </button>
 
-          <button
-            type="button"
-            onClick={() => handleNotice("Tài khoản & Hội viên")}
+          <Link
+            href="/login"
+            title="Đăng nhập / Đăng ký tài khoản"
             className="flex items-center gap-space-sm pl-2 group cursor-pointer"
           >
             <img
@@ -168,7 +168,7 @@ export default function Header({
                 </span>
               </div>
             </div>
-          </button>
+          </Link>
         </div>
       </div>
     </header>

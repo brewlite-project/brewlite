@@ -1,27 +1,36 @@
 import {
+  AUTH_VALIDATION_RULES,
   MOCK_CATEGORIES,
   MOCK_HERO_BANNER,
   MOCK_PRICE_FILTER_OPTIONS,
   MOCK_PRODUCT_DETAILS,
   MOCK_PRODUCTS_RESPONSE,
+  MOCK_REGISTERED_USERS,
   MOCK_SITE_CONFIG,
   MOCK_SORT_OPTIONS,
+  type AuthApiErrorResponse,
   type CategoryOption,
   type DrinkSize,
   type HeroBannerData,
+  type LoginRequestDto,
+  type LoginResponseDto,
+  type MockRegisteredUser,
   type ProductDetail,
   type ProductListItem,
   type ProductListResponse,
+  type RegisterRequestDto,
+  type RegisterResponseDto,
   type SelectOption,
   type SiteConfigData,
   type ToppingOption,
 } from "@/mock-data";
 
 // ============================================================================
-// BREWLITE SERVICE & BUSINESS RULES — SPRINT 1 (GALLERY & PRODUCT DETAIL)
+// BREWLITE SERVICE & BUSINESS RULES — SPRINT 1 & SPRINT 2
 // Đối chiếu chuẩn 100% với:
 // - docs/api/BrewLite_API_Contract_v1.0.md (Mục 2, 3, 4, 5)
-// - docs/api/BrewLite_API_Contract_v2.0.md (Mục 3, 4, 5, 8)
+// - docs/api/BrewLite_API_Contract_v2.0.md (Mục 3, 4, 5, 6, 7, 8)
+// - docs/api/BrewLite_API_Contract_v2.1.md (Mục 2.5, 5.2, 5.3, 6, 7, 9.2)
 // - database/schema.dbml
 // ============================================================================
 
@@ -99,7 +108,8 @@ export function calculateUnitPriceVnd(
 ): number {
   const sizePrice = calculateSizePriceVnd(basePriceVnd, multiplierPercent);
   const toppingSum = selectedToppings.reduce(
-    (sum, item) => sum + (Number.isSafeInteger(item.priceVnd) ? item.priceVnd : 0),
+    (sum, item) =>
+      sum + (Number.isSafeInteger(item.priceVnd) ? item.priceVnd : 0),
     0
   );
   return sizePrice + toppingSum;
@@ -279,4 +289,320 @@ export async function fetchCatalogData(options?: {
       totalCatalogCount: items.length,
     },
   };
+}
+
+// ============================================================================
+// AUTHENTICATION BUSINESS RULES & MOCK SERVICE — SPRINT 2 (SCRUM-41)
+// Đối chiếu chuẩn 100% với `docs/api/BrewLite_API_Contract_v2.1.md`:
+// - Mục 2.5: JWT TTL 3600s, `tokenType: "Bearer"`, `sub = User UUID`
+// - Mục 5.2 & 5.3: `VALIDATION_ERROR` (400), `EMAIL_ALREADY_EXISTS` (409), `INVALID_CREDENTIALS` (401)
+// - Mục 6 (`POST /auth/register`):
+//   + `email`: bắt buộc, định dạng email hợp lệ, trim/lowercase, max 255
+//   + `password`: bắt buộc, tối thiểu 8 ký tự, KHÔNG trim/normalize trước khi hash
+//   + `fullName`: không bắt buộc, max 255
+//   + Không tự động login hoặc phát JWT sau khi Register (trả 201 `{ id, email, fullName }`)
+// - Mục 7 (`POST /auth/login`):
+//   + `email`: chuẩn hóa trim/lowercase
+//   + `password`: bắt buộc, non-empty, KHÔNG trim/normalize trước khi verify
+//   + Không tiết lộ email có tồn tại hay không (email sai và password sai trả cùng 401 `INVALID_CREDENTIALS`)
+//   + Giữ nguyên Cart khi đăng nhập thành công hoặc thất bại
+// ============================================================================
+
+export const AUTH_TOKEN_STORAGE_KEY = "brewlite_access_token";
+export const AUTH_USER_STORAGE_KEY = "brewlite_auth_user";
+
+// Bộ nhớ tạm trong phiên cho danh sách khách hàng đăng ký (khởi tạo từ MOCK_REGISTERED_USERS)
+const sessionRegisteredUsers: MockRegisteredUser[] = [
+  ...MOCK_REGISTERED_USERS,
+];
+
+/**
+ * Chuẩn hóa email theo API Contract v2.1 Mục 6.2 & 7.2: `trim().toLowerCase()`
+ */
+export function normalizeAuthEmail(rawEmail: string): string {
+  return (rawEmail || "").trim().toLowerCase();
+}
+
+/**
+ * Kiểm tra định dạng email hợp lệ và độ dài tối đa 255 ký tự (API Contract v2.1 Mục 6.2)
+ */
+export function isValidAuthEmail(normalizedEmail: string): boolean {
+  if (
+    !normalizedEmail ||
+    normalizedEmail.length > AUTH_VALIDATION_RULES.EMAIL_MAX_LENGTH
+  ) {
+    return false;
+  }
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail);
+}
+
+/**
+ * Tạo chuỗi JWT mô phỏng theo chuẩn `header.payload.signature` chứa `sub = userId` và `exp` (+3600s)
+ */
+function createMockJwtToken(userId: string): string {
+  const issuedAt = Math.floor(Date.now() / 1000);
+  const expiresAt = issuedAt + AUTH_VALIDATION_RULES.JWT_EXPIRES_IN_SECONDS;
+  const encodeBase64Url = (obj: Record<string, unknown>) =>
+    typeof window !== "undefined"
+      ? window
+          .btoa(JSON.stringify(obj))
+          .replace(/\+/g, "-")
+          .replace(/\//g, "_")
+          .replace(/=+$/, "")
+      : "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9";
+
+  const header = encodeBase64Url({ alg: "HS256", typ: "JWT" });
+  const payload = encodeBase64Url({
+    sub: userId,
+    iat: issuedAt,
+    exp: expiresAt,
+  });
+  return `${header}.${payload}.brewlite-mock-signature`;
+}
+
+export type AuthRegisterResult =
+  | {
+      ok: true;
+      statusCode: 201;
+      requestPayload: RegisterRequestDto;
+      data: RegisterResponseDto;
+    }
+  | {
+      ok: false;
+      errorResponse: AuthApiErrorResponse;
+    };
+
+export type AuthLoginResult =
+  | {
+      ok: true;
+      statusCode: 200;
+      requestPayload: LoginRequestDto;
+      data: LoginResponseDto;
+      user: RegisterResponseDto;
+    }
+  | {
+      ok: false;
+      errorResponse: AuthApiErrorResponse;
+    };
+
+/**
+ * Xử lý nghiệp vụ Đăng ký khách hàng (`POST /auth/register` — API Contract v2.1 Mục 6):
+ * - Validate `email` (trim/lowercase, hợp lệ, <= 255 ký tự)
+ * - Validate `password` (tối thiểu 8 ký tự, KHÔNG trim/normalize)
+ * - Validate `fullName` (optional, <= 255 ký tự)
+ * - Kiểm tra trùng email (`409 EMAIL_ALREADY_EXISTS`)
+ * - Trả về `201 Created` với `{ id, email, fullName }`; tuyệt đối KHÔNG phát JWT / KHÔNG tự động login
+ */
+export async function submitRegisterMock(
+  input: RegisterRequestDto
+): Promise<AuthRegisterResult> {
+  await waitDelay(300);
+
+  const normalizedEmail = normalizeAuthEmail(input.email);
+  // Theo API Contract v2.1 Mục 6.2: KHÔNG trim/normalize password trước khi hash
+  const rawPassword = typeof input.password === "string" ? input.password : "";
+  const trimmedFullName =
+    typeof input.fullName === "string" ? input.fullName.trim() : "";
+
+  const validationErrors: string[] = [];
+
+  if (!normalizedEmail) {
+    validationErrors.push("Email là bắt buộc.");
+  } else if (normalizedEmail.length > AUTH_VALIDATION_RULES.EMAIL_MAX_LENGTH) {
+    validationErrors.push(
+      `Email không được vượt quá ${AUTH_VALIDATION_RULES.EMAIL_MAX_LENGTH} ký tự.`
+    );
+  } else if (!isValidAuthEmail(normalizedEmail)) {
+    validationErrors.push(
+      "Định dạng email không hợp lệ (ví dụ: customer@example.com)."
+    );
+  }
+
+  if (!rawPassword) {
+    validationErrors.push("Mật khẩu là bắt buộc.");
+  } else if (rawPassword.length < AUTH_VALIDATION_RULES.PASSWORD_MIN_LENGTH) {
+    validationErrors.push(
+      `Mật khẩu phải có tối thiểu ${AUTH_VALIDATION_RULES.PASSWORD_MIN_LENGTH} ký tự (theo API Contract v2.1 Mục 6.2).`
+    );
+  }
+
+  if (trimmedFullName.length > AUTH_VALIDATION_RULES.FULL_NAME_MAX_LENGTH) {
+    validationErrors.push(
+      `Họ và tên không được vượt quá ${AUTH_VALIDATION_RULES.FULL_NAME_MAX_LENGTH} ký tự.`
+    );
+  }
+
+  if (validationErrors.length > 0) {
+    return {
+      ok: false,
+      errorResponse: {
+        statusCode: 400,
+        message: validationErrors,
+        error: "Bad Request",
+        code: "VALIDATION_ERROR",
+      },
+    };
+  }
+
+  // Kiểm tra email đã tồn tại trong DB / Mock (409 EMAIL_ALREADY_EXISTS — Mục 6.4)
+  const existingUser = sessionRegisteredUsers.find(
+    (u) => normalizeAuthEmail(u.email) === normalizedEmail
+  );
+  if (existingUser) {
+    return {
+      ok: false,
+      errorResponse: {
+        statusCode: 409,
+        message: "Email này đã được đăng ký. Vui lòng sử dụng email khác hoặc chuyển sang Đăng nhập.",
+        error: "Conflict",
+        code: "EMAIL_ALREADY_EXISTS",
+      },
+    };
+  }
+
+  // Chỉ đóng gói đúng 3 trường được phép trong Request Body (không gửi role, loyaltyPoints, passwordHash)
+  const sanitizedRequestPayload: RegisterRequestDto = {
+    email: normalizedEmail,
+    password: rawPassword,
+    ...(trimmedFullName ? { fullName: trimmedFullName } : {}),
+  };
+
+  const newUserId = `550e8400-e29b-41d4-a716-${String(
+    446655440000 + sessionRegisteredUsers.length + 1
+  ).slice(-12)}`;
+
+  const createdUser: MockRegisteredUser = {
+    id: newUserId,
+    email: normalizedEmail,
+    password: rawPassword,
+    fullName: trimmedFullName || null,
+  };
+
+  sessionRegisteredUsers.push(createdUser);
+
+  // Response 201 Created: chỉ trả `id`, `email`, `fullName` (Mục 6.3)
+  return {
+    ok: true,
+    statusCode: 201,
+    requestPayload: sanitizedRequestPayload,
+    data: {
+      id: createdUser.id,
+      email: createdUser.email,
+      fullName: createdUser.fullName,
+    },
+  };
+}
+
+/**
+ * Xử lý nghiệp vụ Đăng nhập (`POST /auth/login` — API Contract v2.1 Mục 7):
+ * - Chuẩn hóa `email` (`trim().toLowerCase()`)
+ * - Kiểm tra `password` required, non-empty (KHÔNG trim/normalize password trước khi verify)
+ * - Bảo mật: Email không tồn tại và password sai trả CÙNG status `401`, code `INVALID_CREDENTIALS` và message
+ * - Thành công trả `200 OK` với `{ accessToken, tokenType: "Bearer", expiresIn: 3600 }`
+ * - Lưu token mà KHÔNG xóa giỏ hàng (Cart)
+ */
+export async function submitLoginMock(
+  input: LoginRequestDto
+): Promise<AuthLoginResult> {
+  await waitDelay(300);
+
+  const normalizedEmail = normalizeAuthEmail(input.email);
+  // Theo API Contract v2.1 Mục 7.2: KHÔNG trim/normalize password trước khi verify
+  const rawPassword = typeof input.password === "string" ? input.password : "";
+
+  const validationErrors: string[] = [];
+
+  if (!normalizedEmail) {
+    validationErrors.push("Vui lòng nhập email tài khoản.");
+  } else if (normalizedEmail.length > AUTH_VALIDATION_RULES.EMAIL_MAX_LENGTH) {
+    validationErrors.push(
+      `Email không được vượt quá ${AUTH_VALIDATION_RULES.EMAIL_MAX_LENGTH} ký tự.`
+    );
+  } else if (!isValidAuthEmail(normalizedEmail)) {
+    validationErrors.push(
+      "Định dạng email không hợp lệ (ví dụ: customer@example.com)."
+    );
+  }
+
+  if (rawPassword.length === 0) {
+    validationErrors.push("Vui lòng nhập mật khẩu.");
+  }
+
+  if (validationErrors.length > 0) {
+    return {
+      ok: false,
+      errorResponse: {
+        statusCode: 400,
+        message: validationErrors,
+        error: "Bad Request",
+        code: "VALIDATION_ERROR",
+      },
+    };
+  }
+
+  const matchedUser = sessionRegisteredUsers.find(
+    (u) => normalizeAuthEmail(u.email) === normalizedEmail
+  );
+
+  // Mục 7.2 & 7.4: Email không tồn tại và password sai phải trả CÙNG status/code/message
+  // để không tiết lộ email có tồn tại trong hệ thống hay không
+  if (!matchedUser || matchedUser.password !== rawPassword) {
+    return {
+      ok: false,
+      errorResponse: {
+        statusCode: 401,
+        message: "Email hoặc mật khẩu không chính xác.",
+        error: "Unauthorized",
+        code: "INVALID_CREDENTIALS",
+      },
+    };
+  }
+
+  const loginResponse: LoginResponseDto = {
+    accessToken: createMockJwtToken(matchedUser.id),
+    tokenType: "Bearer",
+    expiresIn: AUTH_VALIDATION_RULES.JWT_EXPIRES_IN_SECONDS,
+  };
+
+  // Mục 7.5: Lưu token vào storage mà không chạm vào hay làm mất dữ liệu Giỏ hàng (Cart)
+  if (typeof window !== "undefined") {
+    try {
+      window.localStorage.setItem(
+        AUTH_TOKEN_STORAGE_KEY,
+        loginResponse.accessToken
+      );
+      window.localStorage.setItem(
+        AUTH_USER_STORAGE_KEY,
+        JSON.stringify({
+          id: matchedUser.id,
+          email: matchedUser.email,
+          fullName: matchedUser.fullName,
+        })
+      );
+    } catch {
+      // Bỏ qua nếu trình duyệt chặn localStorage
+    }
+  }
+
+  return {
+    ok: true,
+    statusCode: 200,
+    requestPayload: {
+      email: normalizedEmail,
+      password: rawPassword,
+    },
+    data: loginResponse,
+    user: {
+      id: matchedUser.id,
+      email: matchedUser.email,
+      fullName: matchedUser.fullName,
+    },
+  };
+}
+
+/**
+ * Lấy danh sách các tài khoản mẫu hiện có trong phiên để hỗ trợ Tester kiểm thử nhanh trên UI
+ */
+export function getMockRegisteredUsers(): MockRegisteredUser[] {
+  return [...sessionRegisteredUsers];
 }
