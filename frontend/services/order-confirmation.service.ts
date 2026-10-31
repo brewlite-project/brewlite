@@ -20,7 +20,7 @@ export type OrderStatus =
   | "COMPLETED"
   | "CANCELLED";
 
-export type PaymentMethodType = "CARD" | "WALLET";
+export type PaymentMethodType = "CARD" | "WALLET" | "VNPAY" | "ZERO_AMOUNT";
 
 export interface OrderItemSummary {
   id: string;

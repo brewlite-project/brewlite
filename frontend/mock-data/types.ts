@@ -487,7 +487,7 @@ export interface SiteConfigData {
 // - backend/src/payments/dto/create-payment.dto.ts & payment-response.dto.ts
 // ============================================================================
 
-export type PaymentMethod = "CARD" | "WALLET";
+export type PaymentMethod = "CARD" | "WALLET" | "VNPAY" | "ZERO_AMOUNT";
 
 export type PaymentStatus = "SUCCESS" | "FAILED";
 

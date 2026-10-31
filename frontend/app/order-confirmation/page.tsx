@@ -14,10 +14,21 @@ import {
 } from "@/services/order-confirmation.service";
 import { OrderSuccessView } from "@/components/OrderSuccessView";
 import { PaymentFailedRetryView } from "@/components/PaymentFailedRetryView";
+import { VnPayRedirectingView } from "@/components/VnPayRedirectingView";
+import { VnPayProcessingView } from "@/components/VnPayProcessingView";
+import { VnPaySuccessView } from "@/components/VnPaySuccessView";
+import { VnPayFailedRetryView } from "@/components/VnPayFailedRetryView";
+import { ZeroPaymentBypassView } from "@/components/ZeroPaymentBypassView";
 
 function OrderConfirmationContent() {
   const searchParams = useSearchParams();
   const orderIdParam = searchParams.get("orderId");
+  const vnpResponseCode = searchParams.get("vnp_ResponseCode");
+  const vnpTxnRef = searchParams.get("vnp_TxnRef");
+  const vnpBankCode = searchParams.get("vnp_BankCode");
+  const vnpPayDate = searchParams.get("vnp_PayDate");
+  const vnpTransactionNo = searchParams.get("vnp_TransactionNo");
+  const viewParam = searchParams.get("view");
 
   const { accessToken, user, isAuthenticated } = useAuth();
   const { clearCart } = useCart();
@@ -201,6 +212,32 @@ function OrderConfirmationContent() {
     );
   }
 
+  // Preview / Direct View override
+  if (viewParam === "redirecting") {
+    return (
+      <VnPayRedirectingView
+        order={order}
+        vnpayPaymentUrl={`/order-confirmation?orderId=${order.id}&vnp_ResponseCode=00&view=processing`}
+      />
+    );
+  }
+
+  // VNPay Processing: khi có vnp_ResponseCode hoặc view=processing và đơn hàng chưa PAID
+  const isVnPayCallback =
+    (vnpResponseCode === "00" || viewParam === "processing") &&
+    order.status === "PENDING";
+  if (isVnPayCallback && (order.status === "PENDING")) {
+    return (
+      <VnPayProcessingView
+        order={order}
+        orderIdParam={orderIdParam}
+        vnpTxnRef={vnpTxnRef}
+        amountVnd={order.totalVnd}
+        onRefreshStatus={() => handleReloadOrder(false)}
+      />
+    );
+  }
+
   // 4. Kiểm tra trạng thái đơn hàng (CHỈ DỰA VÀO DỮ LIỆU SERVER XÁC NHẬN)
   // Tuyệt đối KHÔNG tin URL query param status=PAID khi server chưa xác nhận!
   const isSuccessStatus =
@@ -209,7 +246,39 @@ function OrderConfirmationContent() {
     order.status === "READY" ||
     order.status === "COMPLETED";
 
+  // Case Zero-Payment Bypass (BR-06)
+  if (isSuccessStatus && (order.totalVnd === 0 || order.payment?.method === "ZERO_AMOUNT" || viewParam === "zero")) {
+    return (
+      <ZeroPaymentBypassView
+        order={order}
+        customerName={user?.fullName || "Quý khách"}
+      />
+    );
+  }
+
+  // Case VNPay Payment Success
+  const isVnPaySuccess =
+    order.payment?.method === "VNPAY" ||
+    vnpResponseCode === "00" ||
+    viewParam === "vnpay_success";
+
   if (isSuccessStatus) {
+    if (isVnPaySuccess) {
+      return (
+        <VnPaySuccessView
+          order={order}
+          customerName={user?.fullName || "Quý khách"}
+          userPoints={userLoyaltyPoints || order.pointsEarned}
+          vnpayDetails={{
+            vnp_TxnRef: vnpTxnRef || undefined,
+            vnp_TransactionNo: vnpTransactionNo || undefined,
+            vnp_BankCode: vnpBankCode || undefined,
+            vnp_PayDate: vnpPayDate || undefined,
+          }}
+        />
+      );
+    }
+
     return (
       <OrderSuccessView
         order={order}
@@ -219,7 +288,27 @@ function OrderConfirmationContent() {
     );
   }
 
-  // Mặc định cho PAYMENT_FAILED, CANCELLED, PENDING
+  // Case VNPay Payment Failed & Retry (BR-05)
+  const isVnPayFailed =
+    order.payment?.method === "VNPAY" ||
+    (Boolean(vnpResponseCode) && vnpResponseCode !== "00") ||
+    viewParam === "vnpay_failed";
+
+  if (isVnPayFailed) {
+    return (
+      <VnPayFailedRetryView
+        order={order}
+        vnpResponseCode={vnpResponseCode || "24"}
+        vnpTxnRef={vnpTxnRef}
+        token={token}
+        onRetryVnPay={async () => {
+          await handleReloadOrder(false);
+        }}
+      />
+    );
+  }
+
+  // Mặc định cho PAYMENT_FAILED, CANCELLED, PENDING của Mock Payment
   return (
     <PaymentFailedRetryView
       order={order}

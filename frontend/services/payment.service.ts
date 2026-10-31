@@ -1027,7 +1027,7 @@ export function validatePaymentSnapshot(raw: unknown): MyOrderPaymentSummaryDto 
   const p = raw as Record<string, unknown>;
   if (typeof p.id !== "string" || !isValidUuid(p.id.trim())) return null;
   if (p.status !== "SUCCESS" && p.status !== "FAILED") return null;
-  if (p.method !== "CARD" && p.method !== "WALLET") return null;
+  if (p.method !== "CARD" && p.method !== "WALLET" && p.method !== "VNPAY" && p.method !== "ZERO_AMOUNT") return null;
 
   if (!("methodLast4" in p) || p.methodLast4 === undefined) return null;
   if (
