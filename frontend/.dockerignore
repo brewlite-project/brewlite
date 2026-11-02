@@ -1,0 +1,43 @@
+# Host/build/test artifacts. Next.js is built inside the Linux container.
+node_modules
+**/node_modules
+.next
+**/.next
+coverage
+**/coverage
+*.tsbuildinfo
+**/*.tsbuildinfo
+tests
+**/tests
+**/*.test.ts
+**/*.test.js
+**/*.spec.ts
+**/*.spec.js
+
+# Local credentials and local environment files.
+.env
+.env.*
+**/.env
+**/.env.*
+.npmrc
+**/.npmrc
+
+# Documentation, old patches and stitch design screens
+*.patch
+**/*.patch
+*.zip
+**/*.zip
+*.bundle
+**/*.bundle
+*.md
+**/*.md
+
+# Logs and OS metadata
+.git
+**/.git
+.npm
+**/.npm
+*.log
+**/*.log
+.DS_Store
+Thumbs.db
