@@ -47,6 +47,24 @@ docker compose --env-file .env.scrum80.local -f compose.scrum80.test.yml ps
 
 Wait for `postgres` to be healthy before running scripts. Confirm no production connection string is being used.
 
+## Both Git Bash and PowerShell: bootstrap CLEAN default Compose database first
+
+On a fresh Compose volume, `brewlite_scrum80_verify` exists **without tables or migrations**. `run_db_checks.mjs` intentionally refuses that state. After `up -d postgres`, run the guarded bootstrap runner from the repository root:
+
+```text
+node scripts/scrum80/bootstrap_default_db.mjs
+```
+
+This checks the isolated Compose service/port and exact database name **before** Prisma calls, reads `SCRUM80_DB_PASSWORD` from the local ignored file, builds `DATABASE_URL` for Docker port `55480`, then runs **Prisma migrate deploy → migrate status → deploy again** using the repository's `backend/prisma7.config.ts`. It refuses migration histories outside the exact nine expected migrations, never drops tables or resets volumes. The second deploy is a non-destructive repeatability check. `migrate status` is not a substitute for applying migrations.
+
+Only then run:
+
+```text
+node scripts/scrum80/run_db_checks.mjs
+```
+
+For a repeat on the same volume, run `bootstrap_default_db.mjs` and `run_db_checks.mjs` again; no reset is required. For an actual **fresh** database, use a new isolated Compose project/volume only after explicitly deciding what to do with existing fixture data. **Do not use `down -v` on a volume containing valuable data.**
+
 ## Both Git Bash and PowerShell: Phase 1 -> Phase 2
 
 The scripts resolve the repo root from their own location. Do not `cd` to a hard-coded machine path. The first run will create only the dedicated legacy test database and **refuse to overwrite an existing one**.
@@ -86,4 +104,4 @@ docker compose --env-file .env.scrum80.local -f compose.scrum80.test.yml stop po
 
 ## Reviewer evidence and expected results
 
-Capture terminal output including: exact database; seven Phase 1 migrations then two Phase 2 migrations; `3/3 MOCK, 1 SUCCESS, 2 FAILED`; three unchanged fingerprints; nine migrations up-to-date; `No pending migrations to apply`; 5 UNIQUE indexes; 23 targeted CHECK negative cases; each DML suite `ROLLBACK`. Redact secrets before attachment and update `SCRUM80_Payment_Migration_Verification.md` from PENDING to PASS **only after actual execution**.
+Capture terminal output including: exact database; seven Phase 1 migrations then two Phase 2 migrations; `3/3 MOCK, 1 SUCCESS, 2 FAILED`; three unchanged fingerprints; nine migrations up-to-date; `No pending migrations to apply`; 5 UNIQUE indexes; 32 targeted CHECK negative cases plus 6 explicit positive DML updates (and one valid VNPAY FAILED fixture); each DML suite `ROLLBACK`. Redact secrets before attachment and update `SCRUM80_Payment_Migration_Verification.md` from PENDING to PASS **only after actual execution**.

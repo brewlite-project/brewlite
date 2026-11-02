@@ -34,6 +34,15 @@ BEGIN
   RAISE NOTICE 'PASS CHECK %', name;
 END $func$;
 
+CREATE FUNCTION pg_temp.expect_valid(command text, label text)
+RETURNS void LANGUAGE plpgsql AS $func$
+BEGIN
+  EXECUTE command;
+  RAISE NOTICE 'PASS VALID %', label;
+EXCEPTION WHEN OTHERS THEN
+  RAISE EXCEPTION 'Expected valid DML for %, got SQLSTATE %: %', label, SQLSTATE, SQLERRM;
+END $func$;
+
 DO $test$
 DECLARE
   user_mock uuid:=gen_random_uuid(); user_zero uuid:=gen_random_uuid();
@@ -43,6 +52,7 @@ DECLARE
   pay_mock uuid:=gen_random_uuid(); pay_zero uuid:=gen_random_uuid();
   pay_vnp uuid:=gen_random_uuid(); pay_terminal uuid:=gen_random_uuid();
   event_id uuid:=gen_random_uuid();
+  user_failed uuid:=gen_random_uuid(); order_failed uuid:=gen_random_uuid(); pay_failed uuid:=gen_random_uuid();
 BEGIN
   INSERT INTO users(id,email,password_hash) VALUES
     (user_mock,'scrum80ck-'||replace(user_mock::text,'-','')||'@example.test','TEST_ONLY'),
@@ -83,6 +93,44 @@ BEGIN
     response_code,transaction_status,outcome,disposition,received_at,verified_at,evidence)
   VALUES(event_id,pay_terminal,'IPN',repeat('a',64),85000,
     '00','00','SUCCESS','FINALIZED',clock_timestamp(),clock_timestamp(),'{}'::jsonb);
+
+  -- Positive VNPAY FAILED terminal fixture (separate Order / immutable original fixtures).
+  INSERT INTO users(id,email,password_hash) VALUES
+    (user_failed,'scrum80ck-'||replace(user_failed::text,'-','')||'@example.test','TEST_ONLY');
+  INSERT INTO orders(id,user_id,status,subtotal_vnd,discount_vnd,total_vnd,expires_at,paid_at)
+    VALUES(order_failed,user_failed,'PAYMENT_FAILED',85000,0,85000,clock_timestamp()+interval '15 min',NULL);
+  INSERT INTO payments(id,order_id,user_id,idempotency_key,request_hash,amount_vnd,
+    provider,method,status,response_snapshot,vnp_txn_ref,vnp_tmn_code,vnp_create_date,
+    gateway_expires_at,initiation_snapshot,final_outcome_snapshot,verified_at,finalized_at,
+    reconciliation_state,reconcile_until)
+  VALUES(pay_failed,order_failed,user_failed,'s80-ck-failed','hf',85000,'VNPAY',NULL,'FAILED',NULL,
+    'S80CK'||replace(gen_random_uuid()::text,'-',''),'TESTMERCHANT','20261101130000',
+    clock_timestamp()+interval '10 min','{}'::jsonb,'{}'::jsonb,
+    clock_timestamp(),clock_timestamp(),'RESOLVED',clock_timestamp()+interval '65 min');
+  RAISE NOTICE 'PASS VALID VNPAY FAILED terminal (verified/finalized evidence)';
+
+  -- Explicit missing-gateway-field cases: 23514 AND exact constraint name.
+  PERFORM pg_temp.expect_check(format('UPDATE payments SET vnp_txn_ref=NULL WHERE id=%L::uuid',pay_vnp),'ck_payments_gateway_shape');
+  PERFORM pg_temp.expect_check(format('UPDATE payments SET vnp_tmn_code=NULL WHERE id=%L::uuid',pay_vnp),'ck_payments_gateway_shape');
+  PERFORM pg_temp.expect_check(format('UPDATE payments SET gateway_expires_at=NULL WHERE id=%L::uuid',pay_vnp),'ck_payments_gateway_shape');
+  PERFORM pg_temp.expect_check(format('UPDATE payments SET initiation_snapshot=NULL WHERE id=%L::uuid',pay_vnp),'ck_payments_gateway_shape');
+  PERFORM pg_temp.expect_check(format('UPDATE payments SET reconcile_until=NULL WHERE id=%L::uuid',pay_vnp),'ck_payments_gateway_shape');
+  PERFORM pg_temp.expect_check(format('UPDATE payments SET response_snapshot=NULL WHERE id=%L::uuid',pay_zero),'ck_payments_provider_shape');
+
+  -- REQUIRES_REVIEW valid pair and invalid missing/blank reason; restore PENDING scheduler state.
+  PERFORM pg_temp.expect_check(format('UPDATE payments SET reconciliation_state=''REQUIRES_REVIEW'', next_query_at=NULL,review_reason=NULL WHERE id=%L::uuid',pay_vnp),'ck_payments_reconcile_shape');
+  PERFORM pg_temp.expect_valid(format('UPDATE payments SET reconciliation_state=''REQUIRES_REVIEW'', next_query_at=NULL, review_reason=''Manual investigation needed'' WHERE id=%L::uuid',pay_vnp),'REQUIRES_REVIEW with review_reason');
+  PERFORM pg_temp.expect_valid(format('UPDATE payments SET reconciliation_state=''SCHEDULED'', next_query_at=clock_timestamp()+interval ''15 min'',review_reason=NULL WHERE id=%L::uuid',pay_vnp),'Restore SCHEDULED after review example');
+
+  -- Claim and lease must be present together; valid pair on SCHEDULED, then clear.
+  PERFORM pg_temp.expect_check(format('UPDATE payments SET lease_expires_at=clock_timestamp()+interval ''5 min'' WHERE id=%L::uuid',pay_vnp),'ck_payments_claim_pair');
+  PERFORM pg_temp.expect_valid(format('UPDATE payments SET claim_token=gen_random_uuid(), lease_expires_at=clock_timestamp()+interval ''5 min'' WHERE id=%L::uuid',pay_vnp),'Claim/lease complete pair');
+  PERFORM pg_temp.expect_valid(format('UPDATE payments SET claim_token=NULL, lease_expires_at=NULL WHERE id=%L::uuid',pay_vnp),'Claim/lease release pair');
+
+  -- QueryDR: positive history requires attempts >0, a timestamp and request id.
+  PERFORM pg_temp.expect_valid(format('UPDATE payments SET query_attempts=1,last_query_at=clock_timestamp(),last_query_request_id=''scrum80-query-1'' WHERE id=%L::uuid',pay_vnp),'Valid QueryDR history shape');
+  PERFORM pg_temp.expect_check(format('UPDATE payments SET last_query_request_id=NULL WHERE id=%L::uuid',pay_vnp),'ck_payments_query_history');
+  PERFORM pg_temp.expect_valid(format('UPDATE payments SET query_attempts=0,last_query_at=NULL,last_query_request_id=NULL,last_query_error=NULL WHERE id=%L::uuid',pay_vnp),'Restore empty QueryDR history');
 
   -- MOCK shape and zero-amount provider guard.
   PERFORM pg_temp.expect_check(format('UPDATE payments SET amount_vnd=-1 WHERE id=%L::uuid',pay_mock), 'ck_payments_amount_nonnegative');
