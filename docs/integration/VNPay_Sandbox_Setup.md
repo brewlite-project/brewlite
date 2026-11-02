@@ -168,7 +168,9 @@ npm run start:dev
 cd ../frontend
 npm ci
 # Tạo frontend/.env.local nếu chưa có; địa chỉ phải khớp backend PORT thực tế.
-printf 'NEXT_PUBLIC_API_URL=http://localhost:3001\n' > .env.local
+if [ ! -f .env.local ]; then
+  printf 'NEXT_PUBLIC_API_URL=http://localhost:3001\n' > .env.local
+fi
 npm run dev
 ```
 
@@ -202,24 +204,22 @@ Nếu frontend đã có `.env.local`, **chỉnh giá trị hiện có thay vì g
 | `ORDER_EXPIRATION_BATCH_SIZE` | Giới hạn batch expiration | Giữ `50` theo template nếu phù hợp; xác minh source runtime |
 | `AUTH_TEST_DATABASE_URL`, `ORDERS_TEST_DATABASE_URL` | Dùng cho các integration test tương ứng | Chỉ cần điền khi chạy test có yêu cầu các URL này; dùng DB test tách biệt, không dùng DB chung/production |
 
-**Phân loại bắt buộc:** `DATABASE_URL`, `JWT_SECRET`, `INTERNAL_SECRET` cần điền giá trị thật để chạy các luồng DB/auth/internal tương ứng; `PORT`, `ORDER_EXPIRATION_ENABLED`, `ORDER_EXPIRATION_BATCH_SIZE` đã có giá trị mẫu để kiểm tra/giữ lại. Hai `*_TEST_DATABASE_URL` chỉ áp dụng khi chạy integration tests. Không suy diễn mọi key là yêu cầu khởi động tuyệt đối của tất cả service nếu chưa kiểm tra runtime validation. **Để test VNPay initiate**, phải bổ sung đúng merchant Sandbox credentials/return URL theo tên biến mà source `dev` đang đọc, không dùng các placeholder dưới đây như thể đã verify.
-
-**Config names:** Template Backend được cung cấp chưa chứa `VNPAY_*`; Contract v4.0 khóa chính sách Mock nhưng không tự xác nhận tất cả tên biến. Đối chiếu tên thực tế của từng key với `backend/src` trước khi chạy. Với Next.js, `NEXT_PUBLIC_API_URL` là **địa chỉ Backend công khai với browser** (không chứa secret).
-
-> **CẢNH BÁO:** Tên `VNPAY_*`, `PAYMENT_PROVIDER` dưới đây là ví dụ cấu hình, **không** phải bằng chứng Backend đang đọc các key đó. `MOCK_PAYMENT_ENABLED` là tên policy trong Contract v4.0 nhưng vẫn cần VERIFY implementation. Không đưa secret thật vào tài liệu/Git.
+**Phân loại bắt buộc:** `DATABASE_URL`, `JWT_SECRET`, `INTERNAL_SECRET` cần cấu hình cho các luồng DB/auth/internal tương ứng. `PORT`, `ORDER_EXPIRATION_ENABLED`, `ORDER_EXPIRATION_BATCH_SIZE` có giá trị mẫu cần kiểm tra theo runtime. Hai `*_TEST_DATABASE_URL` chỉ dùng khi chạy integration tests. Để chạy **VNPay initiate** trên Sandbox, `backend/.env.example` hiện đã khai báo **đúng 4 biến runtime mà source đang sử dụng** dưới đây; điền giá trị thực tế vào `backend/.env` (không commit):
 
 ```dotenv
-# EXAMPLE ONLY – not a verified BrewLite configuration contract
-PAYMENT_PROVIDER=VNPAY
-MOCK_PAYMENT_ENABLED=false
-VNPAY_ENVIRONMENT=sandbox
-VNPAY_TMN_CODE=<sandbox-merchant-id-from-secret-manager>
-VNPAY_HASH_SECRET=<inject-locally-never-commit>
+# VNPay Sandbox runtime – backend/.env (thay placeholder bằng cấu hình hợp lệ)
+VNPAY_TMN_CODE=<merchant-code>
+VNPAY_HASH_SECRET=<backend-only-secret>
 VNPAY_PAYMENT_URL=https://sandbox.vnpayment.vn/paymentv2/vpcpay.html
-VNPAY_QUERYDR_URL=https://sandbox.vnpayment.vn/merchant_webapi/api/transaction
 VNPAY_RETURN_URL=http://localhost:3000/order-confirmation
-VNPAY_IPN_URL=https://<temporary-tunnel-host>/payments/vnpay/ipn
 ```
+
+- `VNPAY_TMN_CODE`: mã merchant Sandbox được cấp; không tự đặt mã.
+- `VNPAY_HASH_SECRET`: **backend-only secret**, dùng để ký/xác minh; tuyệt đối không đưa vào `frontend/.env.local`, biến `NEXT_PUBLIC_*`, log, tài liệu hoặc Git. Không commit `backend/.env` chứa secret; nếu lộ phải rotate.
+- `VNPAY_PAYMENT_URL`: URL thanh toán Sandbox; đối chiếu endpoint với cấu hình merchant thực tế.
+- `VNPAY_RETURN_URL`: địa chỉ frontend quay về sau thanh toán; bảo đảm route `/order-confirmation` thực sự tồn tại, và Return URL **không** phải bằng chứng Payment SUCCESS.
+
+**Future/design only (chưa phải cấu hình runnable hiện tại):** `VNPAY_IPN_URL` và `VNPAY_QUERYDR_URL` có thể cần cho các task IPN/QueryDR về sau. Nếu source chưa đọc hai biến này, **không** thêm chúng vào checklist `.env` cần chạy ngay, không mô tả IPN/QueryDR là đã triển khai. Các key như `VNPAY_ENVIRONMENT`, `PAYMENT_PROVIDER`, `MOCK_PAYMENT_ENABLED` cũng không được coi là cấu hình runtime bắt buộc của VNPay initiate nếu source chưa sử dụng.
 
 **`frontend/.env.local`** (browser-visible, không đặt secrets):
 
@@ -227,18 +227,16 @@ VNPAY_IPN_URL=https://<temporary-tunnel-host>/payments/vnpay/ipn
 NEXT_PUBLIC_API_URL=http://localhost:3001
 ```
 
-**Giải thích:**
+**Phân loại biến VNPay:**
 
-| Cấu hình minh họa | Vai trò | Công khai? |
+| Biến | Trạng thái | Lưu ý |
 |---|---|---|
-| `VNPAY_ENVIRONMENT` | Chỉ Sandbox trong Phase 2 | Tên và giá trị môi trường có thể public |
-| `VNPAY_TMN_CODE` | Merchant identity VNPay cấp | Không commit giá trị cấu hình merchant của nhóm nếu chưa được phép |
-| `VNPAY_HASH_SECRET` | Key ký/xác minh HMAC-SHA512 | **Tuyệt đối không** commit, gửi chat, xuất Swagger hoặc log |
-| `VNPAY_PAYMENT_URL` | Gateway browser redirect | URL Sandbox chính thức có thể công khai |
-| `VNPAY_QUERYDR_URL` | Server-to-server QueryDR POST | URL Sandbox chính thức có thể công khai |
-| `VNPAY_RETURN_URL` | Browser quay về frontend | Chỉ định route đã thực sự tồn tại |
-| `VNPAY_IPN_URL` | Gateway gọi public HTTPS vào NestJS | Phải đăng ký/cấu hình với VNPay; không nhất thiết là tham số trong Payment URL |
-| `MOCK_PAYMENT_ENABLED` | Policy do backend kiểm soát | Bị vô hiệu trong production, không nhận quyết định từ frontend |
+| `VNPAY_TMN_CODE` | Runtime hiện tại | Mã merchant Sandbox |
+| `VNPAY_HASH_SECRET` | Runtime hiện tại | **Backend-only secret; không commit/không công khai** |
+| `VNPAY_PAYMENT_URL` | Runtime hiện tại | URL Sandbox dùng khi initiate |
+| `VNPAY_RETURN_URL` | Runtime hiện tại | Điều hướng frontend; không tự xác nhận SUCCESS |
+| `VNPAY_IPN_URL` | Future/design | Chờ IPN public endpoint và task cấu hình tương ứng |
+| `VNPAY_QUERYDR_URL` | Future/design | Chờ QueryDR client và task cấu hình tương ứng |
 
 Không đặt giá trị thật vào file hướng dẫn, `.env.example`, `NEXT_PUBLIC_*`, `Dockerfile`, screenshot, README hoặc GitHub Issues. `.env` thật phải được ignore; nếu bị lộ, rotate secret và xử lý lịch sử Git phù hợp, không chỉ xóa dòng ở commit mới.
 
