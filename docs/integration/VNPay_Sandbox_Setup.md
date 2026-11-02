@@ -1,15 +1,15 @@
 # BrewLite – VNPay Sandbox Environment & Integration Guide
 
 > **Document ID:** BL-GUIDE-VNPAY-SANDBOX-001
-> **Phiên bản:** v1.2 – 01/11/2026 (review changes theo API Contract v4.0/current `dev`)
+> **Phiên bản:** v1.3 – 02/11/2026 (runtime/implementation-gated review)
 > **Task:** Phase 2 – Document VNPay Sandbox Integration Setup
 > **Đường dẫn trong repository:** `docs/integration/VNPay_Sandbox_Setup.md`
-> **Trạng thái:** **UPDATED REVIEW CANDIDATE – Contract v4.0 Review 3; thực thi Sandbox/E2E vẫn cần VERIFY**
+> **Trạng thái:** **REVIEW CANDIDATE – IMPLEMENTED NOW / REQUIRED BEFORE E2E TÁCH RIÊNG; FULL VNPay E2E BLOCKED**
 > **Phạm vi:** VNPay Sandbox trên NestJS Backend, Next.js Frontend và PostgreSQL; **không hướng dẫn kích hoạt production**.
 
 ## 1. Mục đích, nguồn và giới hạn
 
-Tài liệu hướng dẫn thành viên BrewLite chuẩn bị môi trường, vận hành luồng thanh toán VNPay Sandbox và thu thập bằng chứng kiểm thử mà không tiết lộ thông tin bí mật. Guide áp dụng cho thiết kế Phase 2 hiện tại. **API Contract v4.0 là nguồn của đường dẫn/DTO được chốt trong thiết kế; việc một route đã hoạt động trên branch cụ thể cần kiểm tra bằng Swagger/source và HTTP/Sandbox test.** Bản audit Payment Phase 1 cũ chỉ còn là nguồn tham khảo legacy Mock.
+Tài liệu hướng dẫn thành viên BrewLite chuẩn bị môi trường, kiểm tra **những phần thực sự có thể chạy hiện tại** và chuẩn bị điều kiện để làm VNPay Sandbox E2E về sau mà không tiết lộ bí mật. Guide áp dụng cho thiết kế Phase 2 hiện tại. **API Contract v4.0 là nguồn của đường dẫn/DTO thiết kế, KHÔNG phải chứng cứ endpoint đã triển khai. Bảng trạng thái bên dưới dựa trên nhận xét review runtime của `dev` ngày 02/11/2026; người chạy phải đối chiếu lại source/Swagger/HTTP ở commit `dev` mới nhất trước khi cập nhật trạng thái.** Bản audit Payment Phase 1 cũ chỉ còn là nguồn tham khảo legacy Mock.
 
 **Nguồn nghiệp vụ nội bộ:**
 
@@ -30,7 +30,9 @@ Tài liệu hướng dẫn thành viên BrewLite chuẩn bị môi trường, v�
 
 > **Nguồn chân lý khi có xung đột:** BR-01…BR-06 + Requirements v3.1 Approved → US/AC v2.3 / UC v3.1 → API Contract v4.0 cho API/DTO Phase 2 → ERD/Prisma Delta v0.2.2 cho cấu trúc DB → v3.0 chỉ ở phần legacy không bị thay thế. Không tự sửa BR để làm cho code hiện tại dễ chạy. Nếu VNPay Sandbox có hành vi không phù hợp với BR đã Approved, lập change proposal để Project Leader quyết định.
 
-## 2. Tổng quan tích hợp và các quy tắc không được vi phạm
+## 2. Thiết kế mục tiêu (KHÔNG phải flow E2E đang chạy) và các quy tắc
+
+> **DESIGN ONLY – BLOCKED FOR END-TO-END:** Sơ đồ sau mô tả flow đích; IPN, Status API và QueryDR vẫn chưa được implement trên `dev` theo kết quả review hiện tại. Chỉ phần VNPay initiate có endpoint. Không dùng sơ đồ này làm minh chứng giao dịch đã hoàn tất.
 
 ```text
 Customer (Next.js)
@@ -62,19 +64,33 @@ Các quy tắc bắt buộc:
 - **BR-05:** Mỗi Order tối đa một VNPay Attempt PENDING. Retry chỉ khi attempt cũ **FAILED cuối cùng**, Order còn hạn và hợp lệ, với `Idempotency-Key` và `vnp_TxnRef` mới. IPN và QueryDR dùng chung finalization; không giữ DB transaction mở trong lúc HTTP gọi gateway.
 - **BR-06:** `totalVnd = 0` được xử lý bằng `ZERO_AMOUNT` nội bộ; không tạo URL VNPay/Mock; tạo Payment SUCCESS 0 VND và cộng 0 Loyalty khi hợp lệ.
 
-### 2.1. API Phase 2 theo API Contract v4.0 (đối chiếu implementation khi chạy)
+### 2.1. Runtime readiness trên `dev` (snapshot theo reviewer 02/11/2026)
 
-| API / thành phần | Contract v4.0 | Kiểm chứng khi sử dụng |
+**Implemented now** chỉ khẳng định endpoint/component đã có trong source `dev` theo review; **không tự đồng nghĩa** với Sandbox transaction success, business validation PASS hay E2E readiness.
+
+| Component | Runtime status | Có thể làm ngay? | Gate trước E2E |
+|---|---|---|---|
+| `POST /payments/vnpay/initiate` | **IMPLEMENTED NOW** | Có thể kiểm tra route, auth, request validation, attempt/URL generation trên database test, nếu cấu hình merchant hợp lệ | Vẫn cần verified IPN/finalization + server-truth read để xác nhận outcome |
+| `GET /payments/:paymentId/status` | **NOT IMPLEMENTED / BLOCKED** | **Không gọi/poll** như API đang hoạt động | Implement owner auth + DB truth + projection rồi integration test |
+| `GET /payments/vnpay/ipn` (public IPN) | **NOT IMPLEMENTED / BLOCKED** | **Không mở tunnel để test callback thật** khi chưa có handler | Implement route public không JWT, signature/merchant/amount validation, idempotent finalization + test |
+| QueryDR client / scheduler | **NOT IMPLEMENTED / BLOCKED** | **Không chạy reconciliation QueryDR** | Implement signer, response verification, shared finalization, scheduled retries + test |
+| `POST /payments/zero-amount` | **NOT IMPLEMENTED / BLOCKED** | **Không gọi API này** | Implement internal 0 VND finalization + idempotency + test |
+
+**Required before E2E:** 4 phần `Status`, `IPN`, `QueryDR` và `ZERO_AMOUNT` cần các task tương ứng hoàn thiện và có test. Đặc biệt Status/IPN/QueryDR là các dependency để xác nhận VNPay payment outcome an toàn; ZERO_AMOUNT là nhánh nghiệp vụ độc lập cần test riêng trước khi tuyên bố phạm vi Phase 2 hoàn thành. Chưa có đủ dependency thì **E2E = BLOCKED**, không đánh dấu PASS.
+
+### 2.2. Các route/luồng theo API Contract v4.0 — DESIGN, không phải danh sách route đã chạy
+
+| API / thành phần | Contract v4.0 quy định | Runtime/gate |
 |---|---|---|
-| `POST /payments/vnpay/initiate` | JWT + `Idempotency-Key`, body `{ "orderId": "<UUID>" }`; 201 mới / 200 replay; tạo attempt VNPAY PENDING và trả URL Sandbox | Swagger/source/controller, merchant config, idempotency/replay, trạng thái hiện tại sau replay |
-| `GET /payments/vnpay/ipn` | GET public không Customer JWT, bắt buộc verify HMAC-SHA512 / merchant / TxnRef / amount / outcome; trả `RspCode`/`Message` sau commit | Route, public HTTPS tunnel, test callback hợp lệ/sai chữ ký và duplicate |
-| `GET /payments/:paymentId/status` | JWT; đọc DB (không gọi QueryDR); trả `paymentStatus`, `orderStatus`, `resolution`, `requiresReview`, `canRetry`, `lastUpdatedAt` | API-03 response, ownership 404, DB projection theo toàn Order và gateway event |
-| `POST /payments/zero-amount` | JWT + Idempotency-Key; chỉ Order 0 VND, nội bộ SUCCESS, không gọi gateway/Mock | API-04, zero points, shared finalization, retry/idempotency |
-| `POST /payments` | Legacy Mock CARD/WALLET; chỉ khi `MOCK_PAYMENT_ENABLED=true` và không production; không fallback từ VNPay pending | Gate policy, response snapshot tương thích, không trả Mock trong production |
-| `GET /orders/me` | History additive `PaymentSummary`, Order `hasFinancialException`; giữ snapshots legacy | Payment representative và evidence toàn Order, không QueryDR trong History |
-| QueryDR | Internal POST tới gateway PAY 2.1.0; khác canonical signer với Payment URL; không phải Customer API | Response checksum, TransactionStatus, scheduler, rate limit, Sandbox vectors |
+| `POST /payments/vnpay/initiate` | JWT + `Idempotency-Key`, body `{ "orderId": "<UUID>" }`; 201 mới / 200 replay; attempt VNPay PENDING, URL Sandbox | **IMPLEMENTED NOW**; chỉ smoke/integration scope initiation, chưa chứng minh payment completed |
+| `GET /payments/vnpay/ipn` | GET public không Customer JWT; verify HMAC-SHA512, merchant/TxnRef/amount; commit finalization mới ACK | **BLOCKED** – design only |
+| `GET /payments/:paymentId/status` | JWT, ownership, server DB truth, `paymentStatus`, `orderStatus`, `resolution`, `requiresReview`, `canRetry` | **BLOCKED** – design only, không thể poll ngay |
+| `POST /payments/zero-amount` | JWT + Idempotency-Key; Order 0 VND, SUCCESS nội bộ, không gọi gateway | **BLOCKED** – design only |
+| `POST /payments` | Mock legacy theo policy, không auto-fallback từ VNPay PENDING | Legacy scope; verify source/gates riêng, không dùng chứng minh VNPay E2E |
+| `GET /orders/me` | History additive theo Contract v4.0 | Đối chiếu runtime hiện tại; không thay thế Status API nếu thiếu outcome authoritative |
+| QueryDR | Internal merchant → gateway POST, response signature & `vnp_TransactionStatus`, shared finalization | **BLOCKED** – design only; không có QueryDR client để chạy |
 
-**Ví dụ lời gọi Contract v4.0** (không thay thế Swagger/implementation verification):
+**Ví dụ Contract (không phải bằng chứng đã test hoặc yêu cầu bắt buộc chạy E2E):**
 
 ```http
 POST /payments/vnpay/initiate
@@ -85,15 +101,9 @@ Content-Type: application/json
 {"orderId":"<ORDER_UUID>"}
 ```
 
-API-01: lần đầu `201` với `paymentId`, `orderId`, `provider=VNPAY`, `paymentStatus=PENDING`, `orderStatus`, `amountVnd`, `paymentUrl`, `expiresAt`; replay `200` cùng attempt nhưng trạng thái thanh toán/Order phải là **hiện tại**, không tái cấp URL hết hạn.
+Về thiết kế: initiation trả `paymentId`/`paymentUrl`, có replay cùng attempt; Status API tương lai sẽ đọc trạng thái từ DB và không gọi QueryDR trong request; ZERO_AMOUNT API tương lai xử lý Order 0 VND hoàn toàn nội bộ. **Không đưa ví dụ response dự kiến vào kết quả runtime PASS.**
 
-API-03: `GET /payments/:paymentId/status` với JWT trả dữ liệu từ DB như `paymentStatus`, `orderStatus`, `resolution`, `requiresReview`, `canRetry`, `lastUpdatedAt`, `orderExpiresAt`; không gọi QueryDR đồng bộ trong request. Frontend không tự đổi FAILED vì hết thời gian polling.
-
-API-04: `POST /payments/zero-amount` với JWT, `Idempotency-Key` và body `{ "orderId": "<ORDER_UUID>" }` chỉ áp dụng khi snapshot Order chính xác 0 VND, trả SUCCESS nội bộ; không redirect hoặc gọi VNPay/Mock.
-
-**Trạng thái:** Bảng thể hiện **contract/API thiết kế**, không chứng minh mọi controller đang chạy trên branch hiện tại. `docs/api/BrewLite_API_Contract_v4.0.md` từ bản đã nhận ghi `Review 3 Corrected Candidate` / các gateway VERIFY còn mở. Cần kiểm tra code/route hiện hành, không tự ghi `IMPLEMENTED` hoặc `SIT PASS`.
-
-### 2.2. Các điểm tích hợp bắt buộc
+### 2.3. Các điểm tích hợp bắt buộc (design requirements)
 
 - Route IPN phải nhận request server-to-server **không Customer JWT**; các route customer vẫn dùng JWT và kiểm tra quyền sở hữu.
 - Backend phải khóa Order theo thứ tự nhất quán, không gọi HTTP gateway trong transaction, dùng chung finalization cho IPN và QueryDR.
@@ -105,36 +115,57 @@ API-04: `POST /payments/zero-amount` với JWT, `Idempotency-Key` và body `{ "o
 
 ### 3.1. Điều kiện trước khi chạy
 
-- Windows + Git Bash; Node.js/npm tương thích với project; PostgreSQL/Prisma theo README của repository.
-- Backend NestJS và Frontend Next.js khởi động được trên máy phát triển. **Port minh họa**: Backend `http://localhost:3001`, Frontend `http://localhost:3000`; kiểm tra thực tế trước khi sử dụng.
-- Có database **test/disposable**, không chạy trên database sản xuất/chung của nhóm. Đã migrate/seed theo đúng quy trình và có Customer/Order phục vụ demo.
-- Đã được cấp merchant VNPay **Sandbox**: `vnp_TmnCode`, `vnp_HashSecret`/secret key và quyền cấu hình IPN URL. Nếu secret từng bị lộ, **rotate trước khi tích hợp** (Decision Log §3).
-- Có công cụ tunnel HTTPS công khai tạm thời cho IPN, hoặc một endpoint HTTPS ổn định được nhóm kiểm soát.
-- Đã xác nhận backend **thực sự implement** provider VNPay, initiation, IPN và trạng thái Order/Payment trước khi thử thanh toán. Chỉ có tài liệu hoặc endpoint Swagger không có nghĩa là đã tích hợp.
+- Có Git, Node.js/npm phù hợp `backend/package.json` và PostgreSQL test/dev đang hoạt động. **Không** trỏ `DATABASE_URL` tới production hay DB chung của nhóm khi chưa được phê duyệt migration.
+- Có merchant credentials VNPay **Sandbox** nếu kiểm tra bước initiation và URL ký. Không dùng credential thật/production; không commit `.env`.
+- Full transaction E2E vẫn **BLOCKED** khi IPN, server Status và QueryDR chưa được triển khai; **không cần mở tunnel** ở bước fresh-clone.
+- Port minh họa: Backend `http://localhost:3001`, Frontend `http://localhost:3000`. Xác minh `PORT`, route prefix và frontend router của bản `dev` đang dùng.
 
-### 3.2. Xác minh Backend local và phân biệt Mock/VNPay
+### 3.2. Fresh-clone database/backend: đúng thứ tự cấu hình → migrate → generate → start
 
-Chạy trong Git Bash (đường dẫn theo workspace hiện tại của thành viên):
+**Git Bash — từ thư mục bất kỳ, clone `dev` mới nhất vào một thư mục mới** (hoặc chỉ `git fetch origin` và `git pull --ff-only origin dev` nếu đang ở local `dev` sạch):
 
 ```bash
-cd backend
+git clone --branch dev https://github.com/brewlite-project/brewlite.git
+cd brewlite/backend
 npm ci
+
+# Trong repository baseline được cung cấp, .env.example nằm tại repository root.
+# Nếu dev mới nhất di chuyển file mẫu, xác định vị trí rồi mới copy.
+cp ../.env.example .env
+# EDIT backend/.env: thay DATABASE_URL bằng PostgreSQL test/dev thực tế.
+# Giữ JWT_SECRET, INTERNAL_SECRET khác nhau và không commit .env.
+
 npm run db:validate
+npm run db:migrate       # package.json: prisma migrate deploy --config prisma7.config.ts
+npx prisma migrate status --config prisma7.config.ts
 npm run db:generate
+npm run build            # optional readiness check; bắt lỗi compile trước khi start
 npm run start:dev
 ```
 
-Từ thư mục gốc repository, mở terminal khác và kiểm tra cổng Backend (`PORT=3001` trong template được cung cấp; xác nhận cấu hình thực tế):
+**PowerShell — thực hiện tương đương trong một workspace fresh-clone:**
 
-```bash
-curl -i http://localhost:3001
+```powershell
+git clone --branch dev https://github.com/brewlite-project/brewlite.git
+Set-Location brewlite/backend
+npm ci
+Copy-Item ../.env.example .env
+# EDIT backend/.env: DATABASE_URL must target an approved disposable/dev DB.
+npm run db:validate
+npm run db:migrate
+npx prisma migrate status --config prisma7.config.ts
+npm run db:generate
+npm run build
+npm run start:dev
 ```
 
-Phản hồi `404` tại `/` vẫn có thể cho thấy server đang chạy; **không** đủ xác nhận API VNPay. `POST /payments` đã được chứng minh trong source là Mock Phase 1 (JWT + `Idempotency-Key` 8–64 ký tự, DTO CARD/WALLET, HTTP 200 SUCCESS/FAILED). Không dùng API Mock để thử VNPay redirect. Dùng endpoint health thực tế hoặc Swagger để xác minh controller. Nếu dự án chạy Docker, dùng `docker compose` theo README và xác nhận port mapping thay vì mặc định 3001.
+**Database gate:** Chỉ chạy `npm run db:migrate` sau khi kiểm tra database name/host trong `backend/.env`, PostgreSQL sẵn sàng và tài khoản được phép migrate; `deploy` **không tạo database server tự động** và không được dùng để reset dữ liệu. `prisma7.config.ts` dùng `DATABASE_URL` từ môi trường/dotenv. Nếu migration báo drift, P1000/P1001, pending error hoặc schema không khớp, **dừng và xác minh** thay vì `migrate reset`, `db push` hoặc `migrate resolve` tùy tiện. `npm run db:generate` chạy **sau** migrate như checklist reviewer yêu cầu. Bước seed nếu cần demo: đối chiếu `backend/prisma/seed.ts` và chỉ chạy `npm run db:seed` trên database test sau khi được phép.
+
+**Kiểm tra runtime hiện tại:** Dùng Swagger/source/controller ở commit `dev` mới nhất để xác nhận `POST /payments/vnpay/initiate`; chỉ test nó trên Order test còn hạn và merchant Sandbox hợp lệ. Chưa thể chạy GET Status, IPN callback, QueryDR hay ZERO_AMOUNT khi các route/client vẫn thiếu. Một response `404` tại `/` chỉ cho biết root chưa có handler, **không** xác nhận endpoint VNPay hoạt động.
 
 ### 3.3. Biến môi trường mẫu an toàn
 
-**Đã xác minh từ `.env.example` gửi kèm (tên biến đang tồn tại):**
+**Đã xác minh từ `.env.example` được cung cấp (tên biến đang tồn tại trong snapshot; kiểm tra lại trên `dev` mới nhất):**
 
 | Tên biến | Vai trò theo comment trong file | Ghi chú |
 |---|---|---|
@@ -198,58 +229,38 @@ Theo tài liệu VNPay PAY v2.1.0:
 - Sau khi backend persist Attempt PENDING và trả URL hợp lệ, frontend mới redirect; **chỉ dùng `https://sandbox.vnpayment.vn/...`** làm đích thanh toán, tránh open redirect tới domain tùy ý.
 - VNPay PAY có mức thanh toán tối thiểu được tài liệu FAQ nêu là **5.000 VND**; không thử gửi đơn 0 VND lên gateway. Nếu số dương dưới mức cổng hỗ trợ, cần xác nhận chính sách sản phẩm với owner, không tự coi là ZERO_AMOUNT.
 
-## 4. Mở public HTTPS IPN tới Backend local
+## 4. Required before E2E: public HTTPS IPN — **BLOCKED / FUTURE SETUP**
 
-### 4.1. Vì sao cần tunnel?
+**Hiện tại KHÔNG thực hiện bước mở tunnel để test IPN**: theo reviewer, `GET /payments/vnpay/ipn` chưa implement. URL tunnel trả HTTPS 200/404/502 không chứng minh Backend xác minh chữ ký hoặc finalize Payment. Không đăng ký callback thật để coi như đã hoàn thành Phase 2.
 
-`localhost:3001` trên laptop chỉ máy đó truy cập được. VNPay server **không thể gọi** `http://localhost:3001/payments/vnpay/ipn`. BR-04 yêu cầu callback HTTPS công khai. Dùng tunnel cho **môi trường demo/test**, không dùng quick tunnel để vận hành production.
+Khi task IPN đã merge vào `dev` và có test signature/merchant/amount/idempotency, mới thực hiện checklist thiết kế sau trên **database test riêng**:
 
-**Cách minh họa: Cloudflare Quick Tunnel** (không cần tên miền hoặc tài khoản Cloudflare, nhưng cần cài `cloudflared`):
+1. Xác nhận route `GET /payments/vnpay/ipn` có tồn tại trong source, không Customer JWT, và handler verify HMAC-SHA512 + merchant identity + TxnRef/amount/outcome trước DB finalization.
+2. Chuẩn bị public HTTPS endpoint ổn định cho Merchant → Backend. Có thể dùng Cloudflare Quick Tunnel cho test ngắn hạn hoặc hostname HTTPS do nhóm quản lý; xác nhận VNPay merchant Sandbox chấp nhận địa chỉ đó. `localhost` không thể nhận callback từ VNPay server.
+3. Đảm bảo tunnel chuyển tới đúng `PORT` backend, không phơi production/shared DB và không để tunnel chạy ngoài thời gian test.
+4. Dùng kịch bản IPN hợp lệ/sai signature/duplicate với fixture test đã được review; xác nhận callback chỉ ACK sau commit và không tạo side effect trùng.
+5. Chỉ sau khi IPN PASS mới bật testing redirect đầy đủ, kết hợp với server Status API và QueryDR khi task tương ứng đã sẵn sàng.
 
-1. Cài `cloudflared` Windows từ trang chính thức: https://developers.cloudflare.com/tunnel/downloads/; kiểm tra `cloudflared --version`.
-2. Khởi động Backend trên port đã xác nhận (ví dụ 3001).
-3. Mở một Git Bash khác và chạy:
-
-```bash
-cloudflared tunnel --url http://localhost:3001
-```
-
-4. Terminal trả một địa chỉ HTTPS **ngẫu nhiên**, ví dụ minh họa `https://<generated>.trycloudflare.com` (đây **không phải** địa chỉ cố định của nhóm).
-5. Cấu hình IPN công khai thành `https://<generated>.trycloudflare.com/payments/vnpay/ipn` tại **nơi đăng ký IPN URL với VNPay** theo tài khoản Sandbox hoặc theo hướng dẫn hỗ trợ merchant. Đồng bộ cấu hình Backend nếu code có tham số tương ứng.
-6. Để tunnel và Backend chạy trong suốt lúc kiểm thử. Nếu khởi động lại quick tunnel, hostname có thể đổi; khi đó phải cập nhật IPN URL đã đăng ký.
-
-**Kiểm tra đường đi HTTPS:**
-
-```bash
-curl -i 'https://<generated>.trycloudflare.com/payments/vnpay/ipn'
-```
-
-Không có chữ ký hợp lệ, endpoint phải **không cập nhật dữ liệu**. Tùy hợp đồng IPN, backend có thể trả HTTP 200 kèm JSON `RspCode` lỗi (ví dụ lỗi chữ ký/thiếu tham số), không nhất thiết HTTP 401. Nếu trả `404`, cần kiểm tra route; nếu `502`, kiểm tra backend/port. **Không dùng request `curl` thủ công này để giả làm callback VNPay thành công.**
-
-**Lưu ý bảo mật:** Quick Tunnel tạo đường dẫn công khai vào local Backend; ai biết URL đều có thể gọi các API được expose. Chỉ dùng database test, giữ JWT/ownership/validation, giới hạn CORS đúng nguồn và ngừng tunnel sau demo. Không bảo vệ IPN bằng login/challenge mà VNPay không vượt qua được; xác thực IPN bằng signature và các kiểm tra nghiệp vụ. Tránh log toàn bộ query URL nếu chứa dữ liệu giao dịch nhạy cảm.
-
-### 4.2. Nếu dùng tunnel khác (ngrok, stable domain)
-
-Có thể sử dụng ngrok hay tên miền HTTPS do nhóm quản lý; cần xác nhận policy đăng ký IPN và bất kỳ điều kiện allowlist/SSL của VNPay. Mọi lựa chọn phải đáp ứng: **HTTPS public, host ổn định trong phiên test, chuyển tiếp đúng backend port, endpoint không đòi JWT**, và không làm thay đổi quy tắc ký/verify IPN.
+Thông tin đọc thêm, **chưa phải lệnh setup bắt buộc của runtime hiện tại**: [VNPay PAY/IPN](https://sandbox.vnpayment.vn/apis/docs/thanh-toan-pay/pay.html), [Cloudflare Quick Tunnels](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/), [Cloudflare Download](https://developers.cloudflare.com/tunnel/downloads/). Không sử dụng curl tự ký hoặc query params của browser làm callback chứng minh SUCCESS.
 
 ## 5. Phân biệt Return URL, IPN và QueryDR
 
 | Đặc điểm | Return URL | IPN URL | QueryDR |
 |---|---|---|---|
 | Ai gọi? | Trình duyệt Customer bị redirect | Server VNPay → Backend Merchant | Backend Merchant → VNPay |
-| Endpoint ở BrewLite | `/order-confirmation` (đối chiếu `frontend/app/order-confirmation/page.tsx` và callback navigation) | `GET /payments/vnpay/ipn` đã chốt | Internal service, **không tự tạo public endpoint** |
+| Endpoint ở BrewLite | `/order-confirmation` (cần xác minh route trên `dev`) | `GET /payments/vnpay/ipn` **DESIGN ONLY – NOT IMPLEMENTED** | Internal client **NOT IMPLEMENTED** |
 | Cần Customer JWT? | Không giả định; Frontend dùng session và API riêng để xem Order | **Không** | Không có Customer JWT trong request server-to-server |
 | Bảo mật | Không tin query string là quyết định cuối cùng | HMAC-SHA512 + merchant + TxnRef + amount + trạng thái | Ký request, verify response, đối chiếu TransactionStatus |
 | Tác dụng chính | Hiển thị chờ/hoàn tất theo trạng thái server | Cập nhật finalization idempotent sau xác minh | Đối soát khi IPN chưa đủ/đến muộn |
 | Có thể tự xác nhận PAID? | **Không** | Có, nhưng chỉ sau verify và commit | Có, sau verify và finalization chung |
 
-**Return URL:** Nếu `vnp_ResponseCode` trong URL browser báo `00` nhưng Payment chưa được backend verify, frontend **hiển thị “Đang xác minh thanh toán”**, không tự xóa giỏ hoặc báo `PAID`. Frontend phải dùng **`GET /payments/:paymentId/status` (API-03)** với JWT để đọc sự thật từ server, hoặc `GET /orders/me` cho History. `resolution`/`requiresReview` và `canRetry` được suy ra từ DB trên toàn Order; URL Return chỉ là navigation signal, tuyệt đối không tự xác nhận SUCCESS/FAILED.
+**Return URL:** Nếu `vnp_ResponseCode` trong URL browser báo `00` nhưng Payment chưa được backend verify, frontend **hiển thị “Đang xác minh thanh toán”**, không tự xóa giỏ hoặc báo `PAID`. Theo thiết kế, Frontend **sẽ phải dùng** `GET /payments/:paymentId/status` (API-03) với JWT để đọc server truth. **Hiện route Status chưa implement**, nên không được trình bày việc polling là đã hoạt động. `GET /orders/me` nếu có thể dùng cho History theo runtime thì cũng **không mặc nhiên thay thế** payment-status proof/finalization còn thiếu. `resolution`/`requiresReview` và `canRetry` được suy ra từ DB trên toàn Order; URL Return chỉ là navigation signal, tuyệt đối không tự xác nhận SUCCESS/FAILED.
 
-**IPN:** VNPay gọi `GET /payments/vnpay/ipn` qua HTTPS; backend verify chữ ký, `vnp_TmnCode`, `vnp_TxnRef` → saved Attempt, `vnp_Amount` khớp `totalVnd × 100`, cùng `vnp_ResponseCode=00` **và** `vnp_TransactionStatus=00` mới xem xét SUCCESS. Finalization phải khoá/đọc lại và commit an toàn; trả JSON `RspCode`, `Message` theo spec. Với IPN đã được xử lý, trả mã *already processed* theo VNPay; không nhân đôi side effects.
+**IPN – REQUIRED BEFORE E2E, NOT IMPLEMENTED:** Khi được triển khai, VNPay gọi `GET /payments/vnpay/ipn` qua HTTPS; backend verify chữ ký, `vnp_TmnCode`, `vnp_TxnRef` → saved Attempt, `vnp_Amount` khớp `totalVnd × 100`, cùng `vnp_ResponseCode=00` **và** `vnp_TransactionStatus=00` mới xem xét SUCCESS. Finalization phải khoá/đọc lại và commit an toàn; trả JSON `RspCode`, `Message` theo spec. Với IPN đã được xử lý, trả mã *already processed* theo VNPay; không nhân đôi side effects.
 
-**QueryDR:** Gọi `POST https://sandbox.vnpayment.vn/merchant_webapi/api/transaction` với `vnp_Command=querydr`, ký request theo spec và verify chữ ký response. **`vnp_ResponseCode=00` chỉ là trạng thái xử lý yêu cầu QueryDR**, không tự chứng minh Payment SUCCESS; phải xét `vnp_TransactionStatus` và các trường đối chiếu. Không giữ transaction DB mở trong lúc HTTP QueryDR.
+**QueryDR – REQUIRED BEFORE E2E, CLIENT NOT IMPLEMENTED:** Khi được triển khai, backend gọi `POST https://sandbox.vnpayment.vn/merchant_webapi/api/transaction` với `vnp_Command=querydr`, ký request theo spec và verify chữ ký response. **`vnp_ResponseCode=00` chỉ là trạng thái xử lý yêu cầu QueryDR**, không tự chứng minh Payment SUCCESS; phải xét `vnp_TransactionStatus` và các trường đối chiếu. Không giữ transaction DB mở trong lúc HTTP QueryDR.
 
-### 5.1. IPN retry từ VNPay
+### 5.1. IPN retry từ VNPay (chỉ dùng để thiết kế/test sau khi implement)
 
 Theo trang VNPay PAY: mã IPN merchant trả `RspCode=00` hoặc `02` là trường hợp VNPay coi đã xử lý; các mã `01`, `04`, `97`, `99` hoặc timeout có thể kích hoạt retry. VNPay mô tả tối đa 10 lần, khoảng cách 5 phút trong tài liệu tham khảo. **Không** thiết kế nghiệp vụ dựa trên việc IPN nhất định sẽ tới đúng một lần; phải idempotent và sử dụng QueryDR khi thiếu thông tin.
 
@@ -264,36 +275,43 @@ Theo trang VNPay PAY: mã IPN merchant trả `RspCode=00` hoặc `02` là trư�
 | Kết thúc Grace chưa rõ kết quả | Scheduler CANCELLED/release tại lần quét hợp lệ | Vẫn có thể PENDING | Tiếp tục QueryDR; không tự đánh FAILED |
 | SUCCESS xác minh sau khi Order đã CANCELLED | **Không hồi sinh PAID** | Lưu bằng chứng/ngoại lệ | Không consume coupon, cộng điểm hay tự refund |
 
-**Reconciliation schedule (BR-05):** kích hoạt khi `expiresAt` với VNPay PENDING; trong Grace tiếp tục IPN/QueryDR; **sau Grace**, đối soát mỗi 10 phút, tối đa trong 60 phút. Sau cửa sổ này vẫn chưa rõ thì đánh dấu **manual review**, không tự ghi FAILED. Scheduler/QueryDR phải chống chạy trùng và rate-limit.
+**Reconciliation schedule (BR-05 – DESIGN ONLY, scheduler/client chưa implement):** kích hoạt khi `expiresAt` với VNPay PENDING; trong Grace tiếp tục IPN/QueryDR; **sau Grace**, đối soát mỗi 10 phút, tối đa trong 60 phút. Sau cửa sổ này vẫn chưa rõ thì đánh dấu **manual review**, không tự ghi FAILED. Scheduler/QueryDR phải chống chạy trùng và rate-limit.
 
-## 6. Hướng dẫn chạy thử một giao dịch Sandbox
+## 6. Implemented now vs. Required before E2E: test plan tách biệt
 
-> **GATE:** Contract v4.0 định nghĩa đầy đủ API-01…API-07. Trước khi đánh dấu giao dịch Sandbox PASS, phải xác minh controller thực thi, merchant credentials, IPN tunnel, finalization, QueryDR và kết quả E2E trên branch đang chạy; guide không thay thế bằng chứng tích hợp.
+### 6.1. Implemented now — chỉ smoke/integration cho `POST /payments/vnpay/initiate`
 
-> **Điều kiện:** các route/DTO VNPay Phase 2 phải được implement và review; đã cấu hình merchant Sandbox, ký request, Return URL, public HTTPS IPN; có dữ liệu test. Phần dưới theo đường dẫn API Contract v4.0; request/response và lỗi thực tế vẫn phải kiểm tra với code/current branch.
+**Có thể chạy sau Bước 3.2**, nếu source/route trên `dev` mới nhất vẫn có initiation và đã được cấu hình merchant Sandbox:
 
-1. **Chuẩn bị backend và dữ liệu test:** chạy NestJS, PostgreSQL, Frontend, tunnel; xác nhận Swagger và log khởi động. Chỉ dùng Customer demo, không dùng dữ liệu thật.
-2. **Đăng nhập:** thực hiện `POST /auth/login` để nhận JWT (API Phase 1 đã có). Không đưa JWT vào ảnh hoặc tài liệu; ở Swagger chỉ paste token cục bộ.
-3. **Tạo Order:** dùng API tạo Order đã có trong contract (`POST /orders`) với sản phẩm còn tồn. Kiểm tra Order của đúng Customer, totalVnd **lớn hơn 0 và đáp ứng ngưỡng tối thiểu của VNPay**, trạng thái chờ, `expiresAt` còn đủ thời gian. Không nhận tổng từ Frontend.
-4. **Khởi tạo VNPay:** gọi `POST /payments/vnpay/initiate` với JWT, `Idempotency-Key` duy nhất và body `{ "orderId": "<UUID>" }` cho Order của chính Customer. Backend phải kiểm tra Order và provider, lưu Attempt PENDING/TxnRef, rồi cấp payment URL phù hợp. Nếu cùng key/payload được gửi lại do network timeout, backend phải nhận ra attempt cũ, không tạo attempt thứ hai.
-5. **Redirect:** mở payment URL đã được Backend cấp trên browser. URL phải thuộc domain Sandbox chính thức và còn hạn theo Order. Không tự tạo/ký URL trên Frontend.
-6. **Nhập dữ liệu thẻ test:** chỉ dùng **dữ liệu công khai do VNPay cấp** tại https://sandbox.vnpayment.vn/apis/vnpay-demo/; không dùng thẻ hay tiền thật. Không ghi OTP/card details vào repo hay screenshot share public.
-7. **Return URL:** browser trở về `/order-confirmation` (đối chiếu route `frontend/app/order-confirmation/page.tsx`). URL chỉ báo điều hướng; FE dùng Payment ID từ state đáng tin cậy để gọi `GET /payments/:paymentId/status` với JWT; trong `PROCESSING/RECONCILING` giữ thông báo đang xác minh. Không tự ghi PAID/FAILED dựa vào `vnp_ResponseCode` của URL.
-8. **Xác minh callback:** xem log Backend **đã lọc bí mật**, xác nhận IPN đã được verify và finalization commit. Nếu không có IPN, sử dụng QueryDR theo scheduler/chính sách (không tự cập nhật bằng tay để làm cho demo PASS).
-9. **Đối chiếu:** kiểm tra Payment/Order trạng thái cuối, coupon HELD→CONSUMED nếu PAID, loyalty cộng một lần, stock không bị trừ thêm và thông tin History/Confirmation đúng snapshot. Không đưa DB credential/token vào bằng chứng.
-10. **Chạy lại trường hợp replay:** kiểm tra request cùng key và IPN/QueryDR lặp không tạo Attempt hoặc Payment SUCCESS mới; không tiêu thụ coupon/loyalty/stock lặp.
+1. Khởi động PostgreSQL test và Backend bằng fresh-clone guide; đối chiếu Swagger/controller để xác nhận `POST /payments/vnpay/initiate` cùng DTO/guard/Idempotency-Key hiện có.
+2. Đăng nhập bằng Customer test, tạo Order test còn hạn có `totalVnd > 0`; token và URL có chữ ký không đưa vào log công khai.
+3. Gửi `POST /payments/vnpay/initiate` theo contract với JWT, `Idempotency-Key` và `{ "orderId": "<UUID>" }`. Kiểm tra response/DB theo runtime thật: attempt PENDING, idempotency/replay, ownership, expiry, cấu hình Sandbox; ghi PASS chỉ cho case thực sự chạy.
+4. Không tự tuyên bố Payment/Order đã SUCCESS/PAID. **Không test end-to-end thanh toán thực hoặc chuyển hướng đến bước xác nhận thành công** khi IPN và Status API chưa hoàn tất.
+5. Có thể kiểm tra validation errors/replay cho initiation với database test, nhưng không coi đó là full VNPay SIT PASS.
 
-### 6.1. Kịch bản đặc biệt phải có
+### 6.2. Required before E2E — các task còn BLOCKED
 
-- **Payment URL hoặc kết nối timeout:** Attempt chưa biết kết quả vẫn PENDING; không tự FAILED, không auto-fallback Mock.
-- **VNPay FAILED cuối cùng được xác minh:** nếu Order còn hạn và đủ điều kiện, chuyển xử lý theo state machine để Customer có thể retry; retry dùng key/TxnRef mới. Nếu Order đã hết hạn, xử lý CANCELLED/release theo BR-03.
-- **Zero-VND Order:** Order totalVnd = 0 → backend xử lý `ZERO_AMOUNT` nội bộ, **không gọi VNPay** và cộng 0 loyalty.
-- **Late SUCCESS sau CANCELLED:** chỉ lưu bằng chứng và flag exception; không tự hồi sinh Order hoặc tự refund.
-- **IPN sai chữ ký, sai amount, sai merchant hoặc không tìm thấy TxnRef:** từ chối thay đổi nghiệp vụ; trả mã IPN phù hợp theo spec.
+| Dependency | Thực trạng theo reviewer | Khi nào được thử |
+|---|---|---|
+| Server-truth `GET /payments/:paymentId/status` | Chưa implement | Sau khi controller + ownership + projection + integration test merge |
+| Public IPN `GET /payments/vnpay/ipn` | Chưa implement | Sau khi signature/correlation/finalization + HTTPS endpoint test merge |
+| QueryDR client/scheduler | Chưa implement | Sau khi có signer/response validation + retry/scheduling + shared finalization |
+| `POST /payments/zero-amount` | Chưa implement | Sau khi internal SUCCESS/loyalty/idempotency test merge |
+
+**Future-only E2E checklist, KHÔNG chạy được hiện tại:**
+
+- [ ] Thanh toán Sandbox từ initiation → gateway test card → Return URL hiển thị đang xác minh; **Return URL là navigation signal, không phải bằng chứng SUCCESS**.
+- [ ] Public HTTPS IPN đã xác thực và commit finalization idempotently.
+- [ ] Frontend gọi server Status API đã triển khai để đọc `Payment`/`Order` truth; chỉ báo `PAID` khi backend xác nhận.
+- [ ] QueryDR được triển khai và dùng khi IPN thiếu/chậm; không suy SUCCESS từ `vnp_ResponseCode` đơn lẻ.
+- [ ] ZERO_AMOUNT xử lý nội bộ, không gọi gateway và chỉ chạy sau khi endpoint được implement.
+- [ ] Repeat, race, late-success, financial exception và reconciliation được kiểm tra trên DB disposable.
+
+**Full VNPay E2E status hiện tại: BLOCKED (not tested / not PASS).**
 
 ## 7. VNPay SIT Testing – cách dùng và checklist
 
-**SIT Status:** `NOT VERIFIED` trong tài liệu này; cần log test Sandbox của branch hiện tại trước khi ghi PASS. Không đánh dấu PASS các case VNP-01 đến VNP-20 chỉ vì Mock tests đã chạy được.
+**SIT Status:** `BLOCKED` cho end-to-end hiện tại vì Status/IPN/QueryDR/ZERO_AMOUNT chưa implement; cần log test Sandbox của branch hiện tại trước khi ghi PASS. Không đánh dấu PASS các case VNP-01 đến VNP-20 chỉ vì Mock tests đã chạy được.
 
 **SIT (System Integration Testing)** nhằm kiểm tra hành vi kết nối của Merchant với VNPay, khác với Unit Test Mock trong BrewLite. VNPay có mục tải **“Kịch bản test case - SIT”** tại https://sandbox.vnpayment.vn/apis/downloads/. Hãy dùng mẫu SIT mới nhất do VNPay cấp cho merchant và đối chiếu phiên bản API PAY. Không tự coi bảng kiểm thử dưới đây là biên bản SIT đã được VNPay xác nhận.
 
@@ -322,7 +340,7 @@ Ghi bằng chứng cho mỗi case: **Test ID, thời điểm (Asia/Ho_Chi_Minh),
 | VNP-19 | Scheduler/IPN/QueryDR chạy cạnh tranh | Bảo toàn duy nhất SUCCESS, stock/coupon/loyalty |
 | VNP-20 | Bất kỳ lỗi HTTP gateway giữa tiến trình | Không giữ DB transaction qua HTTP, có hướng reconcile |
 
-**SIT Evidence:** Không ghi PASS cho case khi mới có lệnh/script hoặc mock; cần log/test result từ Sandbox hoặc kiểm thử integration trên database disposable. Khi gặp case không thể thực hiện vì thiếu endpoint/merchant credentials, đánh dấu **BLOCKED**, không tự sửa test kỳ vọng.
+**SIT Evidence:** Các case VNP-01…05 chỉ có thể chuyển từ NOT RUN sang PASS khi đã có test result initiation thực tế; các case yêu cầu IPN/Status/QueryDR/ZERO_AMOUNT hiện **BLOCKED**. Không ghi PASS cho case khi mới có lệnh/script hoặc mock; cần log/test result từ Sandbox hoặc kiểm thử integration trên database disposable. Khi gặp case không thể thực hiện vì thiếu endpoint/merchant credentials, đánh dấu **BLOCKED**, không tự sửa test kỳ vọng.
 
 ## 8. Checklist bảo mật và vận hành
 
@@ -361,42 +379,47 @@ Trước khi mở tunnel/giao dịch:
 | Duplicate IPN cộng điểm hai lần | Finalization thiếu khóa/unique/idempotency | Rà DB transaction, unique SUCCESS/Order; không sửa dữ liệu production bằng tay |
 | Merchant không cho đăng ký IPN URL ngẫu nhiên | Sandbox merchant cần domain/cấu hình ổn định | Dùng tên miền HTTPS test cố định do nhóm quản lý hoặc liên hệ VNPay Sandbox support |
 
-## 10. Checklist VERIFY trước khi chạy theo current `dev`
+## 10. Verification sau khi sync latest `dev`
 
-Kiểm tra route `frontend/app/order-confirmation/page.tsx` và phương thức nhận Payment ID an toàn; không tin thông tin thanh toán do Return URL đưa lên. Kiểm tra `frontend/.env.local` chứa `NEXT_PUBLIC_API_URL` trỏ tới Backend, không chứa secrets.
-
-Trong repository root, dùng **đường dẫn tương đối**:
+Từ clone mới nhất của `dev`, xác minh controller/module thực tế, route prefix và thư mục `frontend` trước khi coi một route hoạt động. Trong `backend` dùng scripts hiện có trong `package.json`:
 
 ```bash
-# Git Bash – chạy khi đã đứng ở repository root
+# Git Bash, sau khi vào repository root
 cd backend
 npm ci
+# Configure backend/.env DATABASE_URL to test PostgreSQL first.
 npm run db:validate
+npm run db:migrate
+npx prisma migrate status --config prisma7.config.ts
 npm run db:generate
+npm run build
 npm run start:dev
 ```
 
 ```powershell
-# PowerShell – chạy khi đã đứng ở repository root
+# PowerShell, sau khi vào repository root
 Set-Location backend
 npm ci
+# Configure backend/.env DATABASE_URL to test PostgreSQL first.
 npm run db:validate
+npm run db:migrate
+npx prisma migrate status --config prisma7.config.ts
 npm run db:generate
+npm run build
 npm run start:dev
 ```
 
-Trong một terminal riêng từ repository root, frontend chạy bằng `cd frontend` (Git Bash) hoặc `Set-Location frontend` (PowerShell), cấu hình `NEXT_PUBLIC_API_URL=http://localhost:3001` trong `frontend/.env.local`, sau đó `npm ci` và `npm run dev`. Cổng chỉ là ví dụ cho môi trường local được kiểm tra.
+Frontend nếu cần khởi động được cấu hình trong `frontend/.env.local` với `NEXT_PUBLIC_API_URL=http://localhost:3001` (**không có secret**) và chỉ điều hướng `/order-confirmation` nếu route thực sự có trong source `dev` hiện tại. **Do chưa có Status API, giao diện không được lấy query của Return URL để tự coi thanh toán SUCCESS.**
 
-Đường dẫn tài liệu hiện tại trong Git: `docs/integration/VNPay_Sandbox_Setup.md`. Nguồn Contract v4.0 trong Git: `docs/api/BrewLite_API_Contract_v4.0.md`.
+Tài liệu tự tham chiếu: `docs/integration/VNPay_Sandbox_Setup.md`. API design: `docs/api/BrewLite_API_Contract_v4.0.md` (đối chiếu vị trí thực tế trong `dev`). Không dùng bản tài liệu cũ như bằng chứng API đã implement.
 
-**Các cổng chưa khẳng định PASS:** triển khai đầy đủ API-01/02/03/04, HMAC/IPN/QueryDR Sandbox, callback E2E, verification timestamp, merchant rate limit. Nếu chưa thể chạy, đánh dấu BLOCKED kèm lý do, không tự khẳng định thiếu thiết kế Phase 2 hoặc tự ghi PASS.
+## 11. Tiêu chí bàn giao – PR #121: VNPay Sandbox Setup Guide
 
-## 11. Tiêu chí bàn giao Guide PR #109
-
-- [x] Cập nhật Contract v4.0, 3 API chủ chốt và public IPN.
-- [x] Return URL là navigation signal; status đọc server truth qua API-03.
-- [x] Dùng repo-relative commands; hướng dẫn Git Bash/PowerShell; `NEXT_PUBLIC_API_URL`.
-- [x] Route `/order-confirmation` và self-path guide được nêu rõ.
-- [x] Không ghi nhận SIT/merchant E2E là PASS khi chưa có bằng chứng.
-- [ ] Reviewer đối chiếu tên biến VNPay thực tế trong `backend/src` và kết quả Sandbox/CI hiện hành.
-- [ ] Technical review + approval PR #109.
+- [x] Phân biệt **Implemented now** (VNPay initiate) với **Required before E2E / BLOCKED** (Status, public IPN, QueryDR, ZERO_AMOUNT) theo review runtime 02/11/2026.
+- [x] Các phần IPN/Status/QueryDR/ZERO_AMOUNT được viết như **design/future tasks**, không phải setup steps chạy ngay.
+- [x] Fresh-clone: `DATABASE_URL` → `npm run db:migrate` → `npm run db:generate` → `npm run start:dev`, có `migrate status` và kiểm tra target DB.
+- [x] Secrets/env và Return URL trust boundary được giữ nguyên; Return URL không được quyết định success.
+- [x] Bỏ tham chiếu PR cũ; thay tiêu chí/tên PR đúng scope **PR #121 – VNPay Sandbox Setup Guide**.
+- [ ] Thực hiện `git fetch origin && git merge origin/dev` (hoặc rebase có chủ đích) trên branch VNPay Setup **trước khi commit/push**. Việc sync remote phải do người có repo access thực hiện; file này không xác nhận đã sync.
+- [ ] Reviewer kiểm tra runtime implementation tại commit `dev` hiện hành; chỉ thay đổi cột status khi có route/source/test chứng minh.
+- [ ] PR #121 được review và approve; E2E remains BLOCKED until implementation tasks merge.
