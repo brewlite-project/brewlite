@@ -8,6 +8,7 @@ import { beforeEach, describe, it } from "node:test";
 import {
   isValidIsoUtcString,
   validatePaymentResponseData,
+  validatePaymentStatusResponseData,
   validatePaymentSnapshot,
   validateMyOrderSnapshot,
   validateMyOrdersResponse,
@@ -16,6 +17,8 @@ import {
   type OrderConfirmationData,
   computeOrderRemainingSeconds,
   isOrderExpired,
+  canOrderRetryPayment,
+  fetchPaymentStatusApi,
   formatRemainingTime,
   findOrderForConfirmation,
   fetchMyOrdersApi,
@@ -2457,6 +2460,142 @@ describe("SCRUM-68: Order Confirmation Service & Logic Automated Tests", () => {
       // Khi orderId không tồn tại hoặc sai định dạng UUID
       assert.equal(findOrderForConfirmation(orders, "550e8400-e29b-41d4-a716-446655440999"), null);
       assert.equal(findOrderForConfirmation(orders, "invalid-uuid"), null);
+    });
+
+    it("should validate Phase 2 payment snapshots (VNPAY PENDING, ZERO_AMOUNT, resolution, requiresReview, canRetry) and GET /payments/:id/status", async () => {
+      const vnpayPending = validatePaymentSnapshot({
+        id: "550e8400-e29b-41d4-a716-446655440050",
+        status: "PENDING",
+        provider: "VNPAY",
+        method: null,
+        methodLast4: null,
+        amountVnd: 85000,
+        mockReference: null,
+        failureReason: null,
+        resolution: "PROCESSING",
+        requiresReview: false,
+        canRetry: false,
+        createdAt: "2026-10-29T10:00:00.000Z",
+      });
+      assert.ok(vnpayPending !== null);
+      assert.equal(vnpayPending.status, "PENDING");
+      assert.equal(vnpayPending.provider, "VNPAY");
+      assert.equal(vnpayPending.method, null);
+      assert.equal(vnpayPending.resolution, "PROCESSING");
+      assert.equal(vnpayPending.canRetry, false);
+
+      const zeroAmount = validatePaymentSnapshot({
+        id: "550e8400-e29b-41d4-a716-446655440051",
+        status: "SUCCESS",
+        provider: "ZERO_AMOUNT",
+        method: null,
+        methodLast4: null,
+        amountVnd: 0,
+        mockReference: null,
+        failureReason: null,
+        resolution: "PAYMENT_ACCEPTED",
+        requiresReview: false,
+        canRetry: false,
+        createdAt: "2026-10-29T10:00:00.000Z",
+      });
+      assert.ok(zeroAmount !== null);
+      assert.equal(zeroAmount.status, "SUCCESS");
+      assert.equal(zeroAmount.provider, "ZERO_AMOUNT");
+      assert.equal(zeroAmount.amountVnd, 0);
+      assert.equal(zeroAmount.resolution, "PAYMENT_ACCEPTED");
+
+      assert.equal(
+        validatePaymentSnapshot({
+          id: "550e8400-e29b-41d4-a716-446655440052",
+          status: "SUCCESS",
+          provider: "ZERO_AMOUNT",
+          method: null,
+          methodLast4: null,
+          amountVnd: 50000,
+          mockReference: null,
+          failureReason: null,
+          createdAt: "2026-10-29T10:00:00.000Z",
+        }),
+        null
+      );
+
+      const now = Date.parse("2026-10-29T10:05:00.000Z");
+      const baseOrder: OrderConfirmationData = {
+        id: "550e8400-e29b-41d4-a716-446655440060",
+        status: "PAYMENT_FAILED",
+        createdAt: "2026-10-29T10:00:00.000Z",
+        expiresAt: "2026-10-29T10:15:00.000Z",
+        subtotalVnd: 85000,
+        discountVnd: 0,
+        totalVnd: 85000,
+        couponCode: null,
+        pointsEarned: 0,
+        hasFinancialException: false,
+        items: [],
+        payment: {
+          id: "550e8400-e29b-41d4-a716-446655440061",
+          status: "FAILED",
+          provider: "VNPAY",
+          method: null,
+          methodLast4: null,
+          amountVnd: 85000,
+          mockReference: null,
+          failureReason: "24",
+          resolution: "FAILED",
+          requiresReview: false,
+          canRetry: true,
+          createdAt: "2026-10-29T10:01:00.000Z",
+        },
+      };
+      assert.equal(canOrderRetryPayment(baseOrder, now), true);
+      assert.equal(
+        canOrderRetryPayment(
+          {
+            ...baseOrder,
+            status: "PENDING",
+            payment: {
+              ...baseOrder.payment!,
+              status: "PENDING",
+              resolution: "PROCESSING",
+              canRetry: false,
+            },
+          },
+          now
+        ),
+        false
+      );
+      assert.equal(
+        canOrderRetryPayment({ ...baseOrder, hasFinancialException: true }, now),
+        false
+      );
+
+      const validToken = createValidMockJwt();
+      const rawStatus = {
+        paymentId: "550e8400-e29b-41d4-a716-446655440070",
+        orderId: "550e8400-e29b-41d4-a716-446655440071",
+        provider: "VNPAY",
+        paymentStatus: "PENDING",
+        orderStatus: "CANCELLED",
+        amountVnd: 85000,
+        resolution: "RECONCILING",
+        requiresReview: false,
+        canRetry: false,
+        createdAt: "2026-10-29T10:00:00.000Z",
+        orderExpiresAt: "2026-10-29T10:15:00.000Z",
+        lastUpdatedAt: "2026-10-29T10:16:00.000Z",
+      };
+      const validated = validatePaymentStatusResponseData(rawStatus);
+      assert.equal(validated.resolution, "RECONCILING");
+
+      global.fetch = (async () => ({
+        ok: true,
+        status: 200,
+        json: async () => rawStatus,
+      })) as unknown as typeof fetch;
+
+      const apiRes = await fetchPaymentStatusApi(rawStatus.paymentId, validToken);
+      assert.equal(apiRes.resolution, "RECONCILING");
+      assert.equal(apiRes.orderStatus, "CANCELLED");
     });
   });
 

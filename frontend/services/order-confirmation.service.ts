@@ -7,9 +7,27 @@
 
 import { isValidUuid } from "./api.service";
 import { isTokenExpired } from "./auth.service";
-import { isValidIsoUtcString, validateMyOrdersResponse, validatePaymentResponseData } from "./payment.service";
+import {
+  fetchPaymentStatusApi,
+  isValidIsoUtcString,
+  validateMyOrdersResponse,
+  validatePaymentResponseData,
+  validatePaymentStatusResponseData,
+} from "./payment.service";
+import type {
+  PaymentProvider,
+  PaymentResolution,
+  PaymentStatusResponseDto,
+} from "@/mock-data";
 
-export { isValidIsoUtcString };
+export {
+  fetchPaymentStatusApi,
+  isValidIsoUtcString,
+  validatePaymentStatusResponseData,
+  type PaymentProvider,
+  type PaymentResolution,
+  type PaymentStatusResponseDto,
+};
 
 export type OrderStatus =
   | "PENDING"
@@ -41,12 +59,16 @@ export interface OrderItemSummary {
 
 export interface PaymentSummary {
   id: string;
-  status: "SUCCESS" | "FAILED";
-  method: PaymentMethodType;
+  status: "SUCCESS" | "FAILED" | "PENDING";
+  provider?: PaymentProvider;
+  method: PaymentMethodType | null;
   methodLast4: string | null;
   amountVnd: number;
   mockReference: string | null;
   failureReason: string | null;
+  resolution?: PaymentResolution;
+  requiresReview?: boolean;
+  canRetry?: boolean;
   createdAt: string;
 }
 
@@ -60,6 +82,7 @@ export interface OrderConfirmationData {
   totalVnd: number;
   couponCode: string | null;
   pointsEarned: number;
+  hasFinancialException?: boolean;
   items: OrderItemSummary[];
   payment: PaymentSummary | null;
 }
@@ -149,6 +172,50 @@ export function isOrderExpired(
     return computeOrderRemainingSeconds(order.expiresAt, referenceNowMs) <= 0;
   }
   return false;
+}
+
+/**
+ * Kiểm tra đơn hàng trên trang xác nhận có được phép thực hiện Retry thanh toán hay không (BR-03, BR-05 & RD-01).
+ * Tuyệt đối khóa Retry khi:
+ * - Order đã hết hạn hoặc không ở trạng thái PENDING / PAYMENT_FAILED.
+ * - Order hoặc Payment có cờ hasFinancialException / requiresReview / resolution === FINANCIAL_EXCEPTION / REQUIRES_REVIEW.
+ * - Payment đang ở trạng thái PENDING (đang chờ đối soát VNPay IPN/QueryDR) hoặc canRetry === false từ Backend.
+ */
+export function canOrderRetryPayment(
+  order: OrderConfirmationData | null | undefined,
+  referenceNowMs: number = Date.now()
+): boolean {
+  if (!order) return false;
+  if (order.status !== "PENDING" && order.status !== "PAYMENT_FAILED") {
+    return false;
+  }
+  if (isOrderExpired(order, referenceNowMs)) {
+    return false;
+  }
+  if (order.hasFinancialException === true) {
+    return false;
+  }
+  const payment = order.payment;
+  if (!payment) {
+    return true;
+  }
+  if (
+    payment.status === "PENDING" ||
+    payment.status === "SUCCESS" ||
+    payment.requiresReview === true ||
+    payment.resolution === "FINANCIAL_EXCEPTION" ||
+    payment.resolution === "REQUIRES_REVIEW" ||
+    payment.resolution === "PROCESSING" ||
+    payment.resolution === "RECONCILING" ||
+    payment.provider === "ZERO_AMOUNT" ||
+    payment.method === "ZERO_AMOUNT"
+  ) {
+    return false;
+  }
+  if (payment.canRetry === false) {
+    return false;
+  }
+  return true;
 }
 
 /**

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { Suspense, useEffect, useState } from "react";
+import React, { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
@@ -38,6 +38,22 @@ function OrderConfirmationContent() {
   const [error, setError] = useState<string | null>(null);
   const [order, setOrder] = useState<OrderConfirmationData | null>(null);
   const [userLoyaltyPoints, setUserLoyaltyPoints] = useState<number>(0);
+  const clearedPaidOrderIdRef = useRef<string | null>(null);
+
+  // BR-04: Tự động xóa giỏ hàng và active order đúng 1 lần khi máy chủ xác nhận đơn đã PAID
+  useEffect(() => {
+    if (!order) return;
+    const isConfirmedPaid =
+      order.status === "PAID" ||
+      order.status === "PREPARING" ||
+      order.status === "READY" ||
+      order.status === "COMPLETED";
+    if (isConfirmedPaid && clearedPaidOrderIdRef.current !== order.id) {
+      clearedPaidOrderIdRef.current = order.id;
+      clearCart();
+      clearStoredActiveOrder();
+    }
+  }, [order, clearCart]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -222,11 +238,17 @@ function OrderConfirmationContent() {
     );
   }
 
-  // VNPay Processing: khi có vnp_ResponseCode hoặc view=processing và đơn hàng chưa PAID
+  // VNPay Processing / Reconciling:
+  // Khi có vnp_ResponseCode=00 hoặc view=processing và đơn hàng chưa PAID,
+  // HOẶC khi payment đang ở trạng thái PENDING / PROCESSING / RECONCILING (theo BR-04 & BR-05: không mở Retry khi đang chờ đối soát).
+  const isPaymentPendingReconcile =
+    order.payment?.status === "PENDING" ||
+    order.payment?.resolution === "PROCESSING" ||
+    order.payment?.resolution === "RECONCILING";
   const isVnPayCallback =
-    (vnpResponseCode === "00" || viewParam === "processing") &&
+    (vnpResponseCode === "00" || viewParam === "processing" || isPaymentPendingReconcile) &&
     order.status === "PENDING";
-  if (isVnPayCallback && (order.status === "PENDING")) {
+  if (isVnPayCallback || (order.status === "CANCELLED" && order.payment?.resolution === "RECONCILING" && viewParam === "processing")) {
     return (
       <VnPayProcessingView
         order={order}
@@ -247,7 +269,13 @@ function OrderConfirmationContent() {
     order.status === "COMPLETED";
 
   // Case Zero-Payment Bypass (BR-06)
-  if (isSuccessStatus && (order.totalVnd === 0 || order.payment?.method === "ZERO_AMOUNT" || viewParam === "zero")) {
+  if (
+    isSuccessStatus &&
+    (order.totalVnd === 0 ||
+      order.payment?.provider === "ZERO_AMOUNT" ||
+      order.payment?.method === "ZERO_AMOUNT" ||
+      viewParam === "zero")
+  ) {
     return (
       <ZeroPaymentBypassView
         order={order}
@@ -258,6 +286,7 @@ function OrderConfirmationContent() {
 
   // Case VNPay Payment Success
   const isVnPaySuccess =
+    order.payment?.provider === "VNPAY" ||
     order.payment?.method === "VNPAY" ||
     vnpResponseCode === "00" ||
     viewParam === "vnpay_success";
@@ -289,16 +318,25 @@ function OrderConfirmationContent() {
   }
 
   // Case VNPay Payment Failed & Retry (BR-05)
+  // Lưu ý: chỉ mở VnPayFailedRetryView khi đơn hàng đang PAYMENT_FAILED hoặc có mã lỗi VNPay tường minh (không phải CANCELLED/PENDING)
   const isVnPayFailed =
-    order.payment?.method === "VNPAY" ||
-    (Boolean(vnpResponseCode) && vnpResponseCode !== "00") ||
-    viewParam === "vnpay_failed";
+    order.status !== "CANCELLED" &&
+    !isPaymentPendingReconcile &&
+    (order.payment?.provider === "VNPAY" ||
+      order.payment?.method === "VNPAY" ||
+      (Boolean(vnpResponseCode) && vnpResponseCode !== "00") ||
+      viewParam === "vnpay_failed");
 
   if (isVnPayFailed) {
+    const derivedResponseCode =
+      vnpResponseCode ||
+      (order.payment?.failureReason?.startsWith("VNPAY_RESPONSE_")
+        ? order.payment.failureReason.replace("VNPAY_RESPONSE_", "")
+        : "24");
     return (
       <VnPayFailedRetryView
         order={order}
-        vnpResponseCode={vnpResponseCode || "24"}
+        vnpResponseCode={derivedResponseCode}
         vnpTxnRef={vnpTxnRef}
         token={token}
         onRetryVnPay={async () => {
@@ -308,7 +346,7 @@ function OrderConfirmationContent() {
     );
   }
 
-  // Mặc định cho PAYMENT_FAILED, CANCELLED, PENDING của Mock Payment
+  // Mặc định cho PAYMENT_FAILED, CANCELLED, PENDING của Mock Payment (hoặc trạng thái đối soát/ngoại lệ tài chính)
   return (
     <PaymentFailedRetryView
       order={order}

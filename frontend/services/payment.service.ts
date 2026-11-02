@@ -10,7 +10,10 @@ import type {
   OrderStatus,
   PaymentErrorCode,
   PaymentMethod,
+  PaymentProvider,
+  PaymentResolution,
   PaymentResponseDto,
+  PaymentStatusResponseDto,
   PaymentSubmissionErrorState,
 } from "@/mock-data";
 import { API_BASE_URL, isValidUuid } from "./api.service";
@@ -1017,17 +1020,64 @@ function validateOrderItemSnapshot(raw: unknown): OrderItemSnapshotDto | null {
   };
 }
 
+const VALID_PAYMENT_PROVIDERS: readonly PaymentProvider[] = [
+  "MOCK",
+  "VNPAY",
+  "ZERO_AMOUNT",
+] as const;
+
+const VALID_PAYMENT_RESOLUTIONS: readonly PaymentResolution[] = [
+  "PROCESSING",
+  "RECONCILING",
+  "PAYMENT_ACCEPTED",
+  "FAILED",
+  "FINANCIAL_EXCEPTION",
+  "REQUIRES_REVIEW",
+] as const;
+
 /**
  * Runtime validation cho PaymentSnapshot từ `GET /orders/me`:
  * - Không bao giờ tự mặc định/coerce trường sai sang `"CARD"`, `null` hoặc giá trị khác.
- * - Mọi trường bắt buộc phải tồn tại, đúng kiểu, đúng enum và đúng quy tắc nullable của API Contract v3.0 §4.2.
+ * - Mọi trường bắt buộc phải tồn tại, đúng kiểu, đúng enum và đúng quy tắc nullable của API Contract v3.0 §4.2 & v4.0 §8.
  */
 export function validatePaymentSnapshot(raw: unknown): MyOrderPaymentSummaryDto | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const p = raw as Record<string, unknown>;
   if (typeof p.id !== "string" || !isValidUuid(p.id.trim())) return null;
-  if (p.status !== "SUCCESS" && p.status !== "FAILED") return null;
-  if (p.method !== "CARD" && p.method !== "WALLET" && p.method !== "VNPAY" && p.method !== "ZERO_AMOUNT") return null;
+  if (p.status !== "SUCCESS" && p.status !== "FAILED" && p.status !== "PENDING") return null;
+
+  let provider: PaymentProvider | undefined = undefined;
+  if ("provider" in p && p.provider !== undefined) {
+    if (
+      typeof p.provider !== "string" ||
+      !VALID_PAYMENT_PROVIDERS.includes(p.provider as PaymentProvider)
+    ) {
+      return null;
+    }
+    provider = p.provider as PaymentProvider;
+  }
+
+  if (!("method" in p) || p.method === undefined) return null;
+  if (provider === "VNPAY" || provider === "ZERO_AMOUNT") {
+    if (
+      p.method !== null &&
+      p.method !== "VNPAY" &&
+      p.method !== "ZERO_AMOUNT" &&
+      p.method !== "CARD" &&
+      p.method !== "WALLET"
+    ) {
+      return null;
+    }
+  } else {
+    if (
+      p.method !== "CARD" &&
+      p.method !== "WALLET" &&
+      p.method !== "VNPAY" &&
+      p.method !== "ZERO_AMOUNT"
+    ) {
+      return null;
+    }
+  }
 
   if (!("methodLast4" in p) || p.methodLast4 === undefined) return null;
   if (
@@ -1040,6 +1090,7 @@ export function validatePaymentSnapshot(raw: unknown): MyOrderPaymentSummaryDto 
   if (
     typeof p.amountVnd !== "number" ||
     !Number.isSafeInteger(p.amountVnd) ||
+    ((provider === "ZERO_AMOUNT" || p.method === "ZERO_AMOUNT") && p.amountVnd !== 0) ||
     p.amountVnd < 0
   ) {
     return null;
@@ -1054,8 +1105,40 @@ export function validatePaymentSnapshot(raw: unknown): MyOrderPaymentSummaryDto 
   }
 
   if (!("failureReason" in p) || p.failureReason === undefined) return null;
-  if (p.failureReason !== null && p.failureReason !== "PAYMENT_DECLINED") {
-    return null;
+  if (provider === "VNPAY" || provider === "ZERO_AMOUNT" || p.method === "VNPAY" || p.method === "ZERO_AMOUNT") {
+    if (
+      p.failureReason !== null &&
+      (typeof p.failureReason !== "string" || !p.failureReason.trim())
+    ) {
+      return null;
+    }
+  } else {
+    if (p.failureReason !== null && p.failureReason !== "PAYMENT_DECLINED") {
+      return null;
+    }
+  }
+
+  let resolution: PaymentResolution | undefined = undefined;
+  if ("resolution" in p && p.resolution !== undefined) {
+    if (
+      typeof p.resolution !== "string" ||
+      !VALID_PAYMENT_RESOLUTIONS.includes(p.resolution as PaymentResolution)
+    ) {
+      return null;
+    }
+    resolution = p.resolution as PaymentResolution;
+  }
+
+  let requiresReview: boolean | undefined = undefined;
+  if ("requiresReview" in p && p.requiresReview !== undefined) {
+    if (typeof p.requiresReview !== "boolean") return null;
+    requiresReview = p.requiresReview;
+  }
+
+  let canRetry: boolean | undefined = undefined;
+  if ("canRetry" in p && p.canRetry !== undefined) {
+    if (typeof p.canRetry !== "boolean") return null;
+    canRetry = p.canRetry;
   }
 
   if (typeof p.createdAt !== "string" || !isValidIsoUtcString(p.createdAt)) return null;
@@ -1064,11 +1147,15 @@ export function validatePaymentSnapshot(raw: unknown): MyOrderPaymentSummaryDto 
   return {
     id: p.id.trim(),
     status: p.status,
-    method: p.method,
+    ...(provider !== undefined ? { provider } : {}),
+    method: (p.method as PaymentMethod | null),
     methodLast4: p.methodLast4,
     amountVnd: p.amountVnd,
     mockReference: typeof p.mockReference === "string" ? p.mockReference.trim() : null,
-    failureReason: p.failureReason,
+    failureReason: typeof p.failureReason === "string" ? p.failureReason.trim() : null,
+    ...(resolution !== undefined ? { resolution } : {}),
+    ...(requiresReview !== undefined ? { requiresReview } : {}),
+    ...(canRetry !== undefined ? { canRetry } : {}),
     createdAt: new Date(createdAtMs).toISOString(),
   };
 }
@@ -1114,6 +1201,12 @@ export function validateMyOrderSnapshot(raw: unknown): MyOrderDto | null {
     return null;
   }
 
+  let hasFinancialException: boolean | undefined = undefined;
+  if ("hasFinancialException" in o && o.hasFinancialException !== undefined) {
+    if (typeof o.hasFinancialException !== "boolean") return null;
+    hasFinancialException = o.hasFinancialException;
+  }
+
   if (!Array.isArray(o.items)) return null;
   const validItems: OrderItemSnapshotDto[] = [];
   for (const it of o.items) {
@@ -1142,6 +1235,7 @@ export function validateMyOrderSnapshot(raw: unknown): MyOrderDto | null {
     totalVnd: o.totalVnd,
     couponCode: typeof o.couponCode === "string" && o.couponCode.trim() ? o.couponCode.trim() : null,
     pointsEarned: typeof o.pointsEarned === "number" && o.pointsEarned >= 0 ? o.pointsEarned : 0,
+    ...(hasFinancialException !== undefined ? { hasFinancialException } : {}),
     items: validItems,
     payment,
   };
@@ -1352,4 +1446,254 @@ export async function fetchAuthMeProfile(
   } catch {
     return null;
   }
+}
+
+/**
+ * Runtime validation cho phản hồi `GET /payments/:paymentId/status` (API-03, API Contract v4.0 Mục 5 & Phụ lục C).
+ */
+export function validatePaymentStatusResponseData(
+  raw: unknown
+): PaymentStatusResponseDto {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw createPaymentError(
+      "Phản hồi GET /payments/:paymentId/status không phải là object JSON hợp lệ.",
+      502,
+      "INTERNAL_ERROR",
+      "",
+      { canRetrySameKey: false }
+    );
+  }
+
+  const r = raw as Record<string, unknown>;
+  const paymentId =
+    typeof r.paymentId === "string" ? r.paymentId.trim().toLowerCase() : "";
+  const orderId =
+    typeof r.orderId === "string" ? r.orderId.trim().toLowerCase() : "";
+
+  if (!paymentId || !isValidUuid(paymentId)) {
+    throw createPaymentError(
+      "Phản hồi trạng thái thanh toán có paymentId không hợp lệ.",
+      502,
+      "INTERNAL_ERROR",
+      "",
+      { canRetrySameKey: false }
+    );
+  }
+
+  if (!orderId || !isValidUuid(orderId)) {
+    throw createPaymentError(
+      "Phản hồi trạng thái thanh toán có orderId không hợp lệ.",
+      502,
+      "INTERNAL_ERROR",
+      "",
+      { canRetrySameKey: false }
+    );
+  }
+
+  if (
+    typeof r.provider !== "string" ||
+    !VALID_PAYMENT_PROVIDERS.includes(r.provider as PaymentProvider)
+  ) {
+    throw createPaymentError(
+      "Trường provider trong phản hồi trạng thái thanh toán không hợp lệ.",
+      502,
+      "INTERNAL_ERROR",
+      "",
+      { canRetrySameKey: false }
+    );
+  }
+
+  if (
+    r.paymentStatus !== "PENDING" &&
+    r.paymentStatus !== "SUCCESS" &&
+    r.paymentStatus !== "FAILED"
+  ) {
+    throw createPaymentError(
+      "Trường paymentStatus trong phản hồi trạng thái thanh toán không hợp lệ.",
+      502,
+      "INTERNAL_ERROR",
+      "",
+      { canRetrySameKey: false }
+    );
+  }
+
+  const validOrderStatuses: readonly OrderStatus[] = [
+    "PENDING",
+    "PAYMENT_FAILED",
+    "PAID",
+    "PREPARING",
+    "READY",
+    "COMPLETED",
+    "CANCELLED",
+  ];
+  if (
+    typeof r.orderStatus !== "string" ||
+    !validOrderStatuses.includes(r.orderStatus as OrderStatus)
+  ) {
+    throw createPaymentError(
+      "Trường orderStatus trong phản hồi trạng thái thanh toán không hợp lệ.",
+      502,
+      "INTERNAL_ERROR",
+      "",
+      { canRetrySameKey: false }
+    );
+  }
+
+  if (
+    typeof r.amountVnd !== "number" ||
+    !Number.isSafeInteger(r.amountVnd) ||
+    r.amountVnd < 0
+  ) {
+    throw createPaymentError(
+      "Trường amountVnd trong phản hồi trạng thái thanh toán không hợp lệ.",
+      502,
+      "INTERNAL_ERROR",
+      "",
+      { canRetrySameKey: false }
+    );
+  }
+
+  if (
+    typeof r.resolution !== "string" ||
+    !VALID_PAYMENT_RESOLUTIONS.includes(r.resolution as PaymentResolution)
+  ) {
+    throw createPaymentError(
+      "Trường resolution trong phản hồi trạng thái thanh toán không hợp lệ.",
+      502,
+      "INTERNAL_ERROR",
+      "",
+      { canRetrySameKey: false }
+    );
+  }
+
+  if (typeof r.requiresReview !== "boolean" || typeof r.canRetry !== "boolean") {
+    throw createPaymentError(
+      "Trường requiresReview hoặc canRetry trong phản hồi trạng thái thanh toán không hợp lệ.",
+      502,
+      "INTERNAL_ERROR",
+      "",
+      { canRetrySameKey: false }
+    );
+  }
+
+  if (
+    typeof r.createdAt !== "string" ||
+    !isValidIsoUtcString(r.createdAt) ||
+    typeof r.orderExpiresAt !== "string" ||
+    !isValidIsoUtcString(r.orderExpiresAt) ||
+    typeof r.lastUpdatedAt !== "string" ||
+    !isValidIsoUtcString(r.lastUpdatedAt)
+  ) {
+    throw createPaymentError(
+      "Các mốc thời gian createdAt, orderExpiresAt, lastUpdatedAt phải đúng chuẩn ISO 8601 UTC.",
+      502,
+      "INTERNAL_ERROR",
+      "",
+      { canRetrySameKey: false }
+    );
+  }
+
+  return {
+    paymentId,
+    orderId,
+    provider: r.provider as PaymentProvider,
+    paymentStatus: r.paymentStatus,
+    orderStatus: r.orderStatus as OrderStatus,
+    amountVnd: r.amountVnd,
+    resolution: r.resolution as PaymentResolution,
+    requiresReview: r.requiresReview,
+    canRetry: r.canRetry,
+    createdAt: r.createdAt,
+    orderExpiresAt: r.orderExpiresAt,
+    lastUpdatedAt: r.lastUpdatedAt,
+  };
+}
+
+/**
+ * Gọi API `GET /payments/:paymentId/status` (API-03, API Contract v4.0 Mục 5) để tra cứu trạng thái giao dịch.
+ * Read-only, không tạo mới Payment attempt.
+ */
+export async function fetchPaymentStatusApi(
+  paymentId: string,
+  accessToken?: string | null
+): Promise<PaymentStatusResponseDto> {
+  const cleanPaymentId =
+    typeof paymentId === "string" ? paymentId.trim().toLowerCase() : "";
+  if (!cleanPaymentId || !isValidUuid(cleanPaymentId)) {
+    throw createPaymentError(
+      "Mã giao dịch (paymentId) không đúng định dạng UUID.",
+      400,
+      "VALIDATION_ERROR",
+      "",
+      { canRetrySameKey: false }
+    );
+  }
+
+  const token = accessToken ?? getStoredToken();
+  if (!token || isTokenExpired(token)) {
+    clearStoredSession();
+    throw createPaymentError(
+      "Phiên đăng nhập đã hết hạn hoặc không hợp lệ (401 UNAUTHORIZED).",
+      401,
+      "UNAUTHORIZED",
+      "",
+      { canRetrySameKey: false }
+    );
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(
+      resolveBackendEndpoint(`/payments/${cleanPaymentId}/status`),
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+        },
+      }
+    );
+  } catch {
+    throw createPaymentError(
+      "Không thể kết nối đến máy chủ để tra cứu trạng thái thanh toán (GET /payments/:paymentId/status).",
+      0,
+      "NETWORK_ERROR",
+      "",
+      { canRetrySameKey: false }
+    );
+  }
+
+  if (res.status === 401) {
+    clearStoredSession();
+    throw createPaymentError(
+      "Phiên đăng nhập đã hết hạn hoặc không hợp lệ (401 UNAUTHORIZED).",
+      401,
+      "UNAUTHORIZED",
+      "",
+      { canRetrySameKey: false }
+    );
+  }
+
+  if (res.status === 404) {
+    throw createPaymentError(
+      "Giao dịch thanh toán không tồn tại hoặc không thuộc tài khoản của bạn (404 NOT_FOUND).",
+      404,
+      "NOT_FOUND",
+      "",
+      { canRetrySameKey: false }
+    );
+  }
+
+  if (!res.ok) {
+    throw createPaymentError(
+      `Không thể tra cứu trạng thái thanh toán (HTTP ${res.status}).`,
+      res.status,
+      res.status === 400 ? "VALIDATION_ERROR" : "INTERNAL_ERROR",
+      "",
+      { canRetrySameKey: false }
+    );
+  }
+
+  const rawData: unknown = await res.json().catch(() => null);
+  return validatePaymentStatusResponseData(rawData);
 }

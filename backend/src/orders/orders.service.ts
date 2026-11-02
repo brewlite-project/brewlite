@@ -13,7 +13,6 @@ import {
 } from '../promotions/promotion-policy.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { Prisma } from '../generated/prisma/client.js';
-import { readPaymentSnapshot } from '../payments/payment-snapshot.js';
 import type { CreateOrderDto } from './dto/create-order.dto.js';
 import type { GetMyOrdersQueryDto } from './dto/get-my-orders-query.dto.js';
 import {
@@ -22,6 +21,7 @@ import {
   reserveInventory,
 } from './inventory-policy.js';
 import { runInventoryTransaction } from './inventory-transaction.js';
+import { mapOrderPaymentPresentation } from './order-payment-presentation.mapper.js';
 
 const SIZE_PERCENT = { S: 100, M: 120, L: 140, ONE_SIZE: 100 } as const;
 const pending = () =>
@@ -70,30 +70,42 @@ export class OrdersService {
             include: {
               items: { include: { toppings: true } },
               payments: {
-                where: { status: { in: ['SUCCESS', 'FAILED'] } },
                 select: {
                   id: true,
                   status: true,
+                  provider: true,
                   method: true,
                   methodLast4: true,
                   amountVnd: true,
                   mockReference: true,
                   responseSnapshot: true,
+                  finalOutcomeSnapshot: true,
+                  reconciliationState: true,
+                  hasFinancialException: true,
                   createdAt: true,
+                  updatedAt: true,
+                  gatewayEvents: {
+                    select: {
+                      outcome: true,
+                      disposition: true,
+                      responseCode: true,
+                      transactionStatus: true,
+                      exceptionReason: true,
+                      verifiedAt: true,
+                      createdAt: true,
+                    },
+                    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+                  },
                 },
                 orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
               },
             },
           });
 
+      const now = new Date();
       return {
         items: orders.map((order) => {
-          const payment =
-            order.payments.find((candidate) => candidate.status === 'SUCCESS') ??
-            order.payments.find((candidate) => candidate.status === 'FAILED');
-          const snapshot = payment
-            ? readPaymentSnapshot(payment.responseSnapshot, payment.id, order.id)
-            : null;
+          const presentation = mapOrderPaymentPresentation(order, now);
           return {
             id: order.id,
             status: order.status,
@@ -104,6 +116,7 @@ export class OrdersService {
             totalVnd: money(order.totalVnd),
             couponCode: order.couponCodeSnapshot,
             pointsEarned: order.pointsEarned,
+            hasFinancialException: presentation.hasFinancialException,
             items: order.items.map((item) => ({
               id: item.id,
               productId: item.productId,
@@ -120,18 +133,7 @@ export class OrdersService {
                 priceVnd: money(topping.toppingPriceSnapshotVnd),
               })),
             })),
-            payment: payment
-              ? {
-                  id: payment.id,
-                  status: payment.status,
-                  method: payment.method,
-                  methodLast4: payment.methodLast4,
-                  amountVnd: money(payment.amountVnd),
-                  mockReference: payment.mockReference,
-                  failureReason: snapshot!.failureReason,
-                  createdAt: payment.createdAt.toISOString(),
-                }
-              : null,
+            payment: presentation.payment,
           };
         }),
         meta: {
