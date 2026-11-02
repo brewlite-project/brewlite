@@ -47,7 +47,7 @@
 - `ck_payments_financial_review`: exception requires review state.
 - `ck_gateway_events_identity`, `ck_gateway_events_source`, `ck_gateway_events_amount`, `ck_gateway_events_terminal_evidence`, `ck_gateway_events_exception`, `ck_gateway_events_evidence`, `ck_gateway_events_disposition_outcome`: verified event evidence.
 
-The SQL DML assertions require **SQLSTATE `32514` and the intended CHECK constraint name**; all fixture writes are inside `BEGIN ... ROLLBACK`.
+The SQL DML assertions require **SQLSTATE `23514` and the intended CHECK constraint name**; all fixture writes are inside `BEGIN ... ROLLBACK`.
 
 ## 3. Reproduce and attach reviewer evidence
 
@@ -76,7 +76,7 @@ Record the command, timestamp, commit SHA, Docker image/version, database name, 
 
 ## PR #120 follow-up coverage (2026-11-02; pending runtime re-run)
 
-- Expanded `06_p2_06_check_constraints.sql` to **32 negative `expect_check` calls** (each checks SQLSTATE `32514` and exact constraint name), **6 positive `expect_valid` calls**, and a valid terminal `VNPAY FAILED` insert; this is a static source count, **not yet a PostgreSQL PASS**.
+- Expanded `06_p2_06_check_constraints.sql` to **32 negative `expect_check` calls** (each checks SQLSTATE `23514` and exact constraint name), **6 positive `expect_valid` calls**, and a valid terminal `VNPAY FAILED` insert; this is a static source count, **not yet a PostgreSQL PASS**.
 - Added five missing VNPAY gateway metadata-null cases; ZERO_AMOUNT missing response; REQUIRES_REVIEW/reason positive and negative; claim/lease pair; valid QueryDR history and invalid request id.
 - Added `scripts/scrum80/bootstrap_default_db.mjs`: guarded clean Compose default DB -> migrate deploy -> migrate status -> repeated deploy; **not yet run on the user's Docker**.
 - Earlier runtime PASS evidence applies to the **prior** CHECK test version only; rerun the expanded test suite on default and legacy databases before reporting new tests PASS.
