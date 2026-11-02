@@ -129,11 +129,11 @@ git clone --branch dev https://github.com/brewlite-project/brewlite.git
 cd brewlite/backend
 npm ci
 
-# Trong repository baseline được cung cấp, .env.example nằm tại repository root.
-# Nếu dev mới nhất di chuyển file mẫu, xác định vị trí rồi mới copy.
-cp ../.env.example .env
-# EDIT backend/.env: thay DATABASE_URL bằng PostgreSQL test/dev thực tế.
-# Giữ JWT_SECRET, INTERNAL_SECRET khác nhau và không commit .env.
+# Template đúng nằm trong backend/.env.example (không dùng root .env.example).
+cp .env.example .env
+# EDIT backend/.env: điền DATABASE_URL, JWT_SECRET, INTERNAL_SECRET
+# và xác nhận PORT, ORDER_EXPIRATION_*; xem bảng cấu hình bên dưới.
+# Nếu thử VNPay initiate: đối chiếu thêm biến Sandbox trong source hiện tại.
 
 npm run db:validate
 npm run db:migrate       # package.json: prisma migrate deploy --config prisma7.config.ts
@@ -149,8 +149,9 @@ npm run start:dev
 git clone --branch dev https://github.com/brewlite-project/brewlite.git
 Set-Location brewlite/backend
 npm ci
-Copy-Item ../.env.example .env
-# EDIT backend/.env: DATABASE_URL must target an approved disposable/dev DB.
+Copy-Item .env.example .env
+# EDIT backend/.env: DATABASE_URL, JWT_SECRET, INTERNAL_SECRET; confirm PORT
+# and ORDER_EXPIRATION_*; verify VNPay sandbox keys in current source if testing initiate.
 npm run db:validate
 npm run db:migrate
 npx prisma migrate status --config prisma7.config.ts
@@ -159,23 +160,49 @@ npm run build
 npm run start:dev
 ```
 
+**Frontend (mở terminal mới sau khi backend đang chạy):** Từ `backend/` chuyển tới thư mục frontend bằng `cd ../frontend`; không chép secret backend sang frontend. Nếu frontend có `frontend/.env.example`, có thể dùng làm mẫu; `.env.local` là cấu hình local và không commit.
+
+**Git Bash:**
+
+```bash
+cd ../frontend
+npm ci
+# Tạo frontend/.env.local nếu chưa có; địa chỉ phải khớp backend PORT thực tế.
+printf 'NEXT_PUBLIC_API_URL=http://localhost:3001\n' > .env.local
+npm run dev
+```
+
+**PowerShell:**
+
+```powershell
+Set-Location ../frontend
+npm ci
+# Chỉ tạo mới nếu chưa tồn tại để tránh ghi đè cấu hình local.
+if (!(Test-Path .env.local)) { 'NEXT_PUBLIC_API_URL=http://localhost:3001' | Set-Content .env.local }
+npm run dev
+```
+
+Nếu frontend đã có `.env.local`, **chỉnh giá trị hiện có thay vì ghi đè**. Chạy backend và frontend ở hai terminal riêng; kiểm tra URL thực tế trong console. Frontend startup không xác nhận full VNPay E2E vì Status/IPN/QueryDR/ZERO_AMOUNT vẫn BLOCKED.
+
 **Database gate:** Chỉ chạy `npm run db:migrate` sau khi kiểm tra database name/host trong `backend/.env`, PostgreSQL sẵn sàng và tài khoản được phép migrate; `deploy` **không tạo database server tự động** và không được dùng để reset dữ liệu. `prisma7.config.ts` dùng `DATABASE_URL` từ môi trường/dotenv. Nếu migration báo drift, P1000/P1001, pending error hoặc schema không khớp, **dừng và xác minh** thay vì `migrate reset`, `db push` hoặc `migrate resolve` tùy tiện. `npm run db:generate` chạy **sau** migrate như checklist reviewer yêu cầu. Bước seed nếu cần demo: đối chiếu `backend/prisma/seed.ts` và chỉ chạy `npm run db:seed` trên database test sau khi được phép.
 
 **Kiểm tra runtime hiện tại:** Dùng Swagger/source/controller ở commit `dev` mới nhất để xác nhận `POST /payments/vnpay/initiate`; chỉ test nó trên Order test còn hạn và merchant Sandbox hợp lệ. Chưa thể chạy GET Status, IPN callback, QueryDR hay ZERO_AMOUNT khi các route/client vẫn thiếu. Một response `404` tại `/` chỉ cho biết root chưa có handler, **không** xác nhận endpoint VNPay hoạt động.
 
 ### 3.3. Biến môi trường mẫu an toàn
 
-**Đã xác minh từ `.env.example` được cung cấp (tên biến đang tồn tại trong snapshot; kiểm tra lại trên `dev` mới nhất):**
+**Các biến trong `backend/.env.example` được cung cấp (điền giá trị thật ở `backend/.env`, không commit):**
 
 | Tên biến | Vai trò theo comment trong file | Ghi chú |
 |---|---|---|
-| `DATABASE_URL` | PostgreSQL cho Backend | Giữ bí mật URL có password; không chép giá trị thực vào tài liệu |
-| `PORT` | Port Backend; mẫu hiện là `3001` | Port được khai báo; chưa đối chiếu `main.ts` |
-| `JWT_SECRET` | Khóa JWT | Tạo ngẫu nhiên và lưu cục bộ, không commit |
-| `INTERNAL_SECRET` | Khóa API chuyển trạng thái Order nội bộ | Khác JWT và VNPay HashSecret |
-| `ORDER_EXPIRATION_ENABLED` | Bật/tắt background expiration | Mẫu hiện là `true`; chưa kiểm chứng Scheduler source |
-| `ORDER_EXPIRATION_BATCH_SIZE` | Giới hạn batch quét | Mẫu hiện là `50` |
-| `AUTH_TEST_DATABASE_URL`, `ORDERS_TEST_DATABASE_URL` | Các URL database kiểm thử riêng | Không sử dụng database chung/production cho SIT |
+| `DATABASE_URL` | **Bắt buộc** cho Prisma migrate/backend DB | Điền URL PostgreSQL test/dev thực tế (`postgresql://USER:PASSWORD@HOST:PORT/DB?schema=public`); kiểm tra DB đích trước migrate, không dùng URL ví dụ `CHANGE_ME` |
+| `PORT` | Port Backend, ví dụ `3001` | Đồng bộ với `NEXT_PUBLIC_API_URL` bên frontend; kiểm tra actual listener |
+| `JWT_SECRET` | **Bắt buộc** để xác thực JWT khi chạy protected flows | Điền chuỗi ngẫu nhiên đủ mạnh, không bỏ trống, không commit |
+| `INTERNAL_SECRET` | **Bắt buộc** cho internal order-advance flow | Điền chuỗi ngẫu nhiên riêng, khác JWT và VNPay HashSecret; không commit |
+| `ORDER_EXPIRATION_ENABLED` | Background order expiration | Giữ `true` theo template nếu muốn chạy luồng expiration; xác minh source runtime |
+| `ORDER_EXPIRATION_BATCH_SIZE` | Giới hạn batch expiration | Giữ `50` theo template nếu phù hợp; xác minh source runtime |
+| `AUTH_TEST_DATABASE_URL`, `ORDERS_TEST_DATABASE_URL` | Dùng cho các integration test tương ứng | Chỉ cần điền khi chạy test có yêu cầu các URL này; dùng DB test tách biệt, không dùng DB chung/production |
+
+**Phân loại bắt buộc:** `DATABASE_URL`, `JWT_SECRET`, `INTERNAL_SECRET` cần điền giá trị thật để chạy các luồng DB/auth/internal tương ứng; `PORT`, `ORDER_EXPIRATION_ENABLED`, `ORDER_EXPIRATION_BATCH_SIZE` đã có giá trị mẫu để kiểm tra/giữ lại. Hai `*_TEST_DATABASE_URL` chỉ áp dụng khi chạy integration tests. Không suy diễn mọi key là yêu cầu khởi động tuyệt đối của tất cả service nếu chưa kiểm tra runtime validation. **Để test VNPay initiate**, phải bổ sung đúng merchant Sandbox credentials/return URL theo tên biến mà source `dev` đang đọc, không dùng các placeholder dưới đây như thể đã verify.
 
 **Config names:** Template Backend được cung cấp chưa chứa `VNPAY_*`; Contract v4.0 khóa chính sách Mock nhưng không tự xác nhận tất cả tên biến. Đối chiếu tên thực tế của từng key với `backend/src` trước khi chạy. Với Next.js, `NEXT_PUBLIC_API_URL` là **địa chỉ Backend công khai với browser** (không chứa secret).
 
@@ -379,15 +406,15 @@ Trước khi mở tunnel/giao dịch:
 | Duplicate IPN cộng điểm hai lần | Finalization thiếu khóa/unique/idempotency | Rà DB transaction, unique SUCCESS/Order; không sửa dữ liệu production bằng tay |
 | Merchant không cho đăng ký IPN URL ngẫu nhiên | Sandbox merchant cần domain/cấu hình ổn định | Dùng tên miền HTTPS test cố định do nhóm quản lý hoặc liên hệ VNPay Sandbox support |
 
-## 10. Verification sau khi sync latest `dev`
+## 10. Verification tại commit `dev` mà branch tài liệu đang dựa trên
 
-Từ clone mới nhất của `dev`, xác minh controller/module thực tế, route prefix và thư mục `frontend` trước khi coi một route hoạt động. Trong `backend` dùng scripts hiện có trong `package.json`:
+Từ checkout đã đối chiếu với runtime `dev`, xác minh controller/module thực tế, route prefix và thư mục `frontend` trước khi coi một route hoạt động. Không yêu cầu sync `dev` thêm chỉ để sửa hai điểm review này. Trong `backend` dùng scripts hiện có trong `package.json`:
 
 ```bash
 # Git Bash, sau khi vào repository root
 cd backend
 npm ci
-# Configure backend/.env DATABASE_URL to test PostgreSQL first.
+# cp .env.example .env (nếu chưa tạo); điền DATABASE_URL, JWT_SECRET, INTERNAL_SECRET.
 npm run db:validate
 npm run db:migrate
 npx prisma migrate status --config prisma7.config.ts
@@ -400,7 +427,7 @@ npm run start:dev
 # PowerShell, sau khi vào repository root
 Set-Location backend
 npm ci
-# Configure backend/.env DATABASE_URL to test PostgreSQL first.
+# cp .env.example .env (nếu chưa tạo); điền DATABASE_URL, JWT_SECRET, INTERNAL_SECRET.
 npm run db:validate
 npm run db:migrate
 npx prisma migrate status --config prisma7.config.ts
@@ -409,17 +436,17 @@ npm run build
 npm run start:dev
 ```
 
-Frontend nếu cần khởi động được cấu hình trong `frontend/.env.local` với `NEXT_PUBLIC_API_URL=http://localhost:3001` (**không có secret**) và chỉ điều hướng `/order-confirmation` nếu route thực sự có trong source `dev` hiện tại. **Do chưa có Status API, giao diện không được lấy query của Return URL để tự coi thanh toán SUCCESS.**
+Frontend khởi động ở terminal thứ hai: từ `backend/` chạy `cd ../frontend`, `npm ci`, tạo/chỉnh `frontend/.env.local`, sau đó `npm run dev`. File cấu hình cần `NEXT_PUBLIC_API_URL=http://localhost:3001` (**không có secret**) và chỉ điều hướng `/order-confirmation` nếu route thực sự có trong source `dev` hiện tại. **Do chưa có Status API, giao diện không được lấy query của Return URL để tự coi thanh toán SUCCESS.**
 
 Tài liệu tự tham chiếu: `docs/integration/VNPay_Sandbox_Setup.md`. API design: `docs/api/BrewLite_API_Contract_v4.0.md` (đối chiếu vị trí thực tế trong `dev`). Không dùng bản tài liệu cũ như bằng chứng API đã implement.
 
-## 11. Tiêu chí bàn giao – PR #121: VNPay Sandbox Setup Guide
+## 11. Tiêu chí bàn giao – VNPay Sandbox Setup Guide
 
 - [x] Phân biệt **Implemented now** (VNPay initiate) với **Required before E2E / BLOCKED** (Status, public IPN, QueryDR, ZERO_AMOUNT) theo review runtime 02/11/2026.
 - [x] Các phần IPN/Status/QueryDR/ZERO_AMOUNT được viết như **design/future tasks**, không phải setup steps chạy ngay.
-- [x] Fresh-clone: `DATABASE_URL` → `npm run db:migrate` → `npm run db:generate` → `npm run start:dev`, có `migrate status` và kiểm tra target DB.
+- [x] Fresh-clone: từ `backend/.env.example` tạo `backend/.env`, điền `DATABASE_URL`, `JWT_SECRET`, `INTERNAL_SECRET`, kiểm tra `PORT`/expiration; `db:migrate` → `db:generate` → `start:dev` và mở frontend (`npm ci` → `.env.local` → `npm run dev`).
 - [x] Secrets/env và Return URL trust boundary được giữ nguyên; Return URL không được quyết định success.
-- [x] Bỏ tham chiếu PR cũ; thay tiêu chí/tên PR đúng scope **PR #121 – VNPay Sandbox Setup Guide**.
-- [ ] Thực hiện `git fetch origin && git merge origin/dev` (hoặc rebase có chủ đích) trên branch VNPay Setup **trước khi commit/push**. Việc sync remote phải do người có repo access thực hiện; file này không xác nhận đã sync.
+- [x] Loại bỏ số PR khỏi metadata tài liệu để tránh stale; scope là **VNPay Sandbox Setup Guide**.
+- [x] Không yêu cầu sync `dev` bổ sung chỉ để sửa các review comments còn lại; trước khi chạy thực tế vẫn cần kiểm tra runtime ở commit đang checkout.
 - [ ] Reviewer kiểm tra runtime implementation tại commit `dev` hiện hành; chỉ thay đổi cột status khi có route/source/test chứng minh.
-- [ ] PR #121 được review và approve; E2E remains BLOCKED until implementation tasks merge.
+- [ ] PR được reviewer review và approve; E2E remains BLOCKED until implementation tasks merge.
