@@ -83,6 +83,56 @@ The `migrate` service can run again when its container is recreated. `prisma
 migrate deploy` applies only pending migrations; migrations already recorded as
 completed are not applied again.
 
+## Manual demo catalog seed
+
+Seed is manual and may be run only after `migrate` has completed successfully.
+It is not part of `docker compose up`, so starting the stack never inserts demo
+catalog data automatically.
+
+Before seeding, verify that the Compose PostgreSQL container reports the
+expected database, nine completed migrations, and no existing products:
+
+```bash
+bash scripts/compose-preflight-env.sh && docker compose --env-file compose.env exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT current_database() AS database_name, (SELECT count(*) FROM \"_prisma_migrations\" WHERE finished_at IS NOT NULL) AS completed_migrations, (SELECT count(*) FROM products) AS product_count;"'
+```
+
+Expected values before the first demo seed are `brewlite_compose`, `9`, and `0`.
+Stop and investigate if any value differs; do not use `prisma migrate reset`,
+`prisma db push`, or `docker compose down -v` to prepare a database for seed.
+
+The seed guard permits Compose only when all of these are exact: database
+`brewlite_compose`, hostname `postgres`, port `5432`, and
+`ALLOW_COMPOSE_DEMO_SEED=true`. Pass the flag directly to the one-shot seed
+container; setting it only in Git Bash would not pass it to the container:
+
+```bash
+bash scripts/compose-preflight-env.sh && docker compose --env-file compose.env build migrate
+bash scripts/compose-preflight-env.sh && docker compose --env-file compose.env run --rm --no-deps -e ALLOW_COMPOSE_DEMO_SEED=true migrate npm run db:seed
+```
+
+The `build migrate` step is required after changing or pulling `seed.ts` so the
+one-shot container uses the current guarded seed code. It does not start a
+container or run the seed.
+
+The seed transaction refuses databases containing a product outside the nine
+demo product IDs. It does not delete or deactivate legacy products, reset stock,
+or modify orders, payments, or other transaction data. Re-running the seed does
+not duplicate rows or reset stock, but can update names and prices of the nine
+sample products by design.
+
+Verify the seeded catalog through the API and frontend:
+
+```bash
+bash scripts/compose-preflight-env.sh && docker compose --env-file compose.env exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT (SELECT count(*) FROM categories) AS categories, (SELECT count(*) FROM products) AS products, (SELECT count(*) FROM toppings) AS toppings;"'
+curl --fail --silent http://localhost:3000/api/backend/products | node -e 'let body=""; process.stdin.on("data", (chunk) => body += chunk).on("end", () => { const items = JSON.parse(body).items; if (!Array.isArray(items) || items.length !== 9) process.exit(1); console.log("API product count: 9"); })'
+curl --fail http://localhost:3000/images/bac-xiu-kem-beo-phin.jpg
+```
+
+Expected database counts are 4 categories, 9 products, and 5 toppings. Open
+`http://localhost:3000/` in a browser and confirm that all nine products and
+their images render. Do not add `ALLOW_COMPOSE_DEMO_SEED=true` to Compose,
+`compose.env`, or any default environment file.
+
 ## Logs, status, and smoke checks
 
 ```bash
