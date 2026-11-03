@@ -94,12 +94,13 @@ migration ledger trước khi chạy.
 ### Kết quả xác minh ngày 03/11/2026
 
 Branch: `SCRUM-85-P2-11-Implement-Mock-Payment-Environment-Access-Policy`.
+Đã đồng bộ `origin/dev` tại `7da19aa`, gồm P2-09 và P2-10.
 
 - `npm run build`, `npx tsc --noEmit`, `npm run lint`: pass.
-- Toàn bộ unit: **243 passed**, 28 files.
-- Toàn bộ HTTP E2E: **211 passed**, 8 files.
+- Toàn bộ unit: **263 passed**, 29 files.
+- Toàn bộ HTTP E2E: **220 passed**, 9 files.
 - Toàn bộ PostgreSQL integration với `PAYMENT_CONCURRENCY_TESTS=1`:
-  **173 passed**, 10 files; không có test skip.
+  **224 passed**, 12 files; không có test skip.
 - Riêng `payments-postgres.integration-spec.ts`: **42 passed**, gồm 12 case
   mới về environment policy, receipt replay và cross-provider safety.
 - P2-11 còn bổ sung 16 unit case và 9 HTTP case; regression Mock cũ giữ nguyên
@@ -111,5 +112,6 @@ Integration chạy trên cluster PostgreSQL test tạm riêng tại
 migration mới. Cluster test được dừng sau khi kiểm tra.
 
 Vitest cần chạy ngoài sandbox do sandbox chặn tạo process (`spawn EPERM`).
+Compose environment preflight và `docker compose config --quiet`: pass với env tạm.
 Không chạy Docker/Compose E2E trong lần này vì Docker daemon chưa chạy;
 production denial được kiểm tra bằng unit, HTTP và PostgreSQL integration.
