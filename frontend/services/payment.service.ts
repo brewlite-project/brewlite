@@ -1681,7 +1681,7 @@ export async function submitZeroAmountPaymentApi(
   // Bắt buộc kiểm tra đầy đủ các trường của DTO trả về từ Backend (BLOCKER: Không tự điền fallback hay hardcode SUCCESS/PAID)
   if (
     typeof record.paymentId !== "string" ||
-    record.paymentId.trim().length === 0 ||
+    !isValidUuid(record.paymentId.trim()) ||
     typeof record.orderId !== "string" ||
     !isValidUuid(record.orderId.trim()) ||
     record.orderId.trim().toLowerCase() !== cleanOrderId ||
@@ -1691,7 +1691,7 @@ export async function submitZeroAmountPaymentApi(
     record.amountVnd !== 0 ||
     record.pointsEarned !== 0 ||
     typeof record.createdAt !== "string" ||
-    Number.isNaN(Date.parse(record.createdAt))
+    !isValidIsoUtcString(record.createdAt)
   ) {
     throw createPaymentError(
       "Dữ liệu phản hồi quyết toán 0đ từ máy chủ không hợp lệ hoặc thiếu trường bắt buộc.",

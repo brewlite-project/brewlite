@@ -1122,7 +1122,7 @@ describe("VNPay Phase 2 UI & Flow Deep Test Suite", () => {
         capturedUrl = String(input);
         return new Response(
           JSON.stringify({
-            paymentId: "pay-zero-test-01",
+            paymentId: "550e8400-e29b-41d4-a716-446655440020",
             orderId: "550e8400-e29b-41d4-a716-446655440000",
             provider: "ZERO_AMOUNT",
             paymentStatus: "SUCCESS",
@@ -1276,42 +1276,125 @@ describe("VNPay Phase 2 UI & Flow Deep Test Suite", () => {
       );
     });
 
-    it("10.8 submitZeroAmountPaymentApi strictly validates response DTO and throws error on incomplete fields without falling back", async () => {
+    it("10.8 submitZeroAmountPaymentApi test matrix: strictly rejects malformed ZERO_AMOUNT DTOs", async () => {
       const { submitZeroAmountPaymentApi } = await import("../services/payment.service");
 
-      // Trường hợp backend trả về HTTP 200 nhưng thiếu trường paymentId hoặc paymentStatus
-      globalThis.fetch = async () =>
-        new Response(
-          JSON.stringify({
-            orderId: "550e8400-e29b-41d4-a716-446655440000",
-            // missing paymentId
-            provider: "ZERO_AMOUNT",
-            // missing paymentStatus & orderStatus
-            amountVnd: 0,
-            pointsEarned: 0,
-            createdAt: new Date().toISOString(),
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } }
-        );
+      const validOrderId = "550e8400-e29b-41d4-a716-446655440000";
+      const validPayload = {
+        paymentId: "550e8400-e29b-41d4-a716-446655440020",
+        orderId: validOrderId,
+        provider: "ZERO_AMOUNT",
+        paymentStatus: "SUCCESS",
+        orderStatus: "PAID",
+        amountVnd: 0,
+        pointsEarned: 0,
+        createdAt: "2026-11-04T00:00:00.000Z",
+      };
 
-      await assert.rejects(
-        async () => {
-          await submitZeroAmountPaymentApi(
-            { orderId: "550e8400-e29b-41d4-a716-446655440000" },
-            "idem-key-zero-missing-field",
-            { accessToken: createTestJwt() }
-          );
+      const testCases: Array<{ name: string; malformed: Record<string, unknown> }> = [
+        // 1. invalid paymentId
+        {
+          name: "invalid paymentId (non-UUID string)",
+          malformed: { ...validPayload, paymentId: "not-a-valid-uuid" },
         },
-        (err: unknown) => {
-          const e = err as { code?: string; message?: string };
-          assert.strictEqual(e.code, "SERVER_ERROR");
-          assert.ok(
-            e.message?.includes("không hợp lệ hoặc thiếu trường bắt buộc"),
-            "Must reject response when required fields are missing"
-          );
-          return true;
-        }
-      );
+        {
+          name: "invalid paymentId (empty string)",
+          malformed: { ...validPayload, paymentId: "" },
+        },
+        {
+          name: "invalid paymentId (missing/null)",
+          malformed: { ...validPayload, paymentId: null },
+        },
+        // 2. orderId mismatch
+        {
+          name: "orderId mismatch (different UUID)",
+          malformed: { ...validPayload, orderId: "660e8400-e29b-41d4-a716-446655440099" },
+        },
+        {
+          name: "orderId invalid (non-UUID)",
+          malformed: { ...validPayload, orderId: "order-12345" },
+        },
+        // 3. provider mismatch
+        {
+          name: "provider mismatch (VNPAY instead of ZERO_AMOUNT)",
+          malformed: { ...validPayload, provider: "VNPAY" },
+        },
+        // 4. paymentStatus mismatch
+        {
+          name: "paymentStatus mismatch (PENDING instead of SUCCESS)",
+          malformed: { ...validPayload, paymentStatus: "PENDING" },
+        },
+        {
+          name: "paymentStatus mismatch (FAILED instead of SUCCESS)",
+          malformed: { ...validPayload, paymentStatus: "FAILED" },
+        },
+        // 5. orderStatus mismatch
+        {
+          name: "orderStatus mismatch (PENDING instead of PAID)",
+          malformed: { ...validPayload, orderStatus: "PENDING" },
+        },
+        {
+          name: "orderStatus mismatch (CANCELLED instead of PAID)",
+          malformed: { ...validPayload, orderStatus: "CANCELLED" },
+        },
+        // 6. amount != 0
+        {
+          name: "amount != 0 (positive amount)",
+          malformed: { ...validPayload, amountVnd: 50000 },
+        },
+        {
+          name: "amount != 0 (negative amount)",
+          malformed: { ...validPayload, amountVnd: -1000 },
+        },
+        // 7. invalid/non-ISO createdAt
+        {
+          name: "invalid createdAt (non-ISO format with spaces)",
+          malformed: { ...validPayload, createdAt: "2026-11-04 10:00:00" },
+        },
+        {
+          name: "invalid createdAt (non-UTC offset +07:00)",
+          malformed: { ...validPayload, createdAt: "2026-11-04T10:00:00+07:00" },
+        },
+        {
+          name: "invalid createdAt (unparseable string)",
+          malformed: { ...validPayload, createdAt: "invalid-date-string" },
+        },
+        {
+          name: "invalid createdAt (epoch number instead of string)",
+          malformed: { ...validPayload, createdAt: Date.now() },
+        },
+      ];
+
+      for (const tc of testCases) {
+        globalThis.fetch = async () =>
+          new Response(JSON.stringify(tc.malformed), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+
+        await assert.rejects(
+          async () => {
+            await submitZeroAmountPaymentApi(
+              { orderId: validOrderId },
+              `idem-matrix-${tc.name.replace(/[^a-zA-Z0-9]/g, "-")}`,
+              { accessToken: createTestJwt() }
+            );
+          },
+          (err: unknown) => {
+            const e = err as { code?: string; message?: string };
+            assert.strictEqual(
+              e.code,
+              "SERVER_ERROR",
+              `Test case [${tc.name}] must throw SERVER_ERROR`
+            );
+            assert.ok(
+              e.message?.includes("không hợp lệ hoặc thiếu trường bắt buộc"),
+              `Test case [${tc.name}] error message should explain invalid response: ${e.message}`
+            );
+            return true;
+          }
+        );
+      }
     });
   });
 
@@ -1507,6 +1590,71 @@ describe("VNPay Phase 2 UI & Flow Deep Test Suite", () => {
         cartCleared,
         false,
         "Cart must NOT be cleared when zero amount payment fails with 404"
+      );
+    });
+
+    it("does NOT clear cart or navigate success when zero-amount API throws due to malformed DTO (invalid paymentId or invalid createdAt)", async () => {
+      let cartCleared = false;
+      const customCartContext: CartContextValue = {
+        ...mockCartContext,
+        clearCart: () => {
+          cartCleared = true;
+        },
+      };
+
+      const zeroOrder = createSampleOrder({
+        status: "PENDING",
+        totalVnd: 0,
+        subtotalVnd: 70000,
+        discountVnd: 70000,
+      });
+
+      // Simulates submitZeroAmountPaymentApi throwing SERVER_ERROR on malformed DTO
+      const malformedZeroApi = async () => {
+        const err = new Error("Dữ liệu phản hồi quyết toán 0đ từ máy chủ không hợp lệ hoặc thiếu trường bắt buộc.") as Error & { code: string; statusCode: number };
+        err.code = "SERVER_ERROR";
+        err.statusCode = 500;
+        throw err;
+      };
+
+      await act(async () => {
+        root = createRoot(container);
+        root.render(
+          React.createElement(
+            AuthContext.Provider,
+            { value: mockAuthContext },
+            React.createElement(
+              CartContext.Provider,
+              { value: customCartContext },
+              React.createElement(PaymentPageView, {
+                initialOrder: zeroOrder as unknown as CreateOrderResponseDto,
+                initialMethod: "VNPAY",
+                submitZeroAmountFn: malformedZeroApi,
+              })
+            )
+          )
+        );
+      });
+
+      const bypassBtn = container.querySelector("#btnZeroPaymentBypass") as HTMLButtonElement;
+      assert.ok(bypassBtn, "Must render #btnZeroPaymentBypass");
+
+      await act(async () => {
+        bypassBtn.click();
+        await new Promise((r) => setTimeout(r, 50));
+      });
+
+      assert.strictEqual(
+        cartCleared,
+        false,
+        "Cart must NOT be cleared when zero amount response validation fails"
+      );
+
+      // Verify error notice is displayed on the page
+      const errorBanner = container.querySelector("#paymentErrorBanner");
+      assert.ok(
+        errorBanner || container.textContent?.includes("không hợp lệ"),
+        "Error banner or message must be presented to user when DTO is malformed"
       );
     });
   });
