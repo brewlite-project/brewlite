@@ -88,7 +88,7 @@ brewlite/
 
 ## 7. Cài đặt và chạy local
 
-**Yêu cầu:** Git, Node.js LTS tương thích với `package.json`, npm; PostgreSQL hoặc Docker nếu backend đang dùng database. Các câu lệnh dưới đây áp dụng khi repo sử dụng npm và script `dev` / `start:dev` mặc định; kiểm tra `package.json` trước khi chạy.
+**Yêu cầu:** Git, Node.js LTS tương thích với `package.json`, npm; **Docker Desktop** (đã bật `Engine running`, hỗ trợ `docker compose` v2+) hoặc PostgreSQL nếu chạy thủ công ngoài Docker. Các câu lệnh dưới đây áp dụng khi repo sử dụng npm và script `dev` / `start:dev` mặc định; kiểm tra `package.json` trước khi chạy.
 
 ```bash
 git clone <URL_REPOSITORY>
@@ -115,13 +115,59 @@ npm run start:dev
 
 Tạo `.env` cục bộ theo `.env.example` **sau khi nhóm thêm đủ biến**. Ví dụ biến cấu hình có thể bao gồm `DATABASE_URL`, `JWT_SECRET` và URL backend cho frontend; tên biến chính xác phải khớp source code. **Không commit `.env`.**
 
-**Docker Compose (mục tiêu Sprint 3):** khi `docker-compose.yml` đã hoàn thành và kiểm thử, chạy:
+### 7.2. Chạy toàn bộ hệ thống bằng Docker Compose (Khuyến nghị)
+
+**Yêu cầu trước khi chạy:**
+- Đã cài và bật **Docker Desktop** (trạng thái `Engine running`, hỗ trợ `docker compose` v2+).
+- Trên Windows, có thể chạy bằng **Git Bash** (khuyến nghị khi dùng `.sh`) hoặc **Windows PowerShell** (dùng `.ps1`). Tuyệt đối không chạy lệnh `bash ...` trong PowerShell nếu máy chỉ có `C:\Windows\System32\bash.exe` (WSL launcher) mà chưa cài distro WSL Linux.
+- Hướng dẫn vận hành đầy đủ xem tại [`docs/Docker_Compose.md`](docs/Docker_Compose.md) và báo cáo kiểm chứng tại [`docs/verification/SCRUM92_Docker_Clean_Setup_Verification.md`](docs/verification/SCRUM92_Docker_Clean_Setup_Verification.md).
+
+#### Cách A — Chạy trên Git Bash (Windows) / Linux / macOS:
 
 ```bash
+# 1. Tạo file compose.env từ mẫu và tự điền mật khẩu/secret ngẫu nhiên local (không commit compose.env)
 cp compose.env.example compose.env
-# Điền các giá trị secret/password local vào compose.env (không commit compose.env)
+
+# 2. Kiểm tra preflight biến môi trường và build/khởi chạy 4 services (postgres, migrate, backend, frontend)
 bash scripts/compose-preflight-env.sh && docker compose --env-file compose.env up --build -d
-bash scripts/compose-preflight-env.sh && docker compose --env-file compose.env run --rm --no-deps -e ALLOW_COMPOSE_DEMO_SEED=true migrate npm run db:seed
+
+# 3. Xác minh deterministic container `migrate` đã hoàn tất với exit code = 0 trước khi seed (tránh race condition)
+bash scripts/compose-preflight-env.sh && \
+  test "$(docker inspect -f '{{.State.Status}}:{{.State.ExitCode}}' "$(docker compose --env-file compose.env ps -a -q migrate)")" = "exited:0" && \
+  echo "Migration verified (exited:0)"
+
+# 4. Chạy guarded demo seed (4 categories, 9 products, 5 toppings) sau khi migrate đã exited:0
+bash scripts/compose-preflight-env.sh && \
+  docker compose --env-file compose.env run --rm --no-deps -e ALLOW_COMPOSE_DEMO_SEED=true migrate npm run db:seed
+
+# 5. (Tùy chọn) Chạy script kiểm thử tích hợp E2E tự động (FE -> BE -> DB, Auth, Order, Payment, Restart Persistence)
+node scripts/scrum92/verify_compose_e2e.mjs
+```
+
+#### Cách B — Chạy trên Windows PowerShell:
+
+```powershell
+# 1. Tạo file compose.env từ mẫu và tự điền mật khẩu/secret ngẫu nhiên local (không commit compose.env)
+Copy-Item compose.env.example compose.env
+
+# 2. Kiểm tra preflight biến môi trường và build/khởi chạy 4 services (postgres, migrate, backend, frontend)
+powershell -ExecutionPolicy Bypass -File scripts/compose-preflight-env.ps1
+if ($LASTEXITCODE -ne 0) { throw "Compose preflight failed" }
+docker compose --env-file compose.env up --build -d
+
+# 3. Xác minh deterministic container `migrate` đã hoàn tất với exit code = 0 trước khi seed (tránh race condition)
+$migrateId = docker compose --env-file compose.env ps -a -q migrate
+$migrateState = if ($migrateId) { docker inspect -f '{{.State.Status}}:{{.State.ExitCode}}' $migrateId } else { '' }
+if ($migrateState -ne 'exited:0') { throw "Migration container has not completed cleanly (state=$migrateState)" }
+Write-Output "Migration verified ($migrateState)"
+
+# 4. Chạy guarded demo seed (4 categories, 9 products, 5 toppings) sau khi migrate đã exited:0
+powershell -ExecutionPolicy Bypass -File scripts/compose-preflight-env.ps1
+if ($LASTEXITCODE -ne 0) { throw "Compose preflight failed" }
+docker compose --env-file compose.env run --rm --no-deps -e ALLOW_COMPOSE_DEMO_SEED=true migrate npm run db:seed
+
+# 5. (Tùy chọn) Chạy script kiểm thử tích hợp E2E tự động (FE -> BE -> DB, Auth, Order, Payment, Restart Persistence)
+node scripts/scrum92/verify_compose_e2e.mjs
 ```
 
 ## 8. API dự kiến

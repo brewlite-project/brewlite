@@ -1,4 +1,4 @@
-# BrewLite Docker Compose (SCRUM-91 / P2-17)
+# BrewLite Docker Compose (SCRUM-91 / P2-17 & SCRUM-92 / P2-18)
 
 ## Scope and isolation
 
@@ -20,9 +20,14 @@ volume deliberately mounts its parent path `/var/lib/postgresql`.
 
 From the repository root, create a local file from the sample:
 
-```bash
-cp compose.env.example compose.env
-```
+- **Git Bash / Linux / macOS**:
+  ```bash
+  cp compose.env.example compose.env
+  ```
+- **Windows PowerShell**:
+  ```powershell
+  Copy-Item compose.env.example compose.env
+  ```
 
 Replace every required placeholder with locally generated values.
 `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB` must match their
@@ -43,36 +48,50 @@ only passed into a container when `docker-compose.yml` explicitly declares them
 under that service's `environment:` block. In particular, no secret is supplied
 to `frontend`, and no `NEXT_PUBLIC_*` variable is used.
 
-Exported variables in Git Bash have higher interpolation precedence than
+Exported variables in the current shell have higher interpolation precedence than
 `compose.env`. Before every Compose command, run the preflight from the
 repository root:
 
-```bash
-bash scripts/compose-preflight-env.sh
-```
+- **Git Bash / Linux / macOS**:
+  ```bash
+  bash scripts/compose-preflight-env.sh
+  ```
+- **Windows PowerShell**:
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File scripts/compose-preflight-env.ps1
+  ```
 
 It exits non-zero and prints only conflicting variable names when an exported
 variable could override the Compose configuration. It never prints or changes a
-secret value. Follow its `unset ...` instruction, then rerun the preflight.
+secret value. Follow its `unset ...` (or `Remove-Item Env:\...`) instruction,
+then rerun the preflight.
 
 ## Build and start
 
 Run from the repository root:
 
-```bash
-bash scripts/compose-preflight-env.sh && docker compose --env-file compose.env up --build -d
-bash scripts/compose-preflight-env.sh && docker compose --env-file compose.env ps
-```
+- **Git Bash / Linux / macOS**:
+  ```bash
+  bash scripts/compose-preflight-env.sh && docker compose --env-file compose.env up --build -d
+  bash scripts/compose-preflight-env.sh && docker compose --env-file compose.env ps -a
+  ```
+- **Windows PowerShell**:
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File scripts/compose-preflight-env.ps1
+  if ($LASTEXITCODE -ne 0) { throw "Compose preflight failed" }
+  docker compose --env-file compose.env up --build -d
+  docker compose --env-file compose.env ps -a
+  ```
 
 After changing a Dockerfile, Compose file, or dependencies, run
-`bash scripts/compose-preflight-env.sh && docker compose --env-file compose.env up --build -d`
+`docker compose --env-file compose.env up --build -d` (with preflight)
 again. `docker compose start` starts existing containers and does not build a
 new image.
 
 Startup sequence is:
 
 1. `postgres` becomes healthy through `pg_isready`.
-2. `migrate` runs `npm run db:migrate` once and exits successfully.
+2. `migrate` runs `npm run db:migrate` once and exits successfully (`Exited (0)`).
 3. `backend` starts after migration success.
 4. `frontend` starts after backend health is reported healthy.
 
@@ -85,16 +104,29 @@ completed are not applied again.
 
 ## Manual demo catalog seed
 
-Seed is manual and may be run only after `migrate` has completed successfully.
+Seed is manual and may be run only after `migrate` has completed successfully (`exited:0`).
 It is not part of `docker compose up`, so starting the stack never inserts demo
 catalog data automatically.
 
-Before seeding, verify that the Compose PostgreSQL container reports the
+Before seeding, deterministically verify that `migrate` has exited with code `0` and that the Compose PostgreSQL container reports the
 expected database, nine completed migrations, and no existing products:
 
-```bash
-bash scripts/compose-preflight-env.sh && docker compose --env-file compose.env exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT current_database() AS database_name, (SELECT count(*) FROM \"_prisma_migrations\" WHERE finished_at IS NOT NULL) AS completed_migrations, (SELECT count(*) FROM products) AS product_count;"'
-```
+- **Git Bash / Linux / macOS**:
+  ```bash
+  bash scripts/compose-preflight-env.sh && \
+    test "$(docker inspect -f '{{.State.Status}}:{{.State.ExitCode}}' "$(docker compose --env-file compose.env ps -a -q migrate)")" = "exited:0" && \
+    docker compose --env-file compose.env exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT current_database() AS database_name, (SELECT count(*) FROM \"_prisma_migrations\" WHERE finished_at IS NOT NULL) AS completed_migrations, (SELECT count(*) FROM products) AS product_count;"'
+  ```
+- **Windows PowerShell**:
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File scripts/compose-preflight-env.ps1
+  if ($LASTEXITCODE -ne 0) { throw "Compose preflight failed" }
+  $migrateId = docker compose --env-file compose.env ps -a -q migrate
+  if (-not $migrateId -or (docker inspect -f '{{.State.Status}}:{{.State.ExitCode}}' $migrateId) -ne 'exited:0') {
+    throw "Migration container has not completed with exit code 0"
+  }
+  docker compose --env-file compose.env exec -T postgres psql -U brewlite -d brewlite_compose -c 'SELECT current_database() AS database_name, (SELECT count(*) FROM "_prisma_migrations" WHERE finished_at IS NOT NULL) AS completed_migrations, (SELECT count(*) FROM products) AS product_count;'
+  ```
 
 Expected values before the first demo seed are `brewlite_compose`, `9`, and `0`.
 Stop and investigate if any value differs; do not use `prisma migrate reset`,
@@ -103,12 +135,26 @@ Stop and investigate if any value differs; do not use `prisma migrate reset`,
 The seed guard permits Compose only when all of these are exact: database
 `brewlite_compose`, hostname `postgres`, port `5432`, and
 `ALLOW_COMPOSE_DEMO_SEED=true`. Pass the flag directly to the one-shot seed
-container; setting it only in Git Bash would not pass it to the container:
+container; setting it only in Git Bash or PowerShell would not pass it to the container:
 
-```bash
-bash scripts/compose-preflight-env.sh && docker compose --env-file compose.env build migrate
-bash scripts/compose-preflight-env.sh && docker compose --env-file compose.env run --rm --no-deps -e ALLOW_COMPOSE_DEMO_SEED=true migrate npm run db:seed
-```
+- **Git Bash / Linux / macOS**:
+  ```bash
+  bash scripts/compose-preflight-env.sh && docker compose --env-file compose.env build migrate
+  bash scripts/compose-preflight-env.sh && \
+    test "$(docker inspect -f '{{.State.Status}}:{{.State.ExitCode}}' "$(docker compose --env-file compose.env ps -a -q migrate)")" = "exited:0" && \
+    docker compose --env-file compose.env run --rm --no-deps -e ALLOW_COMPOSE_DEMO_SEED=true migrate npm run db:seed
+  ```
+- **Windows PowerShell**:
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File scripts/compose-preflight-env.ps1
+  if ($LASTEXITCODE -ne 0) { throw "Compose preflight failed" }
+  docker compose --env-file compose.env build migrate
+  $migrateId = docker compose --env-file compose.env ps -a -q migrate
+  if (-not $migrateId -or (docker inspect -f '{{.State.Status}}:{{.State.ExitCode}}' $migrateId) -ne 'exited:0') {
+    throw "Migration container has not completed with exit code 0"
+  }
+  docker compose --env-file compose.env run --rm --no-deps -e ALLOW_COMPOSE_DEMO_SEED=true migrate npm run db:seed
+  ```
 
 The `build migrate` step is required after changing or pulling `seed.ts` so the
 one-shot container uses the current guarded seed code. It does not start a
@@ -128,6 +174,12 @@ curl --fail --silent http://localhost:3000/api/backend/products | node -e 'let b
 curl --fail http://localhost:3000/images/bac-xiu-kem-beo-phin.jpg
 ```
 
+Or run the cross-platform E2E verification script (works on both Git Bash and Windows PowerShell):
+
+```bash
+node scripts/scrum92/verify_compose_e2e.mjs
+```
+
 Expected database counts are 4 categories, 9 products, and 5 toppings. Open
 `http://localhost:3000/` in a browser and confirm that all nine products and
 their images render. Do not add `ALLOW_COMPOSE_DEMO_SEED=true` to Compose,
@@ -136,7 +188,7 @@ their images render. Do not add `ALLOW_COMPOSE_DEMO_SEED=true` to Compose,
 ## Logs, status, and smoke checks
 
 ```bash
-bash scripts/compose-preflight-env.sh && docker compose --env-file compose.env ps
+bash scripts/compose-preflight-env.sh && docker compose --env-file compose.env ps -a
 bash scripts/compose-preflight-env.sh && docker compose --env-file compose.env logs --tail 100 postgres migrate backend frontend
 curl --fail http://localhost:3000/
 curl --fail http://localhost:3001/
@@ -185,5 +237,5 @@ data that must be retained.
   separate frontend change and are outside P2-17.
 - The backend `GET /` healthcheck is liveness only, not a full PostgreSQL
   readiness check.
-- Docker build and runtime behavior must be proven by the clean-run work in
-  P2-18; see `docs/verification/SCRUM92_Docker_Clean_Setup_Verification.md` for full clean-setup verification evidence and cross-module findings.
+- Docker build and runtime behavior have been verified by the clean-run work in
+  P2-18; see `docs/verification/SCRUM92_Docker_Clean_Setup_Verification.md` for full clean-setup verification evidence, exact commands, sanitized outputs, and cross-module findings.
