@@ -120,7 +120,7 @@ export function VnPaySuccessView({
                   Thanh toán thành công qua VNPay!
                 </h1>
                 <p className="font-body-lg text-body-lg text-on-surface-variant max-w-[560px]">
-                  Cảm ơn <strong className="text-on-surface">{customerName}</strong>! Đơn hàng của bạn đã được xác nhận. Hóa đơn điện tử và chi tiết giao dịch đã được ghi nhận an toàn trên máy chủ.
+                  Cảm ơn <strong className="text-on-surface">{customerName}</strong>! Đơn hàng của bạn đã được xác nhận. Hóa đơn điện tử và chi tiết giao dịch đã được lưu trữ an toàn.
                 </p>
               </div>
 
