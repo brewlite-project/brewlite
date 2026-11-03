@@ -21,7 +21,11 @@ import {
   reserveInventory,
 } from './inventory-policy.js';
 import { runInventoryTransaction } from './inventory-transaction.js';
+
 import { mapOrderPaymentPresentation } from './order-payment-presentation.mapper.js';
+
+import { ORDER_TTL_MS } from './order-expiration.config.js';
+
 
 const SIZE_PERCENT = { S: 100, M: 120, L: 140, ONE_SIZE: 100 } as const;
 const pending = () =>
@@ -179,6 +183,8 @@ export class OrdersService {
           select: { id: true },
         });
         if (active) {
+          // An expired Order with VNPay PENDING remains active during Grace.
+          // Use the same locked policy as the Scheduler before reserving again.
           const status = await expireOrderInTransaction(tx, active.id);
           if (status === 'PENDING' || status === 'PAYMENT_FAILED')
             throw pending();
@@ -253,7 +259,10 @@ export class OrdersService {
           0n,
         );
         money(subtotal);
-        const now = new Date();
+        const [clock] = await tx.$queryRaw<{ now: Date }[]>`
+          SELECT clock_timestamp() AS now`;
+        if (!clock) throw new Error('Missing Order creation clock');
+        const now = clock.now;
         let discount = 0n;
         let coupon = dto.couponCode
           ? await tx.coupon.findUnique({ where: { code: dto.couponCode } })
@@ -276,7 +285,7 @@ export class OrdersService {
             userId,
             status: 'PENDING',
             createdAt: now,
-            expiresAt: new Date(now.getTime() + 15 * 60_000),
+            expiresAt: new Date(now.getTime() + ORDER_TTL_MS),
             subtotalVnd: subtotal,
             discountVnd: discount,
             totalVnd: subtotal - discount,

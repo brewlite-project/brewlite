@@ -8,6 +8,7 @@ import type { MockPaymentOutcome } from './mock-payment.service.js';
 import { readPaymentSnapshot } from './payment-snapshot.js';
 import { calculateLoyaltyPoints } from '../promotions/promotion-policy.js';
 import { cancelLockedOrderAndReleaseInTransaction } from '../orders/inventory-policy.js';
+import { ORDER_GRACE_MS } from '../orders/order-expiration.config.js';
 
 type Tx = Prisma.TransactionClient;
 type PaymentStatus = 'PENDING' | 'SUCCESS' | 'FAILED';
@@ -174,7 +175,7 @@ export class PaymentFinalizationService {
       )
       SELECT db_clock.now AS now,
              db_clock.now < orders.expires_at AS "beforeExpiry",
-             db_clock.now < orders.expires_at + INTERVAL '5 minutes' AS "beforeGraceEnd"
+             db_clock.now < orders.expires_at + (${ORDER_GRACE_MS} * INTERVAL '1 millisecond') AS "beforeGraceEnd"
       FROM orders CROSS JOIN db_clock
       WHERE orders.id = ${orderId}::uuid`;
     if (!clock) throw new Error('Missing payment finalization clock');

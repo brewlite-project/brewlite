@@ -8,17 +8,22 @@ import { PaymentsService } from './payments.service.js';
 import { PaymentsController } from './payments.controller.js';
 import { PaymentFinalizationService } from './payment-finalization.service.js';
 import { VnpayInitiationService } from './vnpay-initiation.service.js';
+import { VnpayIpnController } from './vnpay-ipn.controller.js';
+import { VnpayIpnService } from './vnpay-ipn.service.js';
+import { VnpayQueryDrService } from './vnpay-querydr.service.js';
 import {
   CreatePaymentPipe,
   IdempotencyKeyPipe,
 } from './payment-validation.pipe.js';
 @Module({
   imports: [AuthModule, PrismaModule],
-  controllers: [PaymentsController],
+  controllers: [PaymentsController, VnpayIpnController],
   providers: [
     MockPaymentService,
     PaymentFinalizationService,
     VnpayInitiationService,
+    VnpayIpnService,
+    VnpayQueryDrService,
     PaymentsService,
     CreatePaymentPipe,
     IdempotencyKeyPipe,

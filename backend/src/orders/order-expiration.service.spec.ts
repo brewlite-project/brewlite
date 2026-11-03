@@ -96,7 +96,14 @@ describe('Order expiration runner', () => {
       third,
     ]);
     expect(transaction).toHaveBeenCalledTimes(3);
-    expect(query.mock.calls[2].slice(1)).toEqual([cutoff, second, second, 2]);
+    expect(query.mock.calls[2].slice(1)).toEqual([
+      cutoff,
+      300_000,
+      cutoff,
+      second,
+      second,
+      2,
+    ]);
     expect(log).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(log.mock.calls)).not.toContain('private SQL');
   });
