@@ -18,6 +18,14 @@ COPY src ./src
 # Prisma config requires a URL to parse; generate is offline and does not connect.
 RUN DATABASE_URL="postgresql://build:build@127.0.0.1:5432/build_placeholder?schema=public" npm run db:generate
 RUN npm run build
+
+# This target intentionally retains Prisma CLI, config, schema, and migrations
+# for the one-shot Docker Compose migration service.
+FROM build AS migrate
+
+# Runtime dependencies are pruned in a separate stage so the migration target
+# retains the Prisma CLI.
+FROM build AS production-deps
 # Remove Prisma CLI, Nest CLI, TypeScript and other dev dependencies before copy.
 # npm keeps Prisma CLI as @prisma/client's optional peer, so remove it explicitly.
 RUN npm prune --omit=dev --omit=peer \
@@ -34,9 +42,9 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates libgcc-s1 libstdc++6 libssl3 zlib1g \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=build --chown=node:node /app/package.json ./package.json
-COPY --from=build --chown=node:node /app/node_modules ./node_modules
-COPY --from=build --chown=node:node /app/dist ./dist
+COPY --from=production-deps --chown=node:node /app/package.json ./package.json
+COPY --from=production-deps --chown=node:node /app/node_modules ./node_modules
+COPY --from=production-deps --chown=node:node /app/dist ./dist
 
 USER node
 EXPOSE 3001

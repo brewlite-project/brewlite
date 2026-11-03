@@ -1,0 +1,95 @@
+name: brewlite_compose
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-brewlite}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in compose.env}
+      POSTGRES_DB: ${POSTGRES_DB:-brewlite_compose}
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      # PostgreSQL 18+ stores PGDATA below this mount point.
+      - brewlite_pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    networks:
+      - brewlite_net
+
+  migrate:
+    build:
+      context: ./backend
+      target: migrate
+    restart: "no"
+    command: ["npm", "run", "db:migrate"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL with host postgres in compose.env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - brewlite_net
+
+  backend:
+    build:
+      context: ./backend
+      target: runtime
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL with host postgres in compose.env}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in compose.env}
+      INTERNAL_SECRET: ${INTERNAL_SECRET:?Set INTERNAL_SECRET in compose.env}
+      ORDER_EXPIRATION_ENABLED: ${ORDER_EXPIRATION_ENABLED:-true}
+      ORDER_EXPIRATION_BATCH_SIZE: ${ORDER_EXPIRATION_BATCH_SIZE:-50}
+      VNPAY_TMN_CODE: ${VNPAY_TMN_CODE:-}
+      VNPAY_HASH_SECRET: ${VNPAY_HASH_SECRET:-}
+      VNPAY_PAYMENT_URL: ${VNPAY_PAYMENT_URL:-}
+      VNPAY_RETURN_URL: ${VNPAY_RETURN_URL:-}
+      VNPAY_QUERYDR_URL: ${VNPAY_QUERYDR_URL:-}
+      VNPAY_QUERYDR_TIMEOUT_MS: ${VNPAY_QUERYDR_TIMEOUT_MS:-}
+    ports:
+      - "127.0.0.1:3001:3001"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      # Liveness only: GET / does not perform a database query.
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3001/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    networks:
+      - brewlite_net
+
+  frontend:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    environment:
+      BACKEND_INTERNAL_URL: http://backend:3001
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    networks:
+      - brewlite_net
+
+networks:
+  brewlite_net:
+
+volumes:
+  brewlite_pgdata:
