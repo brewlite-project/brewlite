@@ -3,3 +3,6 @@
 
 # Temporary SQL migration drafts
 /backend/product-catalog-upgrade-draft.sql
+
+# Local Docker Compose configuration
+/compose.env
