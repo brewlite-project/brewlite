@@ -79,7 +79,7 @@ hình VNPay và hoạt động độc lập với cờ bật/tắt Mock.
 Đã chạy ngày 03/11/2026 trên branch SCRUM-84:
 
 - Build, TypeScript check và lint: pass.
-- Toàn bộ unit: 241 passed; toàn bộ integration: 186 passed;
+- Toàn bộ unit: 247 passed; toàn bộ integration: 186 passed;
   toàn bộ E2E: 211 passed, không có case bị skip.
 - Riêng P2-10: 20 unit, 25 PostgreSQL integration và 9 HTTP/JWT/Swagger E2E.
 - Database test tạm tại `localhost:5433/brewlite_test` được áp dụng đủ 9 migration
