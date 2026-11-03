@@ -1,5 +1,6 @@
 import {
   Body,
+  BadRequestException,
   Controller,
   Headers,
   HttpCode,
@@ -22,6 +23,8 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import type { AuthenticatedUser } from '../auth/jwt.strategy.js';
 import { CreatePaymentDto } from './dto/create-payment.dto.js';
 import { PaymentResponseDto } from './dto/payment-response.dto.js';
+import { InitiateVnpayDto, VnpayInitiationResponseDto } from './dto/initiate-vnpay.dto.js';
+import { VnpayInitiationService } from './vnpay-initiation.service.js';
 import { PaymentProcessor } from './payment-processor.js';
 import {
   CreatePaymentPipe,
@@ -36,6 +39,7 @@ export class PaymentsController {
   constructor(
     @Inject(PaymentProcessor) private readonly processor: PaymentProcessor,
     @Inject(IdempotencyKeyPipe) private readonly keyPipe: IdempotencyKeyPipe,
+    private readonly vnpay: VnpayInitiationService,
   ) {}
   @Post()
   @HttpCode(200)
@@ -84,6 +88,34 @@ export class PaymentsController {
       this.keyPipe.transform(key),
       dto,
     );
+    res.setHeader('Idempotency-Replayed', String(result.replayed));
+    return result.response;
+  }
+
+  @Post('vnpay/initiate')
+  @ApiOperation({ summary: 'Create a signed VNPay Sandbox payment attempt' })
+  @ApiHeader({ name: 'Idempotency-Key', required: true, schema: { type: 'string', minLength: 8, maxLength: 64 } })
+  @ApiBody({ type: InitiateVnpayDto })
+  @ApiResponse({ status: 201, type: VnpayInitiationResponseDto })
+  @ApiResponse({ status: 200, type: VnpayInitiationResponseDto, description: 'Idempotency replay' })
+  @ApiResponse({ status: 400, description: 'VALIDATION_ERROR' })
+  @ApiResponse({ status: 401, description: 'UNAUTHORIZED' })
+  @ApiResponse({ status: 404, description: 'NOT_FOUND' })
+  @ApiResponse({ status: 409, description: 'ORDER_EXPIRED | ZERO_AMOUNT_REQUIRED | INVALID_TRANSITION | PAYMENT_IN_PROGRESS | IDEMPOTENCY_KEY_CONFLICT | FINANCIAL_EXCEPTION_REQUIRES_REVIEW' })
+  @ApiResponse({ status: 500, description: 'INTERNAL_ERROR' })
+  async initiateVnpay(
+    @Req() req: Request & { user: AuthenticatedUser },
+    @Headers('idempotency-key') key: unknown,
+    @Body() body: unknown,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<VnpayInitiationResponseDto> {
+    if (!body || typeof body !== 'object' || Array.isArray(body) ||
+      typeof (body as Record<string, unknown>).orderId !== 'string' ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test((body as Record<string, unknown>).orderId as string))
+      throw new BadRequestException({ statusCode: 400, message: ['orderId must be a UUID'], error: 'Bad Request', code: 'VALIDATION_ERROR' });
+    const dto = { orderId: ((body as Record<string, unknown>).orderId as string).toLowerCase() };
+    const result = await this.vnpay.initiate(req.user.userId, this.keyPipe.transform(key), dto, req.ip);
+    res.status(result.created ? 201 : 200);
     res.setHeader('Idempotency-Replayed', String(result.replayed));
     return result.response;
   }
