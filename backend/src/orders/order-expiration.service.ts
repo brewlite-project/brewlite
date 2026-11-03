@@ -11,6 +11,7 @@ import { runInventoryTransaction } from './inventory-transaction.js';
 import {
   ORDER_EXPIRATION_INTERVAL_MS,
   ORDER_EXPIRATION_OPTIONS,
+  ORDER_GRACE_MS,
   type OrderExpirationOptions,
 } from './order-expiration.config.js';
 
@@ -75,6 +76,15 @@ export class OrderExpirationService
         SELECT id FROM orders
         WHERE status IN ('PENDING', 'PAYMENT_FAILED')
           AND expires_at <= ${clock.cutoff}::timestamptz
+          AND (
+            expires_at + (${ORDER_GRACE_MS} * INTERVAL '1 millisecond') <= ${clock.cutoff}::timestamptz
+            OR NOT EXISTS (
+              SELECT 1 FROM payments
+              WHERE payments.order_id = orders.id
+                AND payments.provider = 'VNPAY'
+                AND payments.status = 'PENDING'
+            )
+          )
           AND (${cursor}::uuid IS NULL OR id > ${cursor}::uuid)
         ORDER BY id
         LIMIT ${this.options.batchSize}`;
@@ -82,7 +92,8 @@ export class OrderExpirationService
       for (const candidate of candidates) {
         if (this.stopping) return;
         try {
-          // Lock and recheck state/DB time inside a separate transaction per Order.
+          // The scan only finds candidates. Recheck Grace, attempts and DB time
+          // after the Order lock, shared with POST /orders lazy cleanup.
           await runInventoryTransaction(this.prisma, (tx) =>
             expireOrderInTransaction(tx, candidate.id),
           );
