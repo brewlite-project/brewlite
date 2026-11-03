@@ -3,7 +3,7 @@
 **Source baseline:** `SCRUM82_backend_snapshot.zip` (`git archive` ZIP comment: `04dcd26045d7ed4a5ce21b806d30d6c261db1552`).
 **Target:** branch `SCRUM-82-P2-08-Implement-Payment-Reconciliation-Scheduler` based on `origin/dev`.
 **Status:** implementation patch / static syntax review complete; **backend build, PostgreSQL integration and VNPay Sandbox runs NOT yet observed**.
-**Dependencies on the snapshot:** P2-04 `VnpayQueryDrClient`, P2-07 `PaymentFinalizationService`, existing Order expiration primitive.
+**Dependencies on the snapshot:** P2-04 `PaymentFinalizationService`, P2-07 `VnpayQueryDrClient`, existing Order expiration primitive.
 
 ## Intended behavior (BR-03 + BR-05 / API Contract v4.0)
 

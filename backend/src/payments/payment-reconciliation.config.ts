@@ -26,8 +26,16 @@ function integerEnv(name: string, fallback: number, min: number, max: number): n
 }
 
 export function getPaymentReconciliationOptions(): PaymentReconciliationOptions {
-  const enabled = process.env.PAYMENT_RECONCILIATION_ENABLED ?? 'false';
-  if (!['true', 'false'].includes(enabled))
+  // A missing or disabled scheduler must never pass unnoticed in production:
+  // otherwise PENDING gateway attempts can remain unreconciled indefinitely.
+  const runtime = process.env.NODE_ENV;
+  const production = runtime === 'production';
+  const enabled = process.env.PAYMENT_RECONCILIATION_ENABLED;
+  if (production && enabled !== 'true')
+    throw new Error('Production requires PAYMENT_RECONCILIATION_ENABLED=true and valid QueryDR configuration');
+  if (enabled === undefined && runtime !== 'test' && runtime !== 'development')
+    throw new Error('PAYMENT_RECONCILIATION_ENABLED must be explicit outside development/test');
+  if (enabled !== undefined && !['true', 'false'].includes(enabled))
     throw new Error('PAYMENT_RECONCILIATION_ENABLED must be true or false');
   const intervalMs = integerEnv('PAYMENT_RECONCILIATION_INTERVAL_MS', 60_000, 1_000, 300_000);
   const batchSize = integerEnv('PAYMENT_RECONCILIATION_BATCH_SIZE', 50, 1, 500);
