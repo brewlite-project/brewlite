@@ -125,7 +125,7 @@ expected database, nine completed migrations, and no existing products:
   if (-not $migrateId -or (docker inspect -f '{{.State.Status}}:{{.State.ExitCode}}' $migrateId) -ne 'exited:0') {
     throw "Migration container has not completed with exit code 0"
   }
-  docker compose --env-file compose.env exec -T postgres psql -U brewlite -d brewlite_compose -c 'SELECT current_database() AS database_name, (SELECT count(*) FROM "_prisma_migrations" WHERE finished_at IS NOT NULL) AS completed_migrations, (SELECT count(*) FROM products) AS product_count;'
+  'SELECT current_database() AS database_name, (SELECT count(*) FROM "_prisma_migrations" WHERE finished_at IS NOT NULL) AS completed_migrations, (SELECT count(*) FROM products) AS product_count;' | docker compose --env-file compose.env exec -T postgres sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
   ```
 
 Expected values before the first demo seed are `brewlite_compose`, `9`, and `0`.

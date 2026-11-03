@@ -2,9 +2,16 @@
  * SCRUM-92 / P2-18 — Reproducible Docker Compose Clean Setup & E2E Integration Verification
  * Works on both Git Bash and Windows PowerShell:
  *   node scripts/scrum92/verify_compose_e2e.mjs
+ *   node scripts/scrum92/verify_compose_e2e.mjs --cleanup-only
  *
- * All sensitive values (JWT access tokens, passwords, VNPay signatures/TmnCode) are
- * automatically sanitized in console output so logs can be pasted safely into PRs/docs.
+ * Determinism & Safety Guarantees:
+ * - Never runs `docker volume rm` or `docker compose down -v`.
+ * - Uses container-internal `$POSTGRES_USER` and `$POSTGRES_DB` via `sh -c 'psql ...'`.
+ * - Before running E2E flows, deterministically cleans up any prior SCRUM-92 synthetic test
+ *   records (`scrum92.verify.%@brewlite.vn`) and restores their reserved product stock inside
+ *   a single SQL transaction, so repeated runs never exhaust product stock.
+ * - Automatically redacts sensitive values (`<REDACTED_JWT>`, `<REDACTED_TMN_CODE>`,
+ *   `<REDACTED_SECURE_HASH>`) and strips trailing whitespace from console output.
  */
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -35,6 +42,13 @@ const COMPOSE_VARIABLES = [
   'VNPAY_QUERYDR_TIMEOUT_MS',
   'COMPOSE_PROJECT_NAME',
 ];
+
+function stripTrailingWhitespace(text) {
+  return String(text || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/[ \t]+$/gm, '')
+    .trim();
+}
 
 function checkPreflight() {
   const conflicts = COMPOSE_VARIABLES.filter((name) => process.env[name] !== undefined);
@@ -76,7 +90,7 @@ function runDockerCompose(args, input) {
       `docker compose ${args.join(' ')} failed (exit ${res.status}):\n${res.stdout || ''}\n${res.stderr || ''}`,
     );
   }
-  return (res.stdout || '').trim();
+  return stripTrailingWhitespace(res.stdout);
 }
 
 function inspectContainer(containerId, format) {
@@ -88,13 +102,111 @@ function inspectContainer(containerId, format) {
   if (res.error || res.status !== 0) {
     throw new Error(`docker inspect failed for ${containerId}: ${res.stderr || res.error?.message}`);
   }
-  return res.stdout.trim();
+  return stripTrailingWhitespace(res.stdout);
 }
 
-function runPsql(pgUser, pgDb, sql) {
+function runPsql(sql) {
   return runDockerCompose(
-    ['exec', '-T', 'postgres', 'psql', '-X', '-v', 'ON_ERROR_STOP=1', '-U', pgUser, '-d', pgDb, '-c', sql],
+    ['exec', '-T', 'postgres', 'sh', '-c', 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'],
+    sql,
   );
+}
+
+function runPsqlTuple(sql) {
+  return runDockerCompose(
+    ['exec', '-T', 'postgres', 'sh', '-c', 'psql -X -qAt -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'],
+    sql,
+  );
+}
+
+function cleanupScrum92TestData() {
+  const cleanupSql = `
+BEGIN;
+
+WITH target_users AS (
+  SELECT id
+  FROM users
+  WHERE email LIKE 'scrum92.verify.%@brewlite.vn'
+     OR email LIKE 'scrum92.docker.%@brewlite.vn'
+),
+target_orders AS (
+  SELECT id, status
+  FROM orders
+  WHERE user_id IN (SELECT id FROM target_users)
+),
+stock_to_restore AS (
+  SELECT oi.product_id, COALESCE(SUM(oi.quantity), 0)::int AS qty
+  FROM order_items oi
+  JOIN target_orders o ON o.id = oi.order_id
+  WHERE o.status <> 'CANCELLED'
+  GROUP BY oi.product_id
+),
+restored_products AS (
+  UPDATE products p
+  SET stock = p.stock + s.qty
+  FROM stock_to_restore s
+  WHERE p.id = s.product_id
+  RETURNING p.id, s.qty
+)
+SELECT COALESCE(SUM(qty), 0)::int AS restored_stock_units FROM restored_products;
+
+DELETE FROM payment_gateway_events
+WHERE payment_id IN (
+  SELECT id FROM payments
+  WHERE user_id IN (
+    SELECT id FROM users
+    WHERE email LIKE 'scrum92.verify.%@brewlite.vn'
+       OR email LIKE 'scrum92.docker.%@brewlite.vn'
+  )
+);
+
+DELETE FROM payments
+WHERE user_id IN (
+  SELECT id FROM users
+  WHERE email LIKE 'scrum92.verify.%@brewlite.vn'
+     OR email LIKE 'scrum92.docker.%@brewlite.vn'
+);
+
+DELETE FROM coupon_redemptions
+WHERE user_id IN (
+  SELECT id FROM users
+  WHERE email LIKE 'scrum92.verify.%@brewlite.vn'
+     OR email LIKE 'scrum92.docker.%@brewlite.vn'
+);
+
+DELETE FROM order_item_toppings
+WHERE order_item_id IN (
+  SELECT oi.id
+  FROM order_items oi
+  JOIN orders o ON o.id = oi.order_id
+  JOIN users u ON u.id = o.user_id
+  WHERE u.email LIKE 'scrum92.verify.%@brewlite.vn'
+     OR u.email LIKE 'scrum92.docker.%@brewlite.vn'
+);
+
+DELETE FROM order_items
+WHERE order_id IN (
+  SELECT o.id
+  FROM orders o
+  JOIN users u ON u.id = o.user_id
+  WHERE u.email LIKE 'scrum92.verify.%@brewlite.vn'
+     OR u.email LIKE 'scrum92.docker.%@brewlite.vn'
+);
+
+DELETE FROM orders
+WHERE user_id IN (
+  SELECT id FROM users
+  WHERE email LIKE 'scrum92.verify.%@brewlite.vn'
+     OR email LIKE 'scrum92.docker.%@brewlite.vn'
+);
+
+DELETE FROM users
+WHERE email LIKE 'scrum92.verify.%@brewlite.vn'
+   OR email LIKE 'scrum92.docker.%@brewlite.vn';
+
+COMMIT;
+`;
+  runPsqlTuple(cleanupSql);
 }
 
 async function jsonFetch(url, options = {}) {
@@ -121,6 +233,10 @@ function sanitizeVnpayUrl(rawUrl) {
 }
 
 async function waitForStackReady() {
+  const pgIdInitial = runDockerCompose(['ps', '-a', '-q', 'postgres']);
+  if (pgIdInitial && inspectContainer(pgIdInitial, '{{.State.Status}}') !== 'running') {
+    runDockerCompose(['start']);
+  }
   const deadline = Date.now() + 90_000;
   while (Date.now() < deadline) {
     const migrateId = runDockerCompose(['ps', '-a', '-q', 'migrate']);
@@ -156,28 +272,46 @@ async function waitForStackReady() {
 }
 
 async function main() {
+  const cliArgs = process.argv.slice(2);
+  if (cliArgs.some((arg) => arg !== '--cleanup-only')) {
+    console.error('Usage: node scripts/scrum92/verify_compose_e2e.mjs [--cleanup-only]');
+    process.exit(2);
+  }
+  const cleanupOnly = cliArgs.includes('--cleanup-only');
+
   console.log('=== [0] Preflight & Deterministic Container/Migration Check ===');
   checkPreflight();
   const envCfg = parseEnvFile(ENV_FILE);
-  const pgUser = envCfg.POSTGRES_USER || 'brewlite';
-  const pgDb = envCfg.POSTGRES_DB || 'brewlite_compose';
+  const expectedDb = envCfg.POSTGRES_DB || 'brewlite_compose';
 
   const states = await waitForStackReady();
   console.log('Container health states:', JSON.stringify(states));
   console.log(runDockerCompose(['ps', '-a']));
 
-  console.log('\n=== [1] Database Migration & Seed Verification (psql) ===');
+  const actualDb = runPsqlTuple('SELECT current_database();');
+  if (actualDb !== expectedDb || actualDb === 'brewlite_db') {
+    throw new Error(
+      `Refusing to run E2E verification on unexpected database "${actualDb}" (expected isolated Compose database "${expectedDb}").`,
+    );
+  }
+
+  console.log('\n=== [1] Database Migration, Seed & Scoped Test-Data Cleanup (psql) ===');
+  cleanupScrum92TestData();
   const dbCheckOut = runPsql(
-    pgUser,
-    pgDb,
     `SELECT current_database() AS database_name,
             (SELECT count(*) FROM "_prisma_migrations" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL) AS completed_migrations,
             (SELECT count(*) FROM categories) AS categories,
             (SELECT count(*) FROM products) AS products,
-            (SELECT count(*) FROM toppings) AS toppings;`,
+            (SELECT count(*) FROM toppings) AS toppings,
+            (SELECT stock FROM products WHERE id = 'a3000000-0000-4000-8000-000000000001') AS sample_product_stock;`,
   );
   console.log(dbCheckOut);
-  assert.match(dbCheckOut, /brewlite_compose\s+\|\s+9\s+\|\s+4\s+\|\s+9\s+\|\s+5/);
+  assert.match(dbCheckOut, new RegExp(`${expectedDb}\\s+\\|\\s+9\\s+\\|\\s+4\\s+\\|\\s+9\\s+\\|\\s+5\\s+\\|\\s+25`));
+
+  if (cleanupOnly) {
+    console.log('\n[SCRUM-92] Scoped test-data cleanup and stock restoration completed.');
+    return;
+  }
 
   console.log('\n=== [2] Smoke Check: Frontend, Backend Liveness & Swagger ===');
   const feHome = await fetch(`${FE_URL}/`);
@@ -207,6 +341,7 @@ async function main() {
   const sizeS = detailRes.body.sizes.find((s) => s.size === 'S');
   const firstTopping = detailRes.body.toppings[0];
   assert.ok(sizeS && firstTopping);
+  assert.equal(detailRes.body.isAvailable, true, 'Sample product must be available');
   console.log(
     JSON.stringify({
       endpoint: 'GET /api/backend/products',
@@ -215,9 +350,9 @@ async function main() {
       sampleProduct: {
         id: detailRes.body.id,
         name: detailRes.body.name,
+        isAvailable: detailRes.body.isAvailable,
         selectedSize: sizeS.size,
-        selectedSizePrice: sizeS.price,
-        firstTopping: { id: firstTopping.id, name: firstTopping.name, price: firstTopping.price },
+        firstTopping: { id: firstTopping.id, name: firstTopping.name },
       },
     }),
   );
@@ -441,7 +576,7 @@ async function main() {
        FROM orders o
        JOIN users u ON u.id = o.user_id
       WHERE o.id = '${orderId}';`;
-  const sqlBefore = runPsql(pgUser, pgDb, sqlSnapshotQuery);
+  const sqlBefore = runPsql(sqlSnapshotQuery);
   console.log(
     'Pre-Restart API Snapshot:',
     JSON.stringify({
@@ -477,7 +612,7 @@ async function main() {
   assert.equal(meAfter.status, 200);
   assert.equal(meAfter.body.loyaltyPoints, 10);
 
-  const sqlAfter = runPsql(pgUser, pgDb, sqlSnapshotQuery);
+  const sqlAfter = runPsql(sqlSnapshotQuery);
   console.log(
     'Post-Restart API Snapshot:',
     JSON.stringify({

@@ -62,11 +62,19 @@ Compose preflight passed: no conflicting environment variables detected.
 
 ## 2. Reproducible Verification Evidence (Exact Commands & Sanitized Outputs)
 
-All steps below can be re-executed at any time on either **Git Bash** or **Windows PowerShell** via the repository verification script:
+All steps below can be re-executed repeatedly on either **Git Bash** or **Windows PowerShell** via the repository verification script:
 
 ```bash
 node scripts/scrum92/verify_compose_e2e.mjs
 ```
+
+**Deterministic Rerun & Scoped Cleanup Design**:
+- Before running E2E flows, `scripts/scrum92/verify_compose_e2e.mjs` verifies that the target database is the isolated Compose database (`brewlite_compose`) and executes a single SQL transaction scoped strictly to `scrum92.verify.%@brewlite.vn` synthetic users: it restores the exact `stock` quantities reserved by any prior `SCRUM-92` test orders back to `products` (returning `sample_product_stock` to `25`) and deletes only those synthetic test records.
+- It never executes `docker volume rm` or `docker compose down -v`, and never modifies non-test data.
+- To clean up `SCRUM-92` test records and restore `stock = 25` without starting a new test run:
+  ```bash
+  node scripts/scrum92/verify_compose_e2e.mjs --cleanup-only
+  ```
 
 ### 2.1. Container / Service Status
 
@@ -78,11 +86,11 @@ docker compose --env-file compose.env ps -a
 **Sanitized Output**:
 ```text
 Container health states: {"migrateState":"exited:0","pgHealth":"running:healthy","beHealth":"running:healthy","feHealth":"running:healthy"}
-NAME                          IMAGE                       COMMAND                  SERVICE    CREATED          STATUS                     PORTS
-brewlite_compose-backend-1    brewlite_compose-backend    "docker-entrypoint.s…"   backend    46 minutes ago   Up 3 minutes (healthy)     127.0.0.1:3001->3001/tcp
-brewlite_compose-frontend-1   brewlite_compose-frontend   "docker-entrypoint.s…"   frontend   54 minutes ago   Up 3 minutes (healthy)     0.0.0.0:3000->3000/tcp, [::]:3000->3000/tcp
-brewlite_compose-migrate-1    brewlite_compose-migrate    "docker-entrypoint.s…"   migrate    54 minutes ago   Exited (0) 3 minutes ago   
-brewlite_compose-postgres-1   postgres:18-alpine          "docker-entrypoint.s…"   postgres   52 minutes ago   Up 3 minutes (healthy)     127.0.0.1:15432->5432/tcp
+NAME                          IMAGE                       COMMAND                  SERVICE    CREATED       STATUS                      PORTS
+brewlite_compose-backend-1    brewlite_compose-backend    "docker-entrypoint.s…"   backend    2 hours ago   Up 14 seconds (healthy)     127.0.0.1:3001->3001/tcp
+brewlite_compose-frontend-1   brewlite_compose-frontend   "docker-entrypoint.s…"   frontend   2 hours ago   Up 8 seconds (healthy)      0.0.0.0:3000->3000/tcp, [::]:3000->3000/tcp
+brewlite_compose-migrate-1    brewlite_compose-migrate    "docker-entrypoint.s…"   migrate    2 hours ago   Exited (0) 14 seconds ago
+brewlite_compose-postgres-1   postgres:18-alpine          "docker-entrypoint.s…"   postgres   2 hours ago   Up 21 seconds (healthy)     127.0.0.1:15432->5432/tcp
 ```
 
 ---
@@ -98,13 +106,13 @@ docker compose --env-file compose.env logs migrate
 ```text
 migrate-1  | > backend@0.0.1 db:migrate
 migrate-1  | > prisma migrate deploy --config prisma7.config.ts
-migrate-1  | 
+migrate-1  |
 migrate-1  | Loaded Prisma config from prisma7.config.ts.
 migrate-1  | Prisma schema loaded from prisma/schema.prisma.
 migrate-1  | Datasource "db": PostgreSQL database "brewlite_compose", schema "public" at "postgres:5432"
-migrate-1  | 
+migrate-1  |
 migrate-1  | 9 migrations found in prisma/migrations
-migrate-1  | 
+migrate-1  |
 migrate-1  | Applying migration `20261020143341_init_product_catalog`
 migrate-1  | Applying migration `20261021153059_extend_user_order_orderitem`
 migrate-1  | Applying migration `20261022011000_scrum36_active_order_coupon_constraints`
@@ -114,16 +122,16 @@ migrate-1  | Applying migration `20261024010000_order_item_one_size_constraint`
 migrate-1  | Applying migration `20261026065408_add_payment_schema`
 migrate-1  | Applying migration `20261031190000_scrum76_payment_pending_enum`
 migrate-1  | Applying migration `20261031190100_scrum76_payment_gateway_delta`
-migrate-1  | 
+migrate-1  |
 migrate-1  | All migrations have been successfully applied.
 migrate-1  | ...
 migrate-1  | No pending migrations to apply.
 ```
 
-**Command (Guarded Demo Seed & SQL Verification)**:
+**Command (Guarded Demo Seed & SQL Verification via Container Environment Variables)**:
 ```bash
 docker compose --env-file compose.env run --rm --no-deps -e ALLOW_COMPOSE_DEMO_SEED=true migrate npm run db:seed
-docker compose --env-file compose.env exec -T postgres psql -X -v ON_ERROR_STOP=1 -U brewlite -d brewlite_compose -c 'SELECT current_database() AS database_name, (SELECT count(*) FROM "_prisma_migrations" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL) AS completed_migrations, (SELECT count(*) FROM categories) AS categories, (SELECT count(*) FROM products) AS products, (SELECT count(*) FROM toppings) AS toppings;'
+docker compose --env-file compose.env exec -T postgres sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT current_database() AS database_name, (SELECT count(*) FROM \"_prisma_migrations\" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL) AS completed_migrations, (SELECT count(*) FROM categories) AS categories, (SELECT count(*) FROM products) AS products, (SELECT count(*) FROM toppings) AS toppings, (SELECT stock FROM products WHERE id = '\''a3000000-0000-4000-8000-000000000001'\'') AS sample_product_stock;"'
 ```
 
 **Sanitized Output**:
@@ -133,9 +141,9 @@ docker compose --env-file compose.env exec -T postgres psql -X -v ON_ERROR_STOP=
 
 Seed completed: 9 menu products, 5 toppings
 
-  database_name   | completed_migrations | categories | products | toppings 
-------------------+----------------------+------------+----------+----------
- brewlite_compose |                    9 |          4 |        9 |        5
+  database_name   | completed_migrations | categories | products | toppings | sample_product_stock
+------------------+----------------------+------------+----------+----------+----------------------
+ brewlite_compose |                    9 |          4 |        9 |        5 |                   25
 (1 row)
 ```
 
@@ -155,7 +163,7 @@ curl -s http://localhost:3000/api/backend/products/a3000000-0000-4000-8000-00000
 **Sanitized Output**:
 ```json
 {"frontendHomeStatus":200,"backendLivenessStatus":200,"swaggerDocsStatus":200,"staticProductImageStatus":200}
-{"endpoint":"GET /api/backend/products","status":200,"productCount":9,"sampleProduct":{"id":"a3000000-0000-4000-8000-000000000001","name":"Bạc Xỉu Kem Béo Phin","selectedSize":"S","firstTopping":{"id":"b2000000-0000-4000-8000-000000000002","name":"Kem cheese"}}}
+{"endpoint":"GET /api/backend/products","status":200,"productCount":9,"sampleProduct":{"id":"a3000000-0000-4000-8000-000000000001","name":"Bạc Xỉu Kem Béo Phin","isAvailable":true,"selectedSize":"S","firstTopping":{"id":"b2000000-0000-4000-8000-000000000002","name":"Kem cheese"}}}
 ```
 
 ---
@@ -169,7 +177,7 @@ curl -s http://localhost:3000/api/backend/products/a3000000-0000-4000-8000-00000
 
 **Sanitized Output**:
 ```json
-{"registerStatus":201,"loginStatus":200,"accessToken":"<REDACTED_JWT>","meProfile":{"id":"fdb49a39-98d4-4b6c-9021-58343d151e9f","email":"scrum92.verify.1793719683677@brewlite.vn","fullName":"SCRUM-92 Clean Verifier","loyaltyPoints":0}}
+{"registerStatus":201,"loginStatus":200,"accessToken":"<REDACTED_JWT>","meProfile":{"id":"3ed86c1c-2b5c-41fe-bb54-7eb89d43f7c9","email":"scrum92.verify.1793722647734@brewlite.vn","fullName":"SCRUM-92 Clean Verifier","loyaltyPoints":0}}
 ```
 
 ---
@@ -181,7 +189,7 @@ curl -s http://localhost:3000/api/backend/products/a3000000-0000-4000-8000-00000
 
 **Sanitized Output**:
 ```json
-{"status":201,"orderId":"b397ac19-af17-4e6e-a628-4a80ade97193","orderStatus":"PENDING","subtotalVnd":104000,"totalVnd":104000}
+{"status":201,"orderId":"443bb4fc-1b69-45ec-a698-de2071221d0e","orderStatus":"PENDING","subtotalVnd":104000,"totalVnd":104000}
 ```
 
 ---
@@ -196,8 +204,8 @@ curl -s http://localhost:3000/api/backend/products/a3000000-0000-4000-8000-00000
 
 **Sanitized Output**:
 ```json
-{"failedAttempt":{"paymentId":"a4e69fa8-73fb-4369-bec0-dd820968dfb8","paymentStatus":"FAILED","orderStatus":"PAYMENT_FAILED","failureReason":"PAYMENT_DECLINED"},"retrySuccess":{"paymentId":"0301c0af-e5bb-46c7-83f3-b160d351c48d","paymentStatus":"SUCCESS","orderStatus":"PAID","pointsEarned":10},"idempotentReplay":{"status":200,"idempotencyReplayedHeader":"true","samePaymentId":true}}
-{"initiateStatus":201,"replayStatus":200,"idempotencyReplayedHeader":"true","provider":"VNPAY","paymentStatus":"PENDING","orderStatus":"PENDING","sanitizedPaymentUrl":"https://sandbox.vnpayment.vn/paymentv2/vpcpay.html?vnp_Amount=4200000&vnp_Command=pay&vnp_CreateDate=20261103222804&vnp_CurrCode=VND&vnp_ExpireDate=20261103224304&vnp_IpAddr=172.18.0.4&vnp_Locale=vn&vnp_OrderInfo=Thanh+toan+don+hang+b2f7e23e-93b9-44dc-893e-7c15f4d24489&vnp_OrderType=other&vnp_ReturnUrl=https%3A%2F%2Flocalhost%3A3000%2Forder-confirmation&vnp_TmnCode=%3CREDACTED_TMN_CODE%3E&vnp_TxnRef=d85d77be84ae4cadac02c6c0539d0c60&vnp_Version=2.1.0&vnp_SecureHash=%3CREDACTED_SECURE_HASH%3E"}
+{"failedAttempt":{"paymentId":"4ee2622e-86db-49f7-9919-4929b9771ec6","paymentStatus":"FAILED","orderStatus":"PAYMENT_FAILED","failureReason":"PAYMENT_DECLINED"},"retrySuccess":{"paymentId":"548f22fa-c473-44eb-a248-ef66a5da389a","paymentStatus":"SUCCESS","orderStatus":"PAID","pointsEarned":10},"idempotentReplay":{"status":200,"idempotencyReplayedHeader":"true","samePaymentId":true}}
+{"initiateStatus":201,"replayStatus":200,"idempotencyReplayedHeader":"true","provider":"VNPAY","paymentStatus":"PENDING","orderStatus":"PENDING","sanitizedPaymentUrl":"https://sandbox.vnpayment.vn/paymentv2/vpcpay.html?vnp_Amount=4200000&vnp_Command=pay&vnp_CreateDate=20261103231728&vnp_CurrCode=VND&vnp_ExpireDate=20261103233227&vnp_IpAddr=172.18.0.4&vnp_Locale=vn&vnp_OrderInfo=Thanh+toan+don+hang+072cfb93-454c-403e-8161-efa807a9a3e6&vnp_OrderType=other&vnp_ReturnUrl=https%3A%2F%2Flocalhost%3A3000%2Forder-confirmation&vnp_TmnCode=%3CREDACTED_TMN_CODE%3E&vnp_TxnRef=f7e2108dd66f4ce3bfc8ab2ca8bdf5e7&vnp_Version=2.1.0&vnp_SecureHash=%3CREDACTED_SECURE_HASH%3E"}
 ```
 
 ---
@@ -206,7 +214,7 @@ curl -s http://localhost:3000/api/backend/products/a3000000-0000-4000-8000-00000
 
 **Command (executed by `node scripts/scrum92/verify_compose_e2e.mjs` steps `[7]` and `[8]`)**:
 ```bash
-# Snapshot before restart via API (/api/backend/orders/me, /api/backend/auth/me) and SQL (psql)
+# Snapshot before restart via API (/api/backend/orders/me, /api/backend/auth/me) and SQL (sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"')
 docker compose --env-file compose.env stop
 docker compose --env-file compose.env start
 # Wait for migrate=exited:0 and postgres/backend/frontend=running:healthy, then re-query API and SQL
@@ -215,20 +223,20 @@ docker compose --env-file compose.env start
 **Sanitized Output (Before vs After Restart)**:
 ```text
 === [7] Pre-Restart Snapshot (API & PostgreSQL) ===
-Pre-Restart API Snapshot: {"orderId":"b397ac19-af17-4e6e-a628-4a80ade97193","orderStatus":"PAID","totalVnd":104000,"paymentId":"0301c0af-e5bb-46c7-83f3-b160d351c48d","paymentStatus":"SUCCESS","loyaltyPoints":10}
+Pre-Restart API Snapshot: {"orderId":"443bb4fc-1b69-45ec-a698-de2071221d0e","orderStatus":"PAID","totalVnd":104000,"paymentId":"548f22fa-c473-44eb-a248-ef66a5da389a","paymentStatus":"SUCCESS","loyaltyPoints":10}
 Pre-Restart SQL Snapshot:
-               order_id               | order_status | total_vnd | payment_attempts | winning_payment_status | loyalty_points 
+               order_id               | order_status | total_vnd | payment_attempts | winning_payment_status | loyalty_points
 --------------------------------------+--------------+-----------+------------------+------------------------+----------------
- b397ac19-af17-4e6e-a628-4a80ade97193 | PAID         |    104000 |                2 | SUCCESS                |             10
+ 443bb4fc-1b69-45ec-a698-de2071221d0e | PAID         |    104000 |                2 | SUCCESS                |             10
 (1 row)
 
 === [8] Restart Stack (docker compose stop -> start) & Post-Restart Persistence Check ===
 Post-Restart Container States: {"migrateState":"exited:0","pgHealth":"running:healthy","beHealth":"running:healthy","feHealth":"running:healthy"}
-Post-Restart API Snapshot: {"orderId":"b397ac19-af17-4e6e-a628-4a80ade97193","orderStatus":"PAID","totalVnd":104000,"paymentId":"0301c0af-e5bb-46c7-83f3-b160d351c48d","paymentStatus":"SUCCESS","loyaltyPoints":10}
+Post-Restart API Snapshot: {"orderId":"443bb4fc-1b69-45ec-a698-de2071221d0e","orderStatus":"PAID","totalVnd":104000,"paymentId":"548f22fa-c473-44eb-a248-ef66a5da389a","paymentStatus":"SUCCESS","loyaltyPoints":10}
 Post-Restart SQL Snapshot:
-               order_id               | order_status | total_vnd | payment_attempts | winning_payment_status | loyalty_points 
+               order_id               | order_status | total_vnd | payment_attempts | winning_payment_status | loyalty_points
 --------------------------------------+--------------+-----------+------------------+------------------------+----------------
- b397ac19-af17-4e6e-a628-4a80ade97193 | PAID         |    104000 |                2 | SUCCESS                |             10
+ 443bb4fc-1b69-45ec-a698-de2071221d0e | PAID         |    104000 |                2 | SUCCESS                |             10
 (1 row)
 
 [SCRUM-92] ALL VERIFICATION CHECKS PASSED.
@@ -290,4 +298,4 @@ Post-Restart SQL Snapshot:
 - **Chi tiết & Giải pháp đã áp dụng**:
   1. Bổ sung script [`scripts/compose-preflight-env.ps1`](../../scripts/compose-preflight-env.ps1) tương đương với `scripts/compose-preflight-env.sh` để người dùng Windows PowerShell không gặp lỗi `WSL_E_DEFAULT_DISTRO_NOT_FOUND` khi máy chưa cài WSL distro.
   2. Cập nhật [`README.md`](../../README.md) và [`docs/Docker_Compose.md`](../Docker_Compose.md) với hướng dẫn đầy đủ cho cả **Git Bash** và **Windows PowerShell**, kèm bước kiểm tra deterministic trạng thái container `migrate` (`exited:0`) trước khi chạy `db:seed`.
-  3. Bổ sung script kiểm thử E2E tự động [`scripts/scrum92/verify_compose_e2e.mjs`](../../scripts/scrum92/verify_compose_e2e.mjs) chạy được trên cả Git Bash và PowerShell.
+  3. Bổ sung script kiểm thử E2E tự động [`scripts/scrum92/verify_compose_e2e.mjs`](../../scripts/scrum92/verify_compose_e2e.mjs) chạy được trên cả Git Bash và PowerShell, kèm cơ chế tự động khôi phục `stock` và dọn dữ liệu test scoped cho `SCRUM-92`.
