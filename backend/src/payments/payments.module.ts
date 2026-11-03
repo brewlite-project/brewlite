@@ -11,22 +11,31 @@ import { VnpayInitiationService } from './vnpay-initiation.service.js';
 import { VnpayIpnController } from './vnpay-ipn.controller.js';
 import { VnpayIpnService } from './vnpay-ipn.service.js';
 import { VnpayQueryDrService } from './vnpay-querydr.service.js';
+import { ZeroAmountPaymentController } from './zero-amount-payment.controller.js';
+import { ZeroAmountPaymentService } from './zero-amount-payment.service.js';
 import {
   CreatePaymentPipe,
   IdempotencyKeyPipe,
+  ZeroAmountPaymentPipe,
 } from './payment-validation.pipe.js';
 @Module({
   imports: [AuthModule, PrismaModule],
-  controllers: [PaymentsController, VnpayIpnController],
+  controllers: [
+    PaymentsController,
+    VnpayIpnController,
+    ZeroAmountPaymentController,
+  ],
   providers: [
     MockPaymentService,
     PaymentFinalizationService,
     VnpayInitiationService,
     VnpayIpnService,
     VnpayQueryDrService,
+    ZeroAmountPaymentService,
     PaymentsService,
     CreatePaymentPipe,
     IdempotencyKeyPipe,
+    ZeroAmountPaymentPipe,
     { provide: PaymentProcessor, useExisting: PaymentsService },
   ],
   exports: [MockPaymentService, PaymentsService, PaymentFinalizationService],
