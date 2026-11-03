@@ -2,6 +2,7 @@ import { ConflictException } from '@nestjs/common';
 import type { Prisma } from '../generated/prisma/client.js';
 import type { OrderStatus } from '../generated/prisma/enums.js';
 import { releaseHeldCoupon } from '../promotions/promotion-policy.js';
+import { ORDER_GRACE_MS } from './order-expiration.config.js';
 
 export function inventoryQuantities(
   items: readonly { productId: string; quantity: number }[],
@@ -78,7 +79,7 @@ export async function expireOrderInTransaction(
     )
     SELECT db_clock.now AS now,
            db_clock.now >= orders.expires_at AS expired,
-           db_clock.now >= orders.expires_at + INTERVAL '5 minutes' AS "graceEnded",
+           db_clock.now >= orders.expires_at + (${ORDER_GRACE_MS} * INTERVAL '1 millisecond') AS "graceEnded",
            EXISTS (
              SELECT 1 FROM payments
              WHERE payments.order_id = orders.id
