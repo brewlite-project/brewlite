@@ -1275,6 +1275,44 @@ describe("VNPay Phase 2 UI & Flow Deep Test Suite", () => {
         }
       );
     });
+
+    it("10.8 submitZeroAmountPaymentApi strictly validates response DTO and throws error on incomplete fields without falling back", async () => {
+      const { submitZeroAmountPaymentApi } = await import("../services/payment.service");
+
+      // Trường hợp backend trả về HTTP 200 nhưng thiếu trường paymentId hoặc paymentStatus
+      globalThis.fetch = async () =>
+        new Response(
+          JSON.stringify({
+            orderId: "550e8400-e29b-41d4-a716-446655440000",
+            // missing paymentId
+            provider: "ZERO_AMOUNT",
+            // missing paymentStatus & orderStatus
+            amountVnd: 0,
+            pointsEarned: 0,
+            createdAt: new Date().toISOString(),
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+
+      await assert.rejects(
+        async () => {
+          await submitZeroAmountPaymentApi(
+            { orderId: "550e8400-e29b-41d4-a716-446655440000" },
+            "idem-key-zero-missing-field",
+            { accessToken: createTestJwt() }
+          );
+        },
+        (err: unknown) => {
+          const e = err as { code?: string; message?: string };
+          assert.strictEqual(e.code, "SERVER_ERROR");
+          assert.ok(
+            e.message?.includes("không hợp lệ hoặc thiếu trường bắt buộc"),
+            "Must reject response when required fields are missing"
+          );
+          return true;
+        }
+      );
+    });
   });
 
   // =========================================================================

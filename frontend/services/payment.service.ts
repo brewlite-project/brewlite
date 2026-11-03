@@ -1678,18 +1678,42 @@ export async function submitZeroAmountPaymentApi(
     throw createPaymentError(errMsg, res.status, errCode as PaymentErrorCode, cleanKey);
   }
 
+  // Bắt buộc kiểm tra đầy đủ các trường của DTO trả về từ Backend (BLOCKER: Không tự điền fallback hay hardcode SUCCESS/PAID)
+  if (
+    typeof record.paymentId !== "string" ||
+    record.paymentId.trim().length === 0 ||
+    typeof record.orderId !== "string" ||
+    !isValidUuid(record.orderId.trim()) ||
+    record.orderId.trim().toLowerCase() !== cleanOrderId ||
+    record.provider !== "ZERO_AMOUNT" ||
+    record.paymentStatus !== "SUCCESS" ||
+    record.orderStatus !== "PAID" ||
+    record.amountVnd !== 0 ||
+    record.pointsEarned !== 0 ||
+    typeof record.createdAt !== "string" ||
+    Number.isNaN(Date.parse(record.createdAt))
+  ) {
+    throw createPaymentError(
+      "Dữ liệu phản hồi quyết toán 0đ từ máy chủ không hợp lệ hoặc thiếu trường bắt buộc.",
+      res.status || 500,
+      "SERVER_ERROR",
+      cleanKey,
+      { canRetrySameKey: true }
+    );
+  }
+
   const isReplayed = res.headers.get("Idempotency-Replayed") === "true";
 
   return {
     response: {
-      paymentId: String(record.paymentId || `pay-zero-${cleanOrderId.slice(0, 8)}`),
-      orderId: String(record.orderId || cleanOrderId),
+      paymentId: record.paymentId.trim(),
+      orderId: record.orderId.trim().toLowerCase(),
       provider: "ZERO_AMOUNT",
       paymentStatus: "SUCCESS",
       orderStatus: "PAID",
       amountVnd: 0,
       pointsEarned: 0,
-      createdAt: typeof record.createdAt === "string" ? record.createdAt : new Date().toISOString(),
+      createdAt: record.createdAt,
     },
     replayed: isReplayed,
   };

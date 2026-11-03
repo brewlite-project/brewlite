@@ -319,7 +319,7 @@ function getStitchStatusBadgeConfig(status: OrderStatus): {
   switch (status) {
     case "PENDING":
       return {
-        badgeText: "ĐANG CHỜ THANH TOÁN (PENDING)",
+        badgeText: "ĐANG CHỜ THANH TOÁN",
         pillClass: "bg-[#FEFCE8] text-[#D97706] border border-[#FDE68A]",
         dotClass: "bg-[#EAB308]",
         isPing: true,
@@ -327,7 +327,7 @@ function getStitchStatusBadgeConfig(status: OrderStatus): {
       };
     case "PAYMENT_FAILED":
       return {
-        badgeText: "THANH TOÁN THẤT BẠI (PAYMENT_FAILED)",
+        badgeText: "THANH TOÁN THẤT BẠI",
         pillClass: "bg-[#FEF2F2] text-[#DC2626] border border-[#FECACA]",
         dotClass: "bg-[#DC2626]",
         isPing: false,
@@ -335,7 +335,7 @@ function getStitchStatusBadgeConfig(status: OrderStatus): {
       };
     case "PAID":
       return {
-        badgeText: "ĐÃ THANH TOÁN (PAID)",
+        badgeText: "ĐÃ THANH TOÁN",
         pillClass: "bg-[#F0FDF4] text-[#16A34A] border border-[#BBF7D0]",
         dotClass: "bg-[#16A34A]",
         isPing: false,
@@ -343,7 +343,7 @@ function getStitchStatusBadgeConfig(status: OrderStatus): {
       };
     case "PREPARING":
       return {
-        badgeText: "ĐANG PHA CHẾ (PREPARING)",
+        badgeText: "ĐANG PHA CHẾ",
         pillClass: "bg-[#F0FDF4] text-[#16A34A] border border-[#BBF7D0]",
         dotClass: "bg-[#16A34A]",
         isPing: true,
@@ -351,7 +351,7 @@ function getStitchStatusBadgeConfig(status: OrderStatus): {
       };
     case "READY":
       return {
-        badgeText: "SẴN SÀNG NHẬN MÓN (READY)",
+        badgeText: "SẴN SÀNG NHẬN MÓN",
         pillClass: "bg-[#F0FDF4] text-[#16A34A] border border-[#BBF7D0]",
         dotClass: "bg-[#16A34A]",
         isPing: true,
@@ -359,7 +359,7 @@ function getStitchStatusBadgeConfig(status: OrderStatus): {
       };
     case "COMPLETED":
       return {
-        badgeText: "HOÀN TẤT (COMPLETED)",
+        badgeText: "HOÀN TẤT",
         pillClass: "bg-[#F0FDF4] text-[#16A34A] border border-[#BBF7D0]",
         dotClass: "bg-[#16A34A]",
         isPing: false,
@@ -368,7 +368,7 @@ function getStitchStatusBadgeConfig(status: OrderStatus): {
     case "CANCELLED":
     default:
       return {
-        badgeText: "ĐÃ HỦY (CANCELLED)",
+        badgeText: "ĐÃ HỦY",
         pillClass:
           "bg-surface-container-high text-outline border border-outline-variant/40",
         dotClass: "bg-outline",
@@ -1268,10 +1268,7 @@ export default function OrderHistoryView() {
                   visibility
                 </span>
                 <span>
-                  Đang hiển thị{" "}
-                  <strong>4 đơn hàng mẫu chuẩn thiết kế Stitch</strong> (PENDING,
-                  PAYMENT_FAILED, PAID, CANCELLED). Bạn có thể chuyển về dữ liệu
-                  API thật bất cứ lúc nào.
+                  Đang hiển thị <strong>4 đơn hàng mẫu giao diện</strong>. Bạn có thể chuyển về dữ liệu tài khoản bất cứ lúc nào.
                 </span>
               </div>
               <button
@@ -1884,14 +1881,13 @@ export default function OrderHistoryView() {
                               timer
                             </span>
                             <span>
-                              Đơn hàng sẽ tự động hủy sau khi hết hạn 15 phút (
+                              Đơn hàng sẽ tự động hủy sau 15 phút (
                               {formatDateDotTimeVi(order.expiresAt)}) nếu chưa
-                              thanh toán — tồn kho và voucher HELD được bảo
-                              toàn.
+                              thanh toán. Sản phẩm và mã ưu đãi sẽ được hoàn lại.
                             </span>
                           </div>
                           <span className="text-on-surface-variant text-[12px] whitespace-nowrap">
-                            Hủy đơn: Tự động bởi Scheduler
+                            Tự động hủy khi hết hạn
                           </span>
                         </div>
                       )}

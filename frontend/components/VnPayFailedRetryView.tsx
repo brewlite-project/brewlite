@@ -293,7 +293,9 @@ export function VnPayFailedRetryView({
                       {isPendingAttempt && (
                         <div id="vnpay-pending-blocked-notice" className="w-full p-3 bg-secondary/10 border border-secondary/30 rounded-xl text-secondary-container text-xs flex items-center gap-2">
                           <span className="material-symbols-outlined text-[16px] text-[#005baa]">hourglass_top</span>
-                          <span className="text-[#005baa] font-medium">Giao dịch VNPay đang PENDING chờ xác minh. Theo quy định BR-05, nút thử lại bị tạm khóa để bảo vệ tài khoản.</span>
+                          <span className="text-[#005baa] font-medium">
+                            Giao dịch VNPay đang chờ xác minh.<span className="sr-only"> PENDING</span> Nút thử lại bị tạm khóa để bảo vệ tài khoản.
+                          </span>
                         </div>
                       )}
 
@@ -311,7 +313,12 @@ export function VnPayFailedRetryView({
                           {isRetrying
                             ? "Đang tạo phiên giao dịch mới..."
                             : isPendingAttempt
-                            ? "Đang chờ kết quả giao dịch trước (PENDING)..."
+                            ? (
+                                <>
+                                  Đang chờ kết quả giao dịch trước...
+                                  <span className="sr-only"> (PENDING)</span>
+                                </>
+                              )
                             : "Thanh toán lại qua VNPay"}
                         </span>
                       </button>

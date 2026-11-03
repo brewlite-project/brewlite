@@ -752,6 +752,46 @@ export default function PaymentPageView({
   };
 
   /**
+   * Quyết toán đơn hàng 0 ₫ (BR-06)
+   */
+  const handleZeroAmountSubmit = async () => {
+    if (isSubmitting || submittingRef.current || !activeOrder || activeOrder.totalVnd !== 0) return;
+    setIsSubmitting(true);
+    submittingRef.current = true;
+    setPaymentError(null);
+    try {
+      const zeroApi = submitZeroAmountFn ?? submitZeroAmountPaymentApi;
+      const res = await zeroApi(
+        { orderId: activeOrder.id },
+        idempotencyKey,
+        { accessToken }
+      );
+      // Chỉ hiển thị SUCCESS khi backend thực sự xác nhận đầy đủ DTO
+      if (
+        res?.response?.paymentStatus === "SUCCESS" &&
+        res?.response?.orderStatus === "PAID"
+      ) {
+        setVnPayFlowState("success");
+        clearCart();
+        if (setContextActiveOrder) setContextActiveOrder(null);
+        clearStoredActiveOrder();
+        router.push(
+          `/order-confirmation?orderId=${encodeURIComponent(activeOrder.id)}&view=zero`
+        );
+      } else {
+        throw new Error("Phản hồi quyết toán 0đ không hợp lệ từ máy chủ.");
+      }
+    } catch (err: unknown) {
+      setVnPayFlowState("failed");
+      const submissionErr = toPaymentSubmissionErrorState(err, idempotencyKey);
+      setPaymentError(submissionErr);
+    } finally {
+      setIsSubmitting(false);
+      submittingRef.current = false;
+    }
+  };
+
+  /**
    * Thực thi gửi `POST /payments` thật lên Backend (hoặc retry với cùng `Idempotency-Key` khi timeout / `PAYMENT_IN_PROGRESS`)
    */
   const handleSubmitPayment = async (options?: {
@@ -860,9 +900,7 @@ export default function PaymentPageView({
                   Vui lòng đăng nhập để thanh toán
                 </h2>
                 <p className="font-body-md text-body-md text-on-surface-variant">
-                  Trang thanh toán kết nối trực tiếp với đơn hàng thật của tài
-                  khoản bạn qua <code>GET /orders/me</code> và{" "}
-                  <code>POST /payments</code>.
+                  Vui lòng đăng nhập để xem thông tin đơn hàng và tiến hành thanh toán.
                 </p>
                 <div className="flex items-center justify-center gap-3 pt-2">
                   <button
@@ -898,7 +936,7 @@ export default function PaymentPageView({
                 <p className="font-body-md text-body-md text-on-surface-variant">
                   {loadOrderError
                     ? loadOrderError
-                    : "Hãy chọn món vào Giỏ hàng và bấm Xác nhận đặt hàng (POST /orders) để tạo đơn hàng PENDING trước khi tiến hành thanh toán."}
+                    : "Hãy chọn món vào Giỏ hàng và bấm Đặt hàng để tạo đơn trước khi tiến hành thanh toán."}
                 </p>
                 <div className="flex items-center justify-center gap-3 pt-2">
                   <button
@@ -1085,18 +1123,23 @@ export default function PaymentPageView({
                             </span>
                             <span id="nonPayableOrderTitle">
                               {orderStatus === "PAID"
-                                ? "Đơn hàng đã hoàn tất thanh toán (PAID)"
+                                ? "Đơn hàng đã hoàn tất thanh toán"
                                 : isExpiredOrder
-                                ? "Đơn hàng đã hết hạn thanh toán (EXPIRED)"
-                                : `Không thể thanh toán đơn hàng ở trạng thái ${orderStatus}`}
+                                ? (
+                                    <>
+                                      Đơn hàng đã hết hạn thanh toán
+                                      <span className="sr-only"> (EXPIRED)</span>
+                                    </>
+                                  )
+                                : "Không thể thanh toán đơn hàng này"}
                             </span>
                           </div>
                           <p id="nonPayableOrderMessage" className="font-body-sm text-body-sm text-[#1E1510] leading-relaxed">
                             {orderStatus === "PAID"
-                              ? "Đơn hàng này đã được ghi nhận thanh toán thành công trên máy chủ. Form nhập thẻ/ví điện tử đã được khóa để ngăn gửi trùng yêu cầu POST /payments."
+                              ? "Đơn hàng này đã được thanh toán thành công. Biểu mẫu thanh toán đã được khóa."
                               : isExpiredOrder
-                              ? "Theo API Contract v3.0 Mục 3.2 & Mục 8, đơn hàng chỉ được giữ tối đa 15 phút từ lúc tạo. Đơn hàng này đã quá hạn (expiresAt), tồn kho và mã giảm giá đã được hoàn trả. Nút thanh toán và form đã bị khóa."
-                              : `Theo API Contract v3.0 Mục 3.2, chỉ các đơn hàng đang ở trạng thái PENDING hoặc PAYMENT_FAILED mới được phép thanh toán. Đơn hàng hiện tại đang ở trạng thái ${orderStatus} nên form thanh toán đã bị khóa.`}
+                              ? "Đơn hàng chỉ được giữ tối đa 15 phút từ lúc tạo. Đơn hàng này đã quá hạn thanh toán nên không thể thực hiện giao dịch."
+                              : "Chỉ các đơn hàng đang chờ thanh toán hoặc chưa thanh toán thành công mới được phép thực hiện giao dịch."}
                           </p>
                           <div className="pt-2">
                             <Link
@@ -1130,14 +1173,16 @@ export default function PaymentPageView({
                               <p className="text-xs text-[#166534] leading-relaxed">
                                 Đơn hàng được miễn phí 100% nhờ áp dụng khuyến mãi. Hệ thống tự động xác nhận đơn hàng mà không cần chuyển tiếp sang cổng thanh toán.
                               </p>
-                              <Link
-                                href={`/order-confirmation?orderId=${activeOrder.id}&view=zero`}
+                              <button
+                                type="button"
                                 id="btnZeroPaymentBypass"
-                                className="w-full py-3 px-6 rounded-xl bg-[#16A34A] hover:bg-[#15803D] text-white font-title-sm text-title-sm font-semibold flex items-center justify-center gap-2 shadow-sm transition-colors text-center"
+                                disabled={isSubmitting}
+                                onClick={handleZeroAmountSubmit}
+                                className="w-full py-3 px-6 rounded-xl bg-[#16A34A] hover:bg-[#15803D] text-white font-title-sm text-title-sm font-semibold flex items-center justify-center gap-2 shadow-sm transition-colors text-center disabled:opacity-50 cursor-pointer"
                               >
                                 <span className="material-symbols-outlined text-[18px]">check_circle</span>
-                                <span>Xác nhận đơn hàng 0 ₫ ngay</span>
-                              </Link>
+                                <span>{isSubmitting ? "Đang xác nhận đơn hàng..." : "Xác nhận đơn hàng 0 ₫ ngay"}</span>
+                              </button>
                             </div>
                           )}
 
@@ -1854,7 +1899,7 @@ export default function PaymentPageView({
                               setPaymentError({
                                 statusCode: 409,
                                 message:
-                                  "Giao dịch VNPay trước đó đang được xử lý (PENDING). Vui lòng không thực hiện lại để tránh trừ tiền 2 lần.",
+                                  "Giao dịch trước đó đang được xử lý. Vui lòng không thực hiện lại để tránh thanh toán hai lần.",
                                 code: "PAYMENT_IN_PROGRESS",
                                 idempotencyKey,
                                 canRetrySameKey: true,
@@ -1998,15 +2043,20 @@ export default function PaymentPageView({
                               ? "Đang khởi tạo cổng VNPay..."
                               : vnPayFlowState === "redirecting"
                               ? "Đang chuyển hướng sang VNPay..."
-                              : "Đang xử lý POST /payments..."
+                              : "Đang xử lý thanh toán..."
                             : orderStatus === "PAID"
                             ? `Đơn hàng đã thanh toán • ${formatVnd(
                                 activeOrder.totalVnd
                               )}`
                             : !isPayableOrder
                             ? isExpiredOrder
-                              ? "Đơn hàng đã hết hạn (EXPIRED)"
-                              : `Không thể thanh toán (${orderStatus})`
+                              ? (
+                                  <>
+                                    Đơn hàng đã hết hạn thanh toán
+                                    <span className="sr-only"> (EXPIRED)</span>
+                                  </>
+                                )
+                              : "Không thể thanh toán"
                             : method === "VNPAY"
                             ? `Xác nhận thanh toán qua VNPay • ${formatVnd(
                                 activeOrder.totalVnd
