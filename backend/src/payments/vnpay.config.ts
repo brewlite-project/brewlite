@@ -7,6 +7,11 @@ export type VnpayConfig = {
     returnUrl: string;
 };
 
+export type VnpayQueryDrConfig = Pick<VnpayConfig, 'tmnCode' | 'hashSecret'> & {
+    queryDrUrl: string;
+    timeoutMs: number;
+};
+
 function requireEnv(name: string): string {
     const value = process.env[name];
 
@@ -107,4 +112,18 @@ export function loadVnpayConfig(): VnpayConfig {
         paymentUrl,
         returnUrl
     };
+}
+
+/** QueryDR is intentionally configured separately from browser payment URL. */
+export function loadVnpayQueryDrConfig(): VnpayQueryDrConfig {
+    const tmnCode = requireEnv('VNPAY_TMN_CODE');
+    const hashSecret = requireSecret('VNPAY_HASH_SECRET');
+    const url = requireHttpsUrl(requireEnv('VNPAY_QUERYDR_URL'), 'VNPAY_QUERYDR_URL');
+    if (url.hostname !== 'sandbox.vnpayment.vn' || url.pathname !== '/merchant_webapi/api/transaction' || url.search || url.hash)
+        throw new Error('Invalid VNPay Sandbox QueryDR URL configuration.');
+    const rawTimeout = requireEnv('VNPAY_QUERYDR_TIMEOUT_MS');
+    if (!/^[1-9][0-9]*$/.test(rawTimeout)) throw new Error('Invalid VNPAY_QUERYDR_TIMEOUT_MS');
+    const timeoutMs = Number(rawTimeout);
+    if (!Number.isSafeInteger(timeoutMs)) throw new Error('Invalid VNPAY_QUERYDR_TIMEOUT_MS');
+    return { tmnCode, hashSecret, queryDrUrl: url.toString(), timeoutMs };
 }
