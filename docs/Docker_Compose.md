@@ -8,7 +8,7 @@ The main Compose stack runs four services: `postgres`, `migrate`, `backend`, and
 - Compose project: `brewlite_compose`
 - PostgreSQL database: `brewlite_compose`
 - named volume: `brewlite_compose_brewlite_pgdata`
-- host database port: `127.0.0.1:55432`
+- host database port: `127.0.0.1:${POSTGRES_HOST_PORT:-15432}` (default `15432`, outside the Windows Hyper-V/WinNAT reserved ephemeral range `49152-65535`)
 
 Do not point this stack at a development, test, shared, or production database.
 It does not reuse SCRUM-80's project, database, port `55480`, or volume.
@@ -186,4 +186,4 @@ data that must be retained.
 - The backend `GET /` healthcheck is liveness only, not a full PostgreSQL
   readiness check.
 - Docker build and runtime behavior must be proven by the clean-run work in
-  P2-18; this document does not claim that Docker tests have passed.
+  P2-18; see `docs/verification/SCRUM92_Docker_Clean_Setup_Verification.md` for full clean-setup verification evidence and cross-module findings.

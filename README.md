@@ -118,7 +118,10 @@ Tạo `.env` cục bộ theo `.env.example` **sau khi nhóm thêm đủ biến**
 **Docker Compose (mục tiêu Sprint 3):** khi `docker-compose.yml` đã hoàn thành và kiểm thử, chạy:
 
 ```bash
-docker compose up --build
+cp compose.env.example compose.env
+# Điền các giá trị secret/password local vào compose.env (không commit compose.env)
+bash scripts/compose-preflight-env.sh && docker compose --env-file compose.env up --build -d
+bash scripts/compose-preflight-env.sh && docker compose --env-file compose.env run --rm --no-deps -e ALLOW_COMPOSE_DEMO_SEED=true migrate npm run db:seed
 ```
 
 ## 8. API dự kiến
