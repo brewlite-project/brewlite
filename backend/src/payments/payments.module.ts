@@ -11,6 +11,10 @@ import { VnpayInitiationService } from './vnpay-initiation.service.js';
 import { VnpayIpnController } from './vnpay-ipn.controller.js';
 import { VnpayIpnService } from './vnpay-ipn.service.js';
 import { VnpayQueryDrService } from './vnpay-querydr.service.js';
+import { PaymentReconciliationScheduler } from './payment-reconciliation.scheduler.js';
+import {
+  PAYMENT_RECONCILIATION_OPTIONS, getPaymentReconciliationOptions,
+} from './payment-reconciliation.config.js';
 import {
   CreatePaymentPipe,
   IdempotencyKeyPipe,
@@ -24,6 +28,8 @@ import {
     VnpayInitiationService,
     VnpayIpnService,
     VnpayQueryDrService,
+    PaymentReconciliationScheduler,
+    { provide: PAYMENT_RECONCILIATION_OPTIONS, useFactory: getPaymentReconciliationOptions },
     PaymentsService,
     CreatePaymentPipe,
     IdempotencyKeyPipe,
