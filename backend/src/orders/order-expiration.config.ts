@@ -1,5 +1,8 @@
 export const ORDER_EXPIRATION_OPTIONS = Symbol('ORDER_EXPIRATION_OPTIONS');
 export const ORDER_EXPIRATION_INTERVAL_MS = 60_000;
+// Business deadlines stay fixed; tests move fixture timestamps instead of waiting.
+export const ORDER_TTL_MS = 15 * 60_000;
+export const ORDER_GRACE_MS = 5 * 60_000;
 
 export type OrderExpirationOptions = { enabled: boolean; batchSize: number };
 
