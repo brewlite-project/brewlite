@@ -7,19 +7,34 @@
  * Download images into frontend/public/images before running frontend.
  */
 import "dotenv/config";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { PrismaClient } from "../src/generated/prisma/client.js";
 import { PrismaPg } from "@prisma/adapter-pg";
 
-const databaseUrl = process.env.DATABASE_URL;
-if (!databaseUrl) throw new Error("DATABASE_URL is not configured");
-const databaseName = decodeURIComponent(new URL(databaseUrl).pathname.slice(1));
-const allowed = /^brewlite_seed_[a-z0-9_]+$/i.test(databaseName);
-// Test DB example: brewlite_seed_catalog_v21. Never disable this guard.
-if (!allowed) throw new Error(`Seeding is not allowed for database: ${databaseName}`);
+export function isSeedDatabaseAllowed(
+  databaseUrl: string,
+  allowComposeDemoSeed = process.env.ALLOW_COMPOSE_DEMO_SEED,
+): boolean {
+  const url = new URL(databaseUrl);
+  const databaseName = decodeURIComponent(url.pathname.slice(1));
+  const isDedicatedSeedDatabase = /^brewlite_seed_[a-z0-9_]+$/i.test(databaseName);
+  const isApprovedComposeDatabase =
+    databaseName === "brewlite_compose" &&
+    url.hostname === "postgres" &&
+    url.port === "5432" &&
+    allowComposeDemoSeed === "true";
 
-// Run on a dedicated clean test database only. Legacy products may be referenced by orders.
-// The strict check below never silently deletes or deactivates them.
-const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }) });
+  return isDedicatedSeedDatabase || isApprovedComposeDatabase;
+}
+
+function isMainModule(): boolean {
+  const entrypoint = process.argv[1];
+  return (
+    typeof entrypoint === "string" &&
+    import.meta.url === pathToFileURL(resolve(entrypoint)).href
+  );
+}
 
 const categories = [
   { code: "traditional", name: "Cà phê truyền thống" },
@@ -50,7 +65,7 @@ const toppings = [
   { id: "b2000000-0000-4000-8000-000000000005", code: "WHIPPED_CREAM", name: "Kem tươi", price: 8000 },
 ] as const;
 
-async function main() {
+async function main(prisma: PrismaClient) {
   await prisma.$transaction(async (tx) => {
     const wantedIds = products.map((product) => product.id);
     const otherProducts = await tx.product.findMany({
@@ -115,7 +130,28 @@ async function main() {
   console.log(`Seed completed: ${products.length} menu products, ${toppings.length} toppings; no legacy products present.`);
 }
 
-main().catch((error) => {
-  console.error("Seed failed:", error);
-  process.exitCode = 1;
-}).finally(async () => prisma.$disconnect());
+if (isMainModule()) {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) throw new Error("DATABASE_URL is not configured");
+
+  const databaseName = decodeURIComponent(new URL(databaseUrl).pathname.slice(1));
+  // Preserve dedicated brewlite_seed_* databases. Compose needs all four exact
+  // conditions in isSeedDatabaseAllowed; never broaden this to a wildcard.
+  if (!isSeedDatabaseAllowed(databaseUrl)) {
+    throw new Error(`Seeding is not allowed for database: ${databaseName}`);
+  }
+
+  // Run on a dedicated clean test or explicitly approved Compose database only.
+  // Legacy products may be referenced by orders; the strict check below never
+  // silently deletes or deactivates them.
+  const prisma = new PrismaClient({
+    adapter: new PrismaPg({ connectionString: databaseUrl }),
+  });
+
+  main(prisma)
+    .catch((error) => {
+      console.error("Seed failed:", error);
+      process.exitCode = 1;
+    })
+    .finally(async () => prisma.$disconnect());
+}
