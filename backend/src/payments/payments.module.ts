@@ -3,6 +3,7 @@ import type { DynamicModule, ModuleMetadata, Type } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module.js';
 import { PrismaModule } from '../prisma/prisma.module.js';
 import { MockPaymentService } from './mock-payment.service.js';
+import { MockPaymentGuard } from './mock-payment.guard.js';
 import { PaymentProcessor } from './payment-processor.js';
 import { PaymentsService } from './payments.service.js';
 import { PaymentsController } from './payments.controller.js';
@@ -19,6 +20,7 @@ import {
   imports: [AuthModule, PrismaModule],
   controllers: [PaymentsController, VnpayIpnController],
   providers: [
+    MockPaymentGuard,
     MockPaymentService,
     PaymentFinalizationService,
     VnpayInitiationService,
