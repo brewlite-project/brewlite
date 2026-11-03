@@ -214,10 +214,11 @@ function OrderConfirmationContent() {
 
   // Preview / Direct View override
   if (viewParam === "redirecting") {
+    const paymentUrlParam = searchParams.get("paymentUrl");
     return (
       <VnPayRedirectingView
         order={order}
-        vnpayPaymentUrl={`/order-confirmation?orderId=${order.id}&vnp_ResponseCode=00&view=processing`}
+        vnpayPaymentUrl={paymentUrlParam || `/payment?orderId=${order.id}`}
       />
     );
   }

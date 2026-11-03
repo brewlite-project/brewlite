@@ -32,6 +32,7 @@ import PaymentPageView from "../components/PaymentPageView";
 import { AuthContext, type AuthContextType } from "../context/AuthContext";
 import { CartContext, type CartContextValue } from "../context/CartContext";
 import type { OrderConfirmationData } from "../services/order-confirmation.service";
+import type { CreateOrderRequestDto, CreateOrderResponseDto } from "../mock-data";
 
 function createSampleOrder(overrides: Partial<OrderConfirmationData> = {}): OrderConfirmationData {
   return {
@@ -467,87 +468,127 @@ describe("VNPay Phase 2 UI & Flow Deep Test Suite", () => {
       closeCart: () => {},
       toggleCart: () => {},
       dismissFeedback: () => {},
-      mapToCreateOrderPayload: () => ({} as any),
+      mapToCreateOrderPayload: () =>
+        ({ items: [] } as unknown as CreateOrderRequestDto),
       activeOrder: null,
       setActiveOrder: () => {},
     };
 
-    it("removes inline btnSubmitVnPay and verifies main btnSubmitPayment opens VNPay in new tab", async () => {
+    it("7.1 verifies main btnSubmitPayment initiates VNPay and redirects directly to backend paymentUrl on success", async () => {
       const order = createSampleOrder({ status: "PENDING" });
-      const openedUrls: Array<{ url: string; target: string }> = [];
+      const redirectedUrls: string[] = [];
 
-      // Mock window.open
-      const originalOpen = (globalThis as any).window.open;
-      (globalThis as any).window.open = (url: string, target: string) => {
-        openedUrls.push({ url, target });
-        return null;
+      const mockInitiate = async () => ({
+        response: {
+          paymentId: "pay-vnpay-live-01",
+          orderId: order.id,
+          provider: "VNPAY" as const,
+          paymentStatus: "PENDING" as const,
+          orderStatus: "PENDING" as const,
+          amountVnd: 98000,
+          paymentUrl:
+            "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html?vnp_Amount=9800000&vnp_TxnRef=live-01",
+          expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+        },
+        replayed: false,
+      });
+
+      await act(async () => {
+        root = createRoot(container);
+        root.render(
+          React.createElement(
+            AuthContext.Provider,
+            { value: mockAuthContext },
+            React.createElement(
+              CartContext.Provider,
+              { value: mockCartContext },
+              React.createElement(PaymentPageView, {
+                initialOrder: order as unknown as CreateOrderResponseDto,
+                initialMethod: "VNPAY",
+                initiateVnPayFn: mockInitiate,
+                onRedirectToVnPay: (url: string) => {
+                  redirectedUrls.push(url);
+                },
+              })
+            )
+          )
+        );
+      });
+
+      // 1. btnSubmitVnPay is removed
+      const inlineVnPayBtn = container.querySelector("#btnSubmitVnPay");
+      assert.strictEqual(inlineVnPayBtn, null, "Inline btnSubmitVnPay must NOT exist in the DOM");
+
+      // 2. Main submit button is adapted for VNPay
+      const submitBtn = container.querySelector("#btnSubmitPayment") as HTMLButtonElement;
+      assert.ok(submitBtn, "Main submit button #btnSubmitPayment must exist");
+      assert.ok(
+        submitBtn.textContent?.includes("Xác nhận thanh toán qua VNPay"),
+        "Submit button label should reflect VNPay payment confirmation"
+      );
+      assert.ok(
+        submitBtn.textContent?.includes("98.000"),
+        "Submit button label should display order total"
+      );
+
+      // 3. User clicks main submit button
+      await act(async () => {
+        submitBtn.click();
+      });
+
+      // 4. Verify redirected directly to backend paymentUrl (NOT fake local url)
+      assert.strictEqual(redirectedUrls.length, 1, "Must redirect exactly once");
+      assert.ok(
+        redirectedUrls[0].startsWith("https://sandbox.vnpayment.vn/paymentv2/vpcpay.html"),
+        "Must redirect directly to backend paymentUrl"
+      );
+    });
+
+    it("7.2 blocks redirect when VNPay initiation fails (e.g. 409 ORDER_EXPIRED)", async () => {
+      const order = createSampleOrder({ status: "PENDING" });
+      const redirectedUrls: string[] = [];
+
+      const mockFailingInitiate = async () => {
+        const err = new Error("Đơn hàng đã hết hạn thanh toán.") as Error & {
+          statusCode: number;
+          code: string;
+        };
+        err.statusCode = 409;
+        err.code = "ORDER_EXPIRED";
+        throw err;
       };
 
-      try {
-        await act(async () => {
-          root = createRoot(container);
-          root.render(
+      await act(async () => {
+        root = createRoot(container);
+        root.render(
+          React.createElement(
+            AuthContext.Provider,
+            { value: mockAuthContext },
             React.createElement(
-              AuthContext.Provider,
-              { value: mockAuthContext },
-              React.createElement(
-                CartContext.Provider,
-                { value: mockCartContext },
-                React.createElement(PaymentPageView, {
-                  initialOrder: order as any,
-                  initialMethod: "VNPAY",
-                })
-              )
+              CartContext.Provider,
+              { value: mockCartContext },
+              React.createElement(PaymentPageView, {
+                initialOrder: order as unknown as CreateOrderResponseDto,
+                initialMethod: "VNPAY",
+                initiateVnPayFn: mockFailingInitiate,
+                onRedirectToVnPay: (url: string) => {
+                  redirectedUrls.push(url);
+                },
+              })
             )
-          );
-        });
-
-        // 1. btnSubmitVnPay is removed
-        const inlineVnPayBtn = container.querySelector("#btnSubmitVnPay");
-        assert.strictEqual(inlineVnPayBtn, null, "Inline btnSubmitVnPay must NOT exist in the DOM");
-
-        // 2. Main submit button is adapted for VNPay
-        const submitBtn = container.querySelector("#btnSubmitPayment") as HTMLButtonElement;
-        assert.ok(submitBtn, "Main submit button #btnSubmitPayment must exist");
-        assert.ok(
-          submitBtn.textContent?.includes("Xác nhận thanh toán qua VNPay"),
-          "Submit button label should reflect VNPay payment confirmation"
+          )
         );
-        assert.ok(
-          submitBtn.textContent?.includes("98.000"),
-          "Submit button label should display order total"
-        );
+      });
 
-        // Notice not displayed before clicking
-        assert.strictEqual(container.querySelector("#vnpayTabNotice"), null);
+      const submitBtn = container.querySelector("#btnSubmitPayment") as HTMLButtonElement;
+      assert.ok(submitBtn);
 
-        // 3. User clicks main submit button
-        await act(async () => {
-          submitBtn.click();
-        });
+      await act(async () => {
+        submitBtn.click();
+      });
 
-        // 4. Verify window.open called with new tab
-        assert.strictEqual(openedUrls.length, 1, "window.open must be called exactly once");
-        assert.strictEqual(openedUrls[0].target, "_blank", "Must open in a new tab (_blank)");
-        assert.ok(
-          openedUrls[0].url.includes(`/order-confirmation?orderId=${order.id}&view=redirecting`),
-          "Must redirect to VNPay redirecting view for the specific order"
-        );
-
-        // 5. Verify current tab remains intact and displays notification banner
-        const tabNotice = container.querySelector("#vnpayTabNotice");
-        assert.ok(tabNotice, "Tab notice banner #vnpayTabNotice must appear on current tab");
-        assert.ok(
-          tabNotice.textContent?.includes("Cổng thanh toán VNPay đã được mở trong tab mới!"),
-          "Notice must inform user that VNPay was opened in a new tab"
-        );
-        assert.ok(
-          tabNotice.textContent?.includes("Tab thanh toán hiện tại vẫn được giữ nguyên"),
-          "Notice must clarify current tab is retained"
-        );
-      } finally {
-        (globalThis as any).window.open = originalOpen;
-      }
+      // Redirect MUST NOT be triggered on failure
+      assert.strictEqual(redirectedUrls.length, 0, "Must NOT redirect when initiation fails");
     });
   });
 
@@ -841,7 +882,8 @@ describe("VNPay Phase 2 UI & Flow Deep Test Suite", () => {
       closeCart: () => {},
       toggleCart: () => {},
       dismissFeedback: () => {},
-      mapToCreateOrderPayload: () => ({} as any),
+      mapToCreateOrderPayload: () =>
+        ({ items: [] } as unknown as CreateOrderRequestDto),
       activeOrder: null,
       setActiveOrder: () => {},
     };
@@ -859,7 +901,7 @@ describe("VNPay Phase 2 UI & Flow Deep Test Suite", () => {
               CartContext.Provider,
               { value: mockCartContext },
               React.createElement(PaymentPageView, {
-                initialOrder: order as any,
+                initialOrder: order as unknown as CreateOrderResponseDto,
               })
             )
           )
@@ -901,7 +943,7 @@ describe("VNPay Phase 2 UI & Flow Deep Test Suite", () => {
               CartContext.Provider,
               { value: mockCartContext },
               React.createElement(PaymentPageView, {
-                initialOrder: order as any,
+                initialOrder: order as unknown as CreateOrderResponseDto,
               })
             )
           )
@@ -1031,9 +1073,10 @@ describe("VNPay Phase 2 UI & Flow Deep Test Suite", () => {
             { accessToken: createTestJwt() }
           );
         },
-        (err: any) => {
-          assert.strictEqual(err.statusCode, 409);
-          assert.strictEqual(err.code, "ORDER_EXPIRED");
+        (err: unknown) => {
+          const e = err as { statusCode?: number; code?: string };
+          assert.strictEqual(e.statusCode, 409);
+          assert.strictEqual(e.code, "ORDER_EXPIRED");
           return true;
         }
       );
@@ -1057,10 +1100,15 @@ describe("VNPay Phase 2 UI & Flow Deep Test Suite", () => {
             { accessToken: createTestJwt() }
           );
         },
-        (err: any) => {
-          assert.strictEqual(err.statusCode, 409);
-          assert.strictEqual(err.code, "PAYMENT_IN_PROGRESS");
-          assert.strictEqual(err.canRetrySameKey, true);
+        (err: unknown) => {
+          const e = err as {
+            statusCode?: number;
+            code?: string;
+            canRetrySameKey?: boolean;
+          };
+          assert.strictEqual(e.statusCode, 409);
+          assert.strictEqual(e.code, "PAYMENT_IN_PROGRESS");
+          assert.strictEqual(e.canRetrySameKey, true);
           return true;
         }
       );
@@ -1141,6 +1189,91 @@ describe("VNPay Phase 2 UI & Flow Deep Test Suite", () => {
       assert.strictEqual(result.resolution, "RECONCILING");
       assert.strictEqual(result.canRetry, false);
       assert.strictEqual(result.requiresReview, false);
+    });
+
+    it("10.5 submitZeroAmountPaymentApi throws real 404 without faking SUCCESS/PAID when backend returns 404", async () => {
+      const { submitZeroAmountPaymentApi } = await import("../services/payment.service");
+
+      globalThis.fetch = async () =>
+        new Response(
+          JSON.stringify({
+            statusCode: 404,
+            error: "Not Found",
+            message: "Cannot POST /payments/zero-amount",
+          }),
+          { status: 404, headers: { "Content-Type": "application/json" } }
+        );
+
+      await assert.rejects(
+        async () => {
+          await submitZeroAmountPaymentApi(
+            { orderId: "550e8400-e29b-41d4-a716-446655440000" },
+            "idem-key-zero-404",
+            { accessToken: createTestJwt() }
+          );
+        },
+        (err: unknown) => {
+          const e = err as { statusCode?: number };
+          assert.strictEqual(e.statusCode, 404, "Must throw real 404 without faking SUCCESS/PAID");
+          return true;
+        }
+      );
+    });
+
+    it("10.6 initiateVnPayPaymentApi throws real 404 without faking sandboxUrl/mockhash when backend returns 404", async () => {
+      const { initiateVnPayPaymentApi } = await import("../services/payment.service");
+
+      globalThis.fetch = async () =>
+        new Response(
+          JSON.stringify({
+            statusCode: 404,
+            error: "Not Found",
+            message: "Cannot POST /payments/vnpay/initiate",
+          }),
+          { status: 404, headers: { "Content-Type": "application/json" } }
+        );
+
+      await assert.rejects(
+        async () => {
+          await initiateVnPayPaymentApi(
+            { orderId: "550e8400-e29b-41d4-a716-446655440000" },
+            "idem-key-vnpay-404",
+            { accessToken: createTestJwt() }
+          );
+        },
+        (err: unknown) => {
+          const e = err as { statusCode?: number };
+          assert.strictEqual(e.statusCode, 404, "Must throw real 404 without faking sandboxUrl/mockhash");
+          return true;
+        }
+      );
+    });
+
+    it("10.7 fetchPaymentStatusApi throws real 404 without faking PENDING when backend returns 404", async () => {
+      const { fetchPaymentStatusApi } = await import("../services/payment.service");
+
+      globalThis.fetch = async () =>
+        new Response(
+          JSON.stringify({
+            statusCode: 404,
+            error: "Not Found",
+            message: "Cannot GET /payments/pay-123/status",
+          }),
+          { status: 404, headers: { "Content-Type": "application/json" } }
+        );
+
+      await assert.rejects(
+        async () => {
+          await fetchPaymentStatusApi("pay-123", {
+            accessToken: createTestJwt(),
+          });
+        },
+        (err: unknown) => {
+          const e = err as { statusCode?: number };
+          assert.strictEqual(e.statusCode, 404, "Must throw real 404 without faking PENDING");
+          return true;
+        }
+      );
     });
   });
 
@@ -1240,7 +1373,8 @@ describe("VNPay Phase 2 UI & Flow Deep Test Suite", () => {
       closeCart: () => {},
       toggleCart: () => {},
       dismissFeedback: () => {},
-      mapToCreateOrderPayload: () => ({} as any),
+      mapToCreateOrderPayload: () =>
+        ({ items: [] } as unknown as CreateOrderRequestDto),
       activeOrder: null,
       setActiveOrder: () => {},
     };
@@ -1263,7 +1397,7 @@ describe("VNPay Phase 2 UI & Flow Deep Test Suite", () => {
               CartContext.Provider,
               { value: mockCartContext },
               React.createElement(PaymentPageView, {
-                initialOrder: zeroOrder as any,
+                initialOrder: zeroOrder as unknown as CreateOrderResponseDto,
                 initialMethod: "VNPAY",
               })
             )
@@ -1280,6 +1414,61 @@ describe("VNPay Phase 2 UI & Flow Deep Test Suite", () => {
       assert.ok(
         (submitBtn.textContent?.replace(/\s+/g, " ").includes("0 ₫") || submitBtn.textContent?.includes("0")),
         "Submit button should indicate 0 ₫ payment"
+      );
+    });
+
+    it("does NOT clear cart when submitZeroAmountPayment fails or returns 404", async () => {
+      let cartCleared = false;
+      const customCartContext: CartContextValue = {
+        ...mockCartContext,
+        clearCart: () => {
+          cartCleared = true;
+        },
+      };
+
+      const zeroOrder = createSampleOrder({
+        status: "PENDING",
+        totalVnd: 0,
+        subtotalVnd: 70000,
+        discountVnd: 70000,
+      });
+
+      const failingZeroApi = async () => {
+        const err = new Error("Route not found") as Error & { statusCode: number };
+        err.statusCode = 404;
+        throw err;
+      };
+
+      await act(async () => {
+        root = createRoot(container);
+        root.render(
+          React.createElement(
+            AuthContext.Provider,
+            { value: mockAuthContext },
+            React.createElement(
+              CartContext.Provider,
+              { value: customCartContext },
+              React.createElement(PaymentPageView, {
+                initialOrder: zeroOrder as unknown as CreateOrderResponseDto,
+                initialMethod: "VNPAY",
+                submitZeroAmountFn: failingZeroApi,
+              })
+            )
+          )
+        );
+      });
+
+      const submitBtn = container.querySelector("#btnSubmitPayment") as HTMLButtonElement;
+      assert.ok(submitBtn);
+
+      await act(async () => {
+        submitBtn.click();
+      });
+
+      assert.strictEqual(
+        cartCleared,
+        false,
+        "Cart must NOT be cleared when zero amount payment fails with 404"
       );
     });
   });

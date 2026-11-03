@@ -324,6 +324,16 @@ function useSafeAppRouter() {
   }
 }
 
+export type VnPayFlowState =
+  | "idle"
+  | "initiating"
+  | "redirecting"
+  | "verifying"
+  | "success"
+  | "failed"
+  | "expired"
+  | "unknown";
+
 export interface PaymentPageViewProps {
   initialOrder?: CreateOrderResponseDto | MyOrderDto | null;
   initialMethod?: PaymentMethod;
@@ -333,6 +343,10 @@ export interface PaymentPageViewProps {
   initialIsSubmitting?: boolean;
   initialPaymentResult?: PaymentResponseDto | null;
   initialPaymentError?: PaymentSubmissionErrorState | null;
+  initialVnPayFlowState?: VnPayFlowState;
+  initiateVnPayFn?: typeof initiateVnPayPaymentApi;
+  submitZeroAmountFn?: typeof submitZeroAmountPaymentApi;
+  onRedirectToVnPay?: (paymentUrl: string) => void;
 }
 
 export default function PaymentPageView({
@@ -344,6 +358,10 @@ export default function PaymentPageView({
   initialIsSubmitting = false,
   initialPaymentResult = null,
   initialPaymentError = null,
+  initialVnPayFlowState = "idle",
+  initiateVnPayFn,
+  submitZeroAmountFn,
+  onRedirectToVnPay,
 }: PaymentPageViewProps) {
   const router = useSafeAppRouter();
   const {
@@ -410,6 +428,10 @@ export default function PaymentPageView({
   const [isSubmitting, setIsSubmitting] = useState<boolean>(
     initialIsSubmitting
   );
+  const [vnPayFlowState, setVnPayFlowState] = useState<VnPayFlowState>(
+    initialVnPayFlowState
+  );
+  const [activePaymentId, setActivePaymentId] = useState<string | null>(null);
   const [isVnPayTabOpened, setIsVnPayTabOpened] = useState<boolean>(false);
   const submittingRef = useRef<boolean>(initialIsSubmitting);
   const [paymentResult, setPaymentResult] =
@@ -1867,50 +1889,159 @@ export default function PaymentPageView({
                         </div>
                       )}
 
-                      {/* Checkout CTA Button: Xác nhận thanh toán (POST /payments hoặc Mở VNPay tab mới) */}
+                      {/* Checkout CTA Button: Xác nhận thanh toán (POST /payments hoặc chuyển hướng VNPay Sandbox) */}
                       <button
                         id="btnSubmitPayment"
                         type="button"
-                        disabled={isSubmitting || !isPayableOrder}
+                        disabled={
+                          isSubmitting ||
+                          !isPayableOrder ||
+                          vnPayFlowState === "verifying" ||
+                          vnPayFlowState === "redirecting"
+                        }
                         onClick={async () => {
                           if (method === "VNPAY") {
+                            // Chặn double-initiation
+                            if (submittingRef.current || isSubmitting) return;
+
+                            // Chặn khi đơn hàng đã hết hạn
+                            if (isOrderExpired(activeOrder) || orderStatus === "CANCELLED") {
+                              setVnPayFlowState("expired");
+                              setPaymentError({
+                                statusCode: 409,
+                                message: "Đơn hàng đã hết hạn thanh toán (15 phút). Không thể tạo giao dịch mới.",
+                                code: "ORDER_EXPIRED",
+                                idempotencyKey,
+                                canRetrySameKey: false,
+                                shouldGenerateNewKey: false,
+                              });
+                              return;
+                            }
+
+                            // Chặn retry khi VNPay còn PENDING (BR-05)
+                            const isPendingPayment =
+                              "payment" in activeOrder &&
+                              (activeOrder as MyOrderDto).payment?.status === "PENDING";
+                            if (
+                              isPendingPayment ||
+                              (orderStatus === "PENDING" && vnPayFlowState === "verifying")
+                            ) {
+                              setVnPayFlowState("verifying");
+                              setPaymentError({
+                                statusCode: 409,
+                                message:
+                                  "Giao dịch VNPay trước đó đang được xử lý (PENDING). Vui lòng không thực hiện lại để tránh trừ tiền 2 lần.",
+                                code: "PAYMENT_IN_PROGRESS",
+                                idempotencyKey,
+                                canRetrySameKey: true,
+                                shouldGenerateNewKey: false,
+                              });
+                              return;
+                            }
+
                             // BR-06: Đơn hàng 0đ quyết toán nội bộ không cần redirect
                             if (activeOrder.totalVnd === 0) {
                               setIsSubmitting(true);
+                              submittingRef.current = true;
                               setPaymentError(null);
                               try {
-                                await submitZeroAmountPaymentApi(
+                                const zeroApi = submitZeroAmountFn ?? submitZeroAmountPaymentApi;
+                                const res = await zeroApi(
                                   { orderId: activeOrder.id },
                                   idempotencyKey,
                                   { accessToken }
                                 );
-                                clearCart();
-                                if (setContextActiveOrder) setContextActiveOrder(null);
-                                clearStoredActiveOrder();
-                                router.push(`/order-confirmation?orderId=${encodeURIComponent(activeOrder.id)}&view=zero`);
+                                // Chỉ hiển thị SUCCESS khi backend thực sự xác nhận
+                                if (
+                                  res?.response?.paymentStatus === "SUCCESS" &&
+                                  res?.response?.orderStatus === "PAID"
+                                ) {
+                                  setVnPayFlowState("success");
+                                  clearCart();
+                                  if (setContextActiveOrder) setContextActiveOrder(null);
+                                  clearStoredActiveOrder();
+                                  router.push(
+                                    `/order-confirmation?orderId=${encodeURIComponent(activeOrder.id)}&view=zero`
+                                  );
+                                } else {
+                                  throw new Error("Phản hồi quyết toán 0đ không hợp lệ từ máy chủ.");
+                                }
                               } catch (err: unknown) {
+                                setVnPayFlowState("failed");
                                 const submissionErr = toPaymentSubmissionErrorState(err, idempotencyKey);
                                 setPaymentError(submissionErr);
                               } finally {
                                 setIsSubmitting(false);
+                                submittingRef.current = false;
                               }
                               return;
                             }
 
-                            // Mở màn hình redirect / cổng VNPay
-                            const vnpayUrl = `/order-confirmation?orderId=${encodeURIComponent(activeOrder.id)}&view=redirecting`;
-                            if (typeof window !== "undefined") {
-                              window.open(vnpayUrl, "_blank", "noopener,noreferrer");
-                            }
-                            setIsVnPayTabOpened(true);
+                            // Khởi tạo thanh toán VNPay Sandbox (> 0 VND)
+                            setIsSubmitting(true);
+                            submittingRef.current = true;
+                            setVnPayFlowState("initiating");
+                            setPaymentError(null);
 
-                            // Đồng thời kích hoạt POST /payments/vnpay/initiate
-                            if (accessToken && !isTokenExpired(accessToken)) {
-                              initiateVnPayPaymentApi(
+                            try {
+                              const initApi = initiateVnPayFn ?? initiateVnPayPaymentApi;
+                              const result = await initApi(
                                 { orderId: activeOrder.id },
                                 idempotencyKey,
                                 { accessToken }
-                              ).catch(() => {});
+                              );
+
+                              // Validate response & paymentUrl từ Backend
+                              const paymentUrl = result?.response?.paymentUrl;
+                              if (
+                                !paymentUrl ||
+                                typeof paymentUrl !== "string" ||
+                                !/^https?:\/\//i.test(paymentUrl)
+                              ) {
+                                throw new Error("Cổng thanh toán không trả về đường dẫn thanh toán hợp lệ.");
+                              }
+
+                              if (result.response.paymentId) {
+                                setActivePaymentId(result.response.paymentId);
+                                if (typeof window !== "undefined") {
+                                  try {
+                                    sessionStorage.setItem(
+                                      `vnpay_payment_id_${activeOrder.id}`,
+                                      result.response.paymentId
+                                    );
+                                  } catch {}
+                                }
+                              }
+
+                              setVnPayFlowState("redirecting");
+
+                              // Chỉ redirect bằng chính paymentUrl do backend trả về
+                              if (onRedirectToVnPay) {
+                                onRedirectToVnPay(paymentUrl);
+                              } else if (typeof window !== "undefined") {
+                                window.location.href = paymentUrl;
+                              }
+                            } catch (err: unknown) {
+                              submittingRef.current = false;
+                              setIsSubmitting(false);
+
+                              const submissionErr = toPaymentSubmissionErrorState(err, idempotencyKey);
+                              const errCode = submissionErr.code;
+
+                              if (errCode === "PAYMENT_IN_PROGRESS") {
+                                setVnPayFlowState("verifying");
+                              } else if (errCode === "ORDER_EXPIRED") {
+                                setVnPayFlowState("expired");
+                              } else if (errCode === "IDEMPOTENCY_KEY_CONFLICT") {
+                                setVnPayFlowState("failed");
+                                setIdempotencyKey(generateIdempotencyKey());
+                              } else if (errCode === "NETWORK_ERROR") {
+                                setVnPayFlowState("unknown");
+                              } else {
+                                setVnPayFlowState("failed");
+                              }
+
+                              setPaymentError(submissionErr);
                             }
                             return;
                           }
@@ -1939,7 +2070,11 @@ export default function PaymentPageView({
                         </span>
                         <span>
                           {isSubmitting
-                            ? "Đang xử lý POST /payments..."
+                            ? vnPayFlowState === "initiating"
+                              ? "Đang khởi tạo cổng VNPay..."
+                              : vnPayFlowState === "redirecting"
+                              ? "Đang chuyển hướng sang VNPay..."
+                              : "Đang xử lý POST /payments..."
                             : orderStatus === "PAID"
                             ? `Đơn hàng đã thanh toán • ${formatVnd(
                                 activeOrder.totalVnd

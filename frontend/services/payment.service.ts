@@ -1507,27 +1507,6 @@ export async function initiateVnPayPaymentApi(
     );
   }
 
-  // Fallback dev/mock nếu backend chưa triển khai endpoint P2-03 (NestJS trả 404 Cannot POST)
-  if (res.status === 404) {
-    const text = await res.clone().text().catch(() => "");
-    if (text.includes("Cannot POST /payments/vnpay/initiate")) {
-      const sandboxUrl = `https://sandbox.vnpayment.vn/paymentv2/vpcpay.html?vnp_Amount=9800000&vnp_Command=pay&vnp_CreateDate=20261031120000&vnp_CurrCode=VND&vnp_IpAddr=127.0.0.1&vnp_Locale=vn&vnp_OrderInfo=${encodeURIComponent("Thanh toan don hang " + cleanOrderId)}&vnp_OrderType=other&vnp_ReturnUrl=${encodeURIComponent("http://localhost:3000/order-confirmation?orderId=" + cleanOrderId)}&vnp_TmnCode=BREWLITE&vnp_TxnRef=${cleanOrderId}&vnp_Version=2.1.0&vnp_SecureHash=mockhash512`;
-      return {
-        response: {
-          paymentId: `pay-vnpay-${cleanOrderId.slice(0, 8)}`,
-          orderId: cleanOrderId,
-          provider: "VNPAY",
-          paymentStatus: "PENDING",
-          orderStatus: "PENDING",
-          amountVnd: 98000,
-          paymentUrl: sandboxUrl,
-          expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-        },
-        replayed: false,
-      };
-    }
-  }
-
   let data: unknown;
   try {
     data = await res.json();
@@ -1674,26 +1653,6 @@ export async function submitZeroAmountPaymentApi(
     );
   }
 
-  // Fallback dev/mock nếu backend chưa có endpoint
-  if (res.status === 404) {
-    const text = await res.clone().text().catch(() => "");
-    if (text.includes("Cannot POST /payments/zero-amount")) {
-      return {
-        response: {
-          paymentId: `pay-zero-${cleanOrderId.slice(0, 8)}`,
-          orderId: cleanOrderId,
-          provider: "ZERO_AMOUNT",
-          paymentStatus: "SUCCESS",
-          orderStatus: "PAID",
-          amountVnd: 0,
-          pointsEarned: 0,
-          createdAt: new Date().toISOString(),
-        },
-        replayed: false,
-      };
-    }
-  }
-
   let data: unknown;
   try {
     data = await res.json();
@@ -1783,32 +1742,13 @@ export async function fetchPaymentStatusApi(
     throw createPaymentError("Phiên làm việc hết hạn (401 UNAUTHORIZED).", 401, "UNAUTHORIZED", "");
   }
 
-  // Fallback dev/mock nếu backend route chưa có
-  if (res.status === 404) {
-    const text = await res.clone().text().catch(() => "");
-    if (text.includes("Cannot GET /payments/")) {
-      return {
-        paymentId,
-        orderId: "",
-        provider: "VNPAY",
-        paymentStatus: "PENDING",
-        orderStatus: "PENDING",
-        amountVnd: 0,
-        resolution: "PROCESSING",
-        requiresReview: false,
-        canRetry: false,
-        createdAt: new Date().toISOString(),
-        orderExpiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-        lastUpdatedAt: new Date().toISOString(),
-      };
-    }
-  }
-
   if (!res.ok) {
     throw createPaymentError(
-      `Không thể lấy trạng thái thanh toán (HTTP ${res.status}).`,
+      res.status === 404
+        ? "Không tìm thấy thông tin giao dịch thanh toán (404 NOT_FOUND)."
+        : `Không thể lấy trạng thái thanh toán (HTTP ${res.status}).`,
       res.status,
-      "SERVER_ERROR",
+      res.status === 404 ? "NOT_FOUND" : "SERVER_ERROR",
       ""
     );
   }
