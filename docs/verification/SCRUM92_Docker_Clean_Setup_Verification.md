@@ -1,11 +1,13 @@
 # SCRUM-92 / P2-18 — Verify Docker Clean Setup & Integration
 
 - **Task**: `SCRUM-92` (`P2-18 – Verify Docker Clean Setup & Integration`)
-- **Branch**: `SCRUM-92-p-2-18-verify-docker-clean-setup-integration` (based on `dev` @ `04dcd26`)
-- **Date**: 2026-11-03
+- **Branch**: `SCRUM-92-p-2-18-verify-docker-clean-setup-integration` (synced with `origin/dev` @ `f3a0285`)
+- **Date**: 2026-11-04
 - **Environment**: Windows 11, Docker Engine `29.9.2`, Docker Compose `v5.6.1`, Node.js `v22+`
 - **Dependencies verified on `dev`**:
   - `P2-06` (`SCRUM-80` — Prisma migrations & guarded demo seed)
+  - `P2-10` (`SCRUM-84` — `POST /payments/zero-amount` settlement & idempotency)
+  - `P2-11` (`SCRUM-85` — `MockPaymentGuard` environment access policy in `NODE_ENV=production`)
   - `P2-15` (`SCRUM-89` — `backend/Dockerfile` multi-stage `build`, `migrate`, `production`)
   - `P2-16` (`SCRUM-90` — `frontend/Dockerfile` standalone + `/api/backend/*` reverse proxy)
   - `P2-17` (`SCRUM-91` — `docker-compose.yml`, `compose.env.example`, `scripts/compose-preflight-env.sh`, `docs/Docker_Compose.md`)
@@ -69,7 +71,7 @@ node scripts/scrum92/verify_compose_e2e.mjs
 ```
 
 **Deterministic Rerun & Scoped Cleanup Design**:
-- Before running E2E flows, `scripts/scrum92/verify_compose_e2e.mjs` verifies that the target database is the isolated Compose database (`brewlite_compose`) and executes a single SQL transaction scoped strictly to `scrum92.verify.%@brewlite.vn` synthetic users: it restores the exact `stock` quantities reserved by any prior `SCRUM-92` test orders back to `products` (returning `sample_product_stock` to `25`) and deletes only those synthetic test records.
+- Before running E2E flows, `scripts/scrum92/verify_compose_e2e.mjs` verifies that the target database is the isolated Compose database (`brewlite_compose`) and executes a single SQL transaction scoped strictly to `scrum92.verify.%@brewlite.vn` synthetic users (and the synthetic coupon `SCRUM92FREE`): it restores the exact `stock` quantities reserved by any prior `SCRUM-92` test orders back to `products` (returning `sample_product_stock` to `25`) and deletes only those synthetic test records.
 - It never executes `docker volume rm` or `docker compose down -v`, and never modifies non-test data.
 - To clean up `SCRUM-92` test records and restore `stock = 25` without starting a new test run:
   ```bash
@@ -86,11 +88,11 @@ docker compose --env-file compose.env ps -a
 **Sanitized Output**:
 ```text
 Container health states: {"migrateState":"exited:0","pgHealth":"running:healthy","beHealth":"running:healthy","feHealth":"running:healthy"}
-NAME                          IMAGE                       COMMAND                  SERVICE    CREATED       STATUS                      PORTS
-brewlite_compose-backend-1    brewlite_compose-backend    "docker-entrypoint.s…"   backend    2 hours ago   Up 14 seconds (healthy)     127.0.0.1:3001->3001/tcp
-brewlite_compose-frontend-1   brewlite_compose-frontend   "docker-entrypoint.s…"   frontend   2 hours ago   Up 8 seconds (healthy)      0.0.0.0:3000->3000/tcp, [::]:3000->3000/tcp
-brewlite_compose-migrate-1    brewlite_compose-migrate    "docker-entrypoint.s…"   migrate    2 hours ago   Exited (0) 14 seconds ago
-brewlite_compose-postgres-1   postgres:18-alpine          "docker-entrypoint.s…"   postgres   2 hours ago   Up 21 seconds (healthy)     127.0.0.1:15432->5432/tcp
+NAME                          IMAGE                       COMMAND                  SERVICE    CREATED              STATUS                          PORTS
+brewlite_compose-backend-1    brewlite_compose-backend    "docker-entrypoint.s…"   backend    About a minute ago   Up About a minute (healthy)     127.0.0.1:3001->3001/tcp
+brewlite_compose-frontend-1   brewlite_compose-frontend   "docker-entrypoint.s…"   frontend   15 hours ago         Up About a minute (healthy)     0.0.0.0:3000->3000/tcp, [::]:3000->3000/tcp
+brewlite_compose-migrate-1    brewlite_compose-migrate    "docker-entrypoint.s…"   migrate    About a minute ago   Exited (0) About a minute ago
+brewlite_compose-postgres-1   postgres:18-alpine          "docker-entrypoint.s…"   postgres   15 hours ago         Up About a minute (healthy)     127.0.0.1:15432->5432/tcp
 ```
 
 ---
@@ -177,7 +179,7 @@ curl -s http://localhost:3000/api/backend/products/a3000000-0000-4000-8000-00000
 
 **Sanitized Output**:
 ```json
-{"registerStatus":201,"loginStatus":200,"accessToken":"<REDACTED_JWT>","meProfile":{"id":"3ed86c1c-2b5c-41fe-bb54-7eb89d43f7c9","email":"scrum92.verify.1793722647734@brewlite.vn","fullName":"SCRUM-92 Clean Verifier","loyaltyPoints":0}}
+{"registerStatus":201,"loginStatus":200,"accessToken":"<REDACTED_JWT>","meProfile":{"id":"fe8a0c32-026e-402c-abc2-a53c2fc78483","email":"scrum92.verify.1793772125411@brewlite.vn","fullName":"SCRUM-92 Clean Verifier","loyaltyPoints":0}}
 ```
 
 ---
@@ -189,23 +191,23 @@ curl -s http://localhost:3000/api/backend/products/a3000000-0000-4000-8000-00000
 
 **Sanitized Output**:
 ```json
-{"status":201,"orderId":"443bb4fc-1b69-45ec-a698-de2071221d0e","orderStatus":"PENDING","subtotalVnd":104000,"totalVnd":104000}
+{"status":201,"orderId":"abddf914-e053-4a2f-984a-23a70072622d","orderStatus":"PENDING","subtotalVnd":104000,"totalVnd":104000}
 ```
 
 ---
 
-### 2.6. Payment Flow via Reverse Proxy (`POST /api/backend/payments` & `POST /api/backend/payments/vnpay/initiate`)
+### 2.6. Payment Flow via Reverse Proxy (`POST /payments`, `POST /payments/zero-amount` & `POST /payments/vnpay/initiate`)
 
 **Command (executed by `node scripts/scrum92/verify_compose_e2e.mjs` steps `[6]` and `[6b]`)**:
-1. `POST http://localhost:3000/api/backend/payments` with declined card `4111111111110002` $\rightarrow$ `FAILED` / `PAYMENT_FAILED` / `PAYMENT_DECLINED`.
-2. `POST http://localhost:3000/api/backend/payments` with new `Idempotency-Key` and valid card `4111111111111234` $\rightarrow$ `SUCCESS` / `PAID` / `pointsEarned: 10`.
-3. Repeat step 2 with identical `Idempotency-Key` $\rightarrow$ `200 OK` with header `idempotency-replayed: true` and same `paymentId`.
-4. `POST http://localhost:3000/api/backend/payments/vnpay/initiate` on a new `PENDING` order $\rightarrow$ `201 Created` (`provider: "VNPAY"`, `paymentStatus: "PENDING"`), followed by idempotent replay $\rightarrow$ `200 OK` (`idempotency-replayed: true`).
+1. `POST http://localhost:3000/api/backend/payments` (Mock) in Compose (`NODE_ENV=production`) $\rightarrow$ `403 Forbidden` (`code: "MOCK_PAYMENT_DISABLED"`, per `SCRUM-85` / `P2-11`).
+2. `POST http://localhost:3000/api/backend/payments/zero-amount` on positive order (`104000 VND`) $\rightarrow$ `409 Conflict` (`code: "ORDER_NOT_ZERO_AMOUNT"`, per `SCRUM-84` / `P2-10`).
+3. `POST http://localhost:3000/api/backend/payments/zero-amount` on a `0 VND` order $\rightarrow$ `201 Created` (`provider: "ZERO_AMOUNT"`, `paymentStatus: "SUCCESS"`, `orderStatus: "PAID"`), followed by idempotent replay with identical `Idempotency-Key` $\rightarrow$ `200 OK` (`idempotency-replayed: true`).
+4. `POST http://localhost:3000/api/backend/payments/vnpay/initiate` on the `104000 VND` `PENDING` order $\rightarrow$ `201 Created` (`provider: "VNPAY"`, `paymentStatus: "PENDING"`), followed by idempotent replay $\rightarrow$ `200 OK` (`idempotency-replayed: true`).
 
 **Sanitized Output**:
 ```json
-{"failedAttempt":{"paymentId":"4ee2622e-86db-49f7-9919-4929b9771ec6","paymentStatus":"FAILED","orderStatus":"PAYMENT_FAILED","failureReason":"PAYMENT_DECLINED"},"retrySuccess":{"paymentId":"548f22fa-c473-44eb-a248-ef66a5da389a","paymentStatus":"SUCCESS","orderStatus":"PAID","pointsEarned":10},"idempotentReplay":{"status":200,"idempotencyReplayedHeader":"true","samePaymentId":true}}
-{"initiateStatus":201,"replayStatus":200,"idempotencyReplayedHeader":"true","provider":"VNPAY","paymentStatus":"PENDING","orderStatus":"PENDING","sanitizedPaymentUrl":"https://sandbox.vnpayment.vn/paymentv2/vpcpay.html?vnp_Amount=4200000&vnp_Command=pay&vnp_CreateDate=20261103231728&vnp_CurrCode=VND&vnp_ExpireDate=20261103233227&vnp_IpAddr=172.18.0.4&vnp_Locale=vn&vnp_OrderInfo=Thanh+toan+don+hang+072cfb93-454c-403e-8161-efa807a9a3e6&vnp_OrderType=other&vnp_ReturnUrl=https%3A%2F%2Flocalhost%3A3000%2Forder-confirmation&vnp_TmnCode=%3CREDACTED_TMN_CODE%3E&vnp_TxnRef=f7e2108dd66f4ce3bfc8ab2ca8bdf5e7&vnp_Version=2.1.0&vnp_SecureHash=%3CREDACTED_SECURE_HASH%3E"}
+{"mockProductionPolicy":{"status":403,"code":"MOCK_PAYMENT_DISABLED"},"zeroAmountPositiveOrderRejection":{"status":409,"code":"ORDER_NOT_ZERO_AMOUNT"},"zeroAmountSettlement":{"status":201,"orderId":"bb1ee46d-74b9-473f-815b-a0b91d71ef92","paymentId":"361fad08-20d4-44c4-b9ce-9d083d635dd3","provider":"ZERO_AMOUNT","paymentStatus":"SUCCESS","orderStatus":"PAID","amountVnd":0},"zeroAmountReplay":{"status":200,"idempotencyReplayedHeader":"true","samePaymentId":true}}
+{"initiateStatus":201,"replayStatus":200,"idempotencyReplayedHeader":"true","provider":"VNPAY","paymentStatus":"PENDING","orderStatus":"PENDING","sanitizedPaymentUrl":"https://sandbox.vnpayment.vn/paymentv2/vpcpay.html?vnp_Amount=10400000&vnp_Command=pay&vnp_CreateDate=20261104130206&vnp_CurrCode=VND&vnp_ExpireDate=20261104131705&vnp_IpAddr=172.18.0.4&vnp_Locale=vn&vnp_OrderInfo=Thanh+toan+don+hang+abddf914-e053-4a2f-984a-23a70072622d&vnp_OrderType=other&vnp_ReturnUrl=https%3A%2F%2Flocalhost%3A3000%2Forder-confirmation&vnp_TmnCode=%3CREDACTED_TMN_CODE%3E&vnp_TxnRef=8c77ee61707d4fc68d7c56e57434baf4&vnp_Version=2.1.0&vnp_SecureHash=%3CREDACTED_SECURE_HASH%3E"}
 ```
 
 ---
@@ -214,7 +216,7 @@ curl -s http://localhost:3000/api/backend/products/a3000000-0000-4000-8000-00000
 
 **Command (executed by `node scripts/scrum92/verify_compose_e2e.mjs` steps `[7]` and `[8]`)**:
 ```bash
-# Snapshot before restart via API (/api/backend/orders/me, /api/backend/auth/me) and SQL (sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"')
+# Snapshot before restart via API (/api/backend/orders/me, /api/backend/payments/zero-amount replay) and SQL (sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"')
 docker compose --env-file compose.env stop
 docker compose --env-file compose.env start
 # Wait for migrate=exited:0 and postgres/backend/frontend=running:healthy, then re-query API and SQL
@@ -223,21 +225,23 @@ docker compose --env-file compose.env start
 **Sanitized Output (Before vs After Restart)**:
 ```text
 === [7] Pre-Restart Snapshot (API & PostgreSQL) ===
-Pre-Restart API Snapshot: {"orderId":"443bb4fc-1b69-45ec-a698-de2071221d0e","orderStatus":"PAID","totalVnd":104000,"paymentId":"548f22fa-c473-44eb-a248-ef66a5da389a","paymentStatus":"SUCCESS","loyaltyPoints":10}
+Pre-Restart API Snapshot: {"primaryOrder":{"orderId":"abddf914-e053-4a2f-984a-23a70072622d","orderStatus":"PENDING","totalVnd":104000},"zeroAmountPaidOrder":{"orderId":"bb1ee46d-74b9-473f-815b-a0b91d71ef92","paymentId":"361fad08-20d4-44c4-b9ce-9d083d635dd3","orderStatus":"PAID","paymentStatus":"SUCCESS"}}
 Pre-Restart SQL Snapshot:
-               order_id               | order_status | total_vnd | payment_attempts | winning_payment_status | loyalty_points
---------------------------------------+--------------+-----------+------------------+------------------------+----------------
- 443bb4fc-1b69-45ec-a698-de2071221d0e | PAID         |    104000 |                2 | SUCCESS                |             10
-(1 row)
+               order_id               | order_status | total_vnd |              payment_id              |  provider   | payment_status
+--------------------------------------+--------------+-----------+--------------------------------------+-------------+----------------
+ abddf914-e053-4a2f-984a-23a70072622d | PENDING      |    104000 | 8c77ee61-707d-4fc6-8d7c-56e57434baf4 | VNPAY       | PENDING
+ bb1ee46d-74b9-473f-815b-a0b91d71ef92 | PAID         |         0 | 361fad08-20d4-44c4-b9ce-9d083d635dd3 | ZERO_AMOUNT | SUCCESS
+(2 rows)
 
 === [8] Restart Stack (docker compose stop -> start) & Post-Restart Persistence Check ===
 Post-Restart Container States: {"migrateState":"exited:0","pgHealth":"running:healthy","beHealth":"running:healthy","feHealth":"running:healthy"}
-Post-Restart API Snapshot: {"orderId":"443bb4fc-1b69-45ec-a698-de2071221d0e","orderStatus":"PAID","totalVnd":104000,"paymentId":"548f22fa-c473-44eb-a248-ef66a5da389a","paymentStatus":"SUCCESS","loyaltyPoints":10}
-Post-Restart SQL Snapshot:
-               order_id               | order_status | total_vnd | payment_attempts | winning_payment_status | loyalty_points
---------------------------------------+--------------+-----------+------------------+------------------------+----------------
- 443bb4fc-1b69-45ec-a698-de2071221d0e | PAID         |    104000 |                2 | SUCCESS                |             10
-(1 row)
+Post-Restart API Snapshot: {"primaryOrder":{"orderId":"abddf914-e053-4a2f-984a-23a70072622d","orderStatus":"PENDING","totalVnd":104000},"zeroAmountPaidOrder":{"orderId":"bb1ee46d-74b9-473f-815b-a0b91d71ef92","paymentId":"361fad08-20d4-44c4-b9ce-9d083d635dd3","orderStatus":"PAID","paymentStatus":"SUCCESS"}}
+Pre-Restart and Post-Restart SQL Snapshot:
+               order_id               | order_status | total_vnd |              payment_id              |  provider   | payment_status
+--------------------------------------+--------------+-----------+--------------------------------------+-------------+----------------
+ abddf914-e053-4a2f-984a-23a70072622d | PENDING      |    104000 | 8c77ee61-707d-4fc6-8d7c-56e57434baf4 | VNPAY       | PENDING
+ bb1ee46d-74b9-473f-815b-a0b91d71ef92 | PAID         |         0 | 361fad08-20d4-44c4-b9ce-9d083d635dd3 | ZERO_AMOUNT | SUCCESS
+(2 rows)
 
 [SCRUM-92] ALL VERIFICATION CHECKS PASSED.
 ```
@@ -279,14 +283,14 @@ Post-Restart SQL Snapshot:
 
 ---
 
-### Issue #3 [Major — Cross-Module Integration]: `GET /orders/me` trên `dev` (`04dcd26`) gặp lỗi 500 khi đơn hàng có giao dịch `VNPAY` (`responseSnapshot = null`)
+### Issue #3 [Major — Cross-Module Integration]: `GET /orders/me` trên `dev` (`f3a0285`) gặp lỗi 500 khi đơn hàng có giao dịch `VNPAY` hoặc `ZERO_AMOUNT`
 
 - **Module / Owner**: `P2-14` (`SCRUM-88` — `backend/src/orders/orders.service.ts`).
 - **Mức độ**: **Major**.
 - **Bước tái hiện**:
-  1. Trên nhánh `dev` (`04dcd26`), tạo đơn hàng và gọi `POST /payments/vnpay/initiate` (tạo bản ghi `Payment` với `provider = VNPAY`, `status = PENDING`, `responseSnapshot = null`), hoặc hoàn tất thanh toán VNPay (`status = SUCCESS`, `responseSnapshot = null`).
+  1. Trên nhánh `dev` (`f3a0285`), tạo đơn hàng `0 VND` và hoàn tất qua `POST /payments/zero-amount` (hoặc hoàn tất thanh toán VNPay `status = SUCCESS`, `responseSnapshot = null`).
   2. Gọi `GET /orders/me`.
-  3. Khi `Payment` VNPay chuyển sang `SUCCESS`/`FAILED`, `OrdersService.getMine()` trên `dev` gọi `readPaymentSnapshot(payment.responseSnapshot)` và throw `InternalServerErrorException('Invalid payment response snapshot')` do giao dịch VNPay không lưu `responseSnapshot` của Mock Card/Wallet. Ngoài ra `getMine()` trên `dev` chỉ lọc `status IN ('SUCCESS', 'FAILED')` nên bỏ sót giao dịch `PENDING`.
+  3. `OrdersService.getMine()` trên `dev` gọi `readPaymentSnapshot(payment.responseSnapshot)` (vốn chỉ chấp nhận cấu trúc snapshot của Mock Card/Wallet) và throw `InternalServerErrorException('Invalid payment response snapshot')`. Ngoài ra `getMine()` trên `dev` chỉ lọc `status IN ('SUCCESS', 'FAILED')` nên bỏ sót giao dịch `PENDING`.
 - **Trạng thái xử lý**:
   - Đã được sửa trong nhánh `SCRUM-88-p-2-14-complete-payment-confirmation-order-history-integration` (`P2-14`). Sau khi `SCRUM-88` được merge vào `dev`, `GET /orders/me` sẽ hỗ trợ đầy đủ `VNPAY`, `MOCK`, `ZERO_AMOUNT` và trạng thái `PENDING`.
 

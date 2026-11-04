@@ -8,8 +8,14 @@
  * - Never runs `docker volume rm` or `docker compose down -v`.
  * - Uses container-internal `$POSTGRES_USER` and `$POSTGRES_DB` via `sh -c 'psql ...'`.
  * - Before running E2E flows, deterministically cleans up any prior SCRUM-92 synthetic test
- *   records (`scrum92.verify.%@brewlite.vn`) and restores their reserved product stock inside
- *   a single SQL transaction, so repeated runs never exhaust product stock.
+ *   records (`scrum92.verify.%@brewlite.vn`, coupon `SCRUM92FREE`) and restores their reserved
+ *   product stock inside a single SQL transaction, so repeated runs never exhaust product stock.
+ * - Verifies Phase 2 payment behavior on current `dev` (`SCRUM-84` & `SCRUM-85`):
+ *   1. `POST /api/backend/payments` (Mock) -> `403 MOCK_PAYMENT_DISABLED` in Compose (`NODE_ENV=production`).
+ *   2. `POST /api/backend/payments/zero-amount` -> `409 ORDER_NOT_ZERO_AMOUNT` on positive order,
+ *      and `201 Created` (`PAID` / `SUCCESS`) + `200 OK` (`idempotency-replayed: true`) on a 0 VND order.
+ *   3. `POST /api/backend/payments/vnpay/initiate` -> `201 Created` (`PENDING`) + `200 OK` replay
+ *      when VNPay sandbox variables are configured in `compose.env`.
  * - Automatically redacts sensitive values (`<REDACTED_JWT>`, `<REDACTED_TMN_CODE>`,
  *   `<REDACTED_SECURE_HASH>`) and strips trailing whitespace from console output.
  */
@@ -200,6 +206,9 @@ WHERE user_id IN (
      OR email LIKE 'scrum92.docker.%@brewlite.vn'
 );
 
+DELETE FROM coupons
+WHERE code = 'SCRUM92FREE';
+
 DELETE FROM users
 WHERE email LIKE 'scrum92.verify.%@brewlite.vn'
    OR email LIKE 'scrum92.docker.%@brewlite.vn';
@@ -207,6 +216,32 @@ WHERE email LIKE 'scrum92.verify.%@brewlite.vn'
 COMMIT;
 `;
   runPsqlTuple(cleanupSql);
+}
+
+function seedScrum92ZeroCoupon() {
+  const couponSql = `
+INSERT INTO coupons (
+  id, code, type, value, min_subtotal_vnd, max_discount_vnd,
+  starts_at, expires_at, usage_limit, per_user_limit, active_usage_count
+) VALUES (
+  'c9200000-0000-4000-8000-000000000092',
+  'SCRUM92FREE',
+  'PERCENT',
+  100,
+  0,
+  NULL,
+  NOW() - INTERVAL '1 day',
+  NOW() + INTERVAL '7 days',
+  100,
+  10,
+  0
+)
+ON CONFLICT (code) DO UPDATE
+SET active_usage_count = 0,
+    starts_at = NOW() - INTERVAL '1 day',
+    expires_at = NOW() + INTERVAL '7 days';
+`;
+  runPsqlTuple(couponSql);
 }
 
 async function jsonFetch(url, options = {}) {
@@ -423,33 +458,13 @@ async function main() {
     }),
   );
 
-  console.log('\n=== [6] Payment Flow via Reverse Proxy (FAILED -> Retry SUCCESS -> Idempotent Replay) ===');
-  const failKey = `scrum92-fail-${randomUUID()}`;
-  const failPayRes = await jsonFetch(`${PROXY_API}/payments`, {
+  console.log('\n=== [6] Payment APIs via Reverse Proxy (SCRUM-85 Mock Guard & SCRUM-84 ZERO_AMOUNT Settlement) ===');
+  const mockAttemptRes = await jsonFetch(`${PROXY_API}/payments`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
-      'Idempotency-Key': failKey,
-    },
-    body: JSON.stringify({
-      orderId,
-      method: 'CARD',
-      paymentDetails: { cardNumber: '4111111111110002' },
-    }),
-  });
-  assert.equal(failPayRes.status, 200, `Failed payment call error: ${JSON.stringify(failPayRes.body)}`);
-  assert.equal(failPayRes.body.paymentStatus, 'FAILED');
-  assert.equal(failPayRes.body.orderStatus, 'PAYMENT_FAILED');
-  assert.equal(failPayRes.body.failureReason, 'PAYMENT_DECLINED');
-
-  const okKey = `scrum92-ok-${randomUUID()}`;
-  const okPayRes = await jsonFetch(`${PROXY_API}/payments`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-      'Idempotency-Key': okKey,
+      'Idempotency-Key': `scrum92-mock-${randomUUID()}`,
     },
     body: JSON.stringify({
       orderId,
@@ -457,63 +472,111 @@ async function main() {
       paymentDetails: { cardNumber: '4111111111111234' },
     }),
   });
-  assert.equal(okPayRes.status, 200, `Success payment call error: ${JSON.stringify(okPayRes.body)}`);
-  assert.equal(okPayRes.body.paymentStatus, 'SUCCESS');
-  assert.equal(okPayRes.body.orderStatus, 'PAID');
-  assert.equal(okPayRes.body.pointsEarned, 10);
+  assert.equal(mockAttemptRes.status, 403, `Expected 403 MOCK_PAYMENT_DISABLED: ${JSON.stringify(mockAttemptRes.body)}`);
+  assert.equal(mockAttemptRes.body.code, 'MOCK_PAYMENT_DISABLED');
 
-  const replayPayRes = await jsonFetch(`${PROXY_API}/payments`, {
+  const nonZeroRejectRes = await jsonFetch(`${PROXY_API}/payments/zero-amount`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
-      'Idempotency-Key': okKey,
+      'Idempotency-Key': `scrum92-nonzero-${randomUUID()}`,
+    },
+    body: JSON.stringify({ orderId }),
+  });
+  assert.equal(nonZeroRejectRes.status, 409);
+  assert.equal(nonZeroRejectRes.body.code, 'ORDER_NOT_ZERO_AMOUNT');
+
+  seedScrum92ZeroCoupon();
+  const zeroEmail = `scrum92.verify.zero.${Date.now()}@brewlite.vn`;
+  const zeroRegRes = await jsonFetch(`${PROXY_API}/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: zeroEmail, password, fullName: 'SCRUM-92 Zero Amount Verifier' }),
+  });
+  assert.equal(zeroRegRes.status, 201);
+  const zeroLoginRes = await jsonFetch(`${PROXY_API}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: zeroEmail, password }),
+  });
+  assert.equal(zeroLoginRes.status, 200);
+  const zeroToken = zeroLoginRes.body.accessToken;
+
+  const zeroOrderRes = await jsonFetch(`${PROXY_API}/orders`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${zeroToken}`,
     },
     body: JSON.stringify({
-      orderId,
-      method: 'CARD',
-      paymentDetails: { cardNumber: '4111111111111234' },
+      couponCode: 'SCRUM92FREE',
+      items: [{ productId: detailRes.body.id, size: sizeS.size, quantity: 1, toppingIds: [] }],
     }),
   });
-  assert.equal(replayPayRes.status, 200);
-  assert.equal(replayPayRes.headers.get('idempotency-replayed'), 'true');
-  assert.equal(replayPayRes.body.paymentId, okPayRes.body.paymentId);
+  assert.equal(zeroOrderRes.status, 201, `Create zero order failed: ${JSON.stringify(zeroOrderRes.body)}`);
+  assert.equal(zeroOrderRes.body.totalVnd, 0);
+  const zeroOrderId = zeroOrderRes.body.id;
+
+  const zeroKey = `scrum92-zero-${randomUUID()}`;
+  const zeroPayRes = await jsonFetch(`${PROXY_API}/payments/zero-amount`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${zeroToken}`,
+      'Idempotency-Key': zeroKey,
+    },
+    body: JSON.stringify({ orderId: zeroOrderId }),
+  });
+  assert.equal(zeroPayRes.status, 201, `ZERO_AMOUNT payment failed: ${JSON.stringify(zeroPayRes.body)}`);
+  assert.equal(zeroPayRes.body.provider, 'ZERO_AMOUNT');
+  assert.equal(zeroPayRes.body.paymentStatus, 'SUCCESS');
+  assert.equal(zeroPayRes.body.orderStatus, 'PAID');
+  assert.equal(zeroPayRes.body.amountVnd, 0);
+  assert.equal(zeroPayRes.headers.get('idempotency-replayed'), 'false');
+
+  const zeroReplayRes = await jsonFetch(`${PROXY_API}/payments/zero-amount`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${zeroToken}`,
+      'Idempotency-Key': zeroKey,
+    },
+    body: JSON.stringify({ orderId: zeroOrderId }),
+  });
+  assert.equal(zeroReplayRes.status, 200);
+  assert.equal(zeroReplayRes.headers.get('idempotency-replayed'), 'true');
+  assert.equal(zeroReplayRes.body.paymentId, zeroPayRes.body.paymentId);
+
   console.log(
     JSON.stringify({
-      failedAttempt: {
-        paymentId: failPayRes.body.paymentId,
-        paymentStatus: failPayRes.body.paymentStatus,
-        orderStatus: failPayRes.body.orderStatus,
-        failureReason: failPayRes.body.failureReason,
+      mockProductionPolicy: {
+        status: mockAttemptRes.status,
+        code: mockAttemptRes.body.code,
       },
-      retrySuccess: {
-        paymentId: okPayRes.body.paymentId,
-        paymentStatus: okPayRes.body.paymentStatus,
-        orderStatus: okPayRes.body.orderStatus,
-        pointsEarned: okPayRes.body.pointsEarned,
+      zeroAmountPositiveOrderRejection: {
+        status: nonZeroRejectRes.status,
+        code: nonZeroRejectRes.body.code,
       },
-      idempotentReplay: {
-        status: replayPayRes.status,
-        idempotencyReplayedHeader: replayPayRes.headers.get('idempotency-replayed'),
-        samePaymentId: replayPayRes.body.paymentId === okPayRes.body.paymentId,
+      zeroAmountSettlement: {
+        status: zeroPayRes.status,
+        orderId: zeroOrderId,
+        paymentId: zeroPayRes.body.paymentId,
+        provider: zeroPayRes.body.provider,
+        paymentStatus: zeroPayRes.body.paymentStatus,
+        orderStatus: zeroPayRes.body.orderStatus,
+        amountVnd: zeroPayRes.body.amountVnd,
+      },
+      zeroAmountReplay: {
+        status: zeroReplayRes.status,
+        idempotencyReplayedHeader: zeroReplayRes.headers.get('idempotency-replayed'),
+        samePaymentId: zeroReplayRes.body.paymentId === zeroPayRes.body.paymentId,
       },
     }),
   );
 
   if (envCfg.VNPAY_TMN_CODE && envCfg.VNPAY_HASH_SECRET && envCfg.VNPAY_RETURN_URL) {
     console.log('\n=== [6b] VNPay Sandbox Initiation & Replay (/api/backend/payments/vnpay/initiate) ===');
-    const vnpOrderRes = await jsonFetch(`${PROXY_API}/orders`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        items: [{ productId: detailRes.body.id, size: sizeS.size, quantity: 1, toppingIds: [] }],
-      }),
-    });
-    assert.equal(vnpOrderRes.status, 201);
-    const vnpOrderId = vnpOrderRes.body.id;
     const vnpKey = `scrum92-vnp-${randomUUID()}`;
     const vnpInitRes = await jsonFetch(`${PROXY_API}/payments/vnpay/initiate`, {
       method: 'POST',
@@ -522,7 +585,7 @@ async function main() {
         Authorization: `Bearer ${token}`,
         'Idempotency-Key': vnpKey,
       },
-      body: JSON.stringify({ orderId: vnpOrderId }),
+      body: JSON.stringify({ orderId }),
     });
     assert.equal(vnpInitRes.status, 201, `VNPay initiate failed: ${JSON.stringify(vnpInitRes.body)}`);
     assert.equal(vnpInitRes.body.provider, 'VNPAY');
@@ -535,7 +598,7 @@ async function main() {
         Authorization: `Bearer ${token}`,
         'Idempotency-Key': vnpKey,
       },
-      body: JSON.stringify({ orderId: vnpOrderId }),
+      body: JSON.stringify({ orderId }),
     });
     assert.equal(vnpReplayRes.status, 200);
     assert.equal(vnpReplayRes.headers.get('idempotency-replayed'), 'true');
@@ -557,35 +620,31 @@ async function main() {
     headers: { Authorization: `Bearer ${token}` },
   });
   assert.equal(ordersBefore.status, 200);
-  const paidOrderBefore = ordersBefore.body.items.find((o) => o.id === orderId);
-  assert.ok(paidOrderBefore);
-  assert.equal(paidOrderBefore.status, 'PAID');
-  assert.equal(paidOrderBefore.payment.id, okPayRes.body.paymentId);
-  assert.equal(paidOrderBefore.payment.status, 'SUCCESS');
-
-  const meBefore = await jsonFetch(`${PROXY_API}/auth/me`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  assert.equal(meBefore.status, 200);
-  assert.equal(meBefore.body.loyaltyPoints, 10);
+  const pendingOrderBefore = ordersBefore.body.items.find((o) => o.id === orderId);
+  assert.ok(pendingOrderBefore);
+  assert.equal(pendingOrderBefore.status, 'PENDING');
 
   const sqlSnapshotQuery = `SELECT o.id AS order_id, o.status AS order_status, o.total_vnd,
-            (SELECT count(*) FROM payments p WHERE p.order_id = o.id) AS payment_attempts,
-            (SELECT p.status FROM payments p WHERE p.id = '${okPayRes.body.paymentId}') AS winning_payment_status,
-            u.loyalty_points
+            p.id AS payment_id, p.provider, p.status AS payment_status
        FROM orders o
-       JOIN users u ON u.id = o.user_id
-      WHERE o.id = '${orderId}';`;
+       LEFT JOIN payments p ON p.order_id = o.id
+      WHERE o.id IN ('${orderId}', '${zeroOrderId}')
+      ORDER BY o.total_vnd DESC;`;
   const sqlBefore = runPsql(sqlSnapshotQuery);
   console.log(
     'Pre-Restart API Snapshot:',
     JSON.stringify({
-      orderId: paidOrderBefore.id,
-      orderStatus: paidOrderBefore.status,
-      totalVnd: paidOrderBefore.totalVnd,
-      paymentId: paidOrderBefore.payment.id,
-      paymentStatus: paidOrderBefore.payment.status,
-      loyaltyPoints: meBefore.body.loyaltyPoints,
+      primaryOrder: {
+        orderId: pendingOrderBefore.id,
+        orderStatus: pendingOrderBefore.status,
+        totalVnd: pendingOrderBefore.totalVnd,
+      },
+      zeroAmountPaidOrder: {
+        orderId: zeroOrderId,
+        paymentId: zeroPayRes.body.paymentId,
+        orderStatus: zeroPayRes.body.orderStatus,
+        paymentStatus: zeroPayRes.body.paymentStatus,
+      },
     }),
   );
   console.log('Pre-Restart SQL Snapshot:\n' + sqlBefore);
@@ -600,28 +659,39 @@ async function main() {
     headers: { Authorization: `Bearer ${token}` },
   });
   assert.equal(ordersAfter.status, 200);
-  const paidOrderAfter = ordersAfter.body.items.find((o) => o.id === orderId);
-  assert.ok(paidOrderAfter);
-  assert.equal(paidOrderAfter.status, 'PAID');
-  assert.equal(paidOrderAfter.payment.id, okPayRes.body.paymentId);
-  assert.equal(paidOrderAfter.payment.status, 'SUCCESS');
+  const pendingOrderAfter = ordersAfter.body.items.find((o) => o.id === orderId);
+  assert.ok(pendingOrderAfter);
+  assert.equal(pendingOrderAfter.status, 'PENDING');
 
-  const meAfter = await jsonFetch(`${PROXY_API}/auth/me`, {
-    headers: { Authorization: `Bearer ${token}` },
+  const zeroReplayAfterRestart = await jsonFetch(`${PROXY_API}/payments/zero-amount`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${zeroToken}`,
+      'Idempotency-Key': zeroKey,
+    },
+    body: JSON.stringify({ orderId: zeroOrderId }),
   });
-  assert.equal(meAfter.status, 200);
-  assert.equal(meAfter.body.loyaltyPoints, 10);
+  assert.equal(zeroReplayAfterRestart.status, 200);
+  assert.equal(zeroReplayAfterRestart.headers.get('idempotency-replayed'), 'true');
+  assert.equal(zeroReplayAfterRestart.body.paymentId, zeroPayRes.body.paymentId);
+  assert.equal(zeroReplayAfterRestart.body.orderStatus, 'PAID');
 
   const sqlAfter = runPsql(sqlSnapshotQuery);
   console.log(
     'Post-Restart API Snapshot:',
     JSON.stringify({
-      orderId: paidOrderAfter.id,
-      orderStatus: paidOrderAfter.status,
-      totalVnd: paidOrderAfter.totalVnd,
-      paymentId: paidOrderAfter.payment.id,
-      paymentStatus: paidOrderAfter.payment.status,
-      loyaltyPoints: meAfter.body.loyaltyPoints,
+      primaryOrder: {
+        orderId: pendingOrderAfter.id,
+        orderStatus: pendingOrderAfter.status,
+        totalVnd: pendingOrderAfter.totalVnd,
+      },
+      zeroAmountPaidOrder: {
+        orderId: zeroOrderId,
+        paymentId: zeroReplayAfterRestart.body.paymentId,
+        orderStatus: zeroReplayAfterRestart.body.orderStatus,
+        paymentStatus: zeroReplayAfterRestart.body.paymentStatus,
+      },
     }),
   );
   console.log('Post-Restart SQL Snapshot:\n' + sqlAfter);
