@@ -41,7 +41,7 @@ export interface OrderItemSummary {
 
 export interface PaymentSummary {
   id: string;
-  status: "SUCCESS" | "FAILED";
+  status: "SUCCESS" | "FAILED" | "PENDING";
   method: PaymentMethodType;
   methodLast4: string | null;
   amountVnd: number;
@@ -77,7 +77,7 @@ export interface GetMyOrdersResponse {
 export interface PaymentApiResponse {
   paymentId: string;
   orderId: string;
-  paymentStatus: "SUCCESS" | "FAILED";
+  paymentStatus: "SUCCESS" | "FAILED" | "PENDING";
   orderStatus: "PAID" | "PAYMENT_FAILED";
   amountVnd: number;
   method: PaymentMethodType;

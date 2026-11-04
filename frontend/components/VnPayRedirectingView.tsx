@@ -28,7 +28,6 @@ export function VnPayRedirectingView({
 
   useEffect(() => {
     redirectedRef.current = false;
-    setSecondsRemaining(totalSeconds);
 
     const interval = setInterval(() => {
       setSecondsRemaining((prev) => {

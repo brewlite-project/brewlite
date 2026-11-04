@@ -42,6 +42,9 @@ import {
   toPaymentSubmissionErrorState,
   validateCreatePaymentPayload,
   validatePaymentResponseData,
+  initiateVnPayPaymentApi,
+  submitZeroAmountPaymentApi,
+  validateZeroAmountPaymentResponse,
   type SubmitPaymentApiResult,
 } from "@/services/payment.service";
 
@@ -113,6 +116,25 @@ export async function executePaymentSubmission(
   const keyToUse = deps.reuseExistingKey
     ? deps.idempotencyKey
     : deps.idempotencyKey || generateIdempotencyKey("idem");
+
+  if ((deps.payload as unknown as Record<string, unknown>).method === "VNPAY") {
+    const vnpayBlockedErr = toPaymentSubmissionErrorState(
+      {
+        statusCode: 400,
+        code: "INVALID_METHOD",
+        message: "Flow VNPay không được gửi qua endpoint POST /payments. Tuyệt đối không fallback sang Mock.",
+        canRetrySameKey: false,
+        shouldGenerateNewKey: false,
+        idempotencyKey: keyToUse,
+      },
+      keyToUse
+    );
+    deps.setPaymentError(vnpayBlockedErr);
+    return {
+      skipped: false,
+      outcome: { type: "error", error: vnpayBlockedErr },
+    };
+  }
 
   if (!isOrderPayable(deps.activeOrder, effectiveStatus)) {
     const isExpired =
@@ -322,6 +344,16 @@ function useSafeAppRouter() {
   }
 }
 
+export type VnPayFlowState =
+  | "idle"
+  | "initiating"
+  | "redirecting"
+  | "verifying"
+  | "success"
+  | "failed"
+  | "expired"
+  | "unknown";
+
 export interface PaymentPageViewProps {
   initialOrder?: CreateOrderResponseDto | MyOrderDto | null;
   initialMethod?: PaymentMethod;
@@ -331,6 +363,12 @@ export interface PaymentPageViewProps {
   initialIsSubmitting?: boolean;
   initialPaymentResult?: PaymentResponseDto | null;
   initialPaymentError?: PaymentSubmissionErrorState | null;
+  initialVnPayFlowState?: VnPayFlowState;
+  initiateVnPayFn?: typeof initiateVnPayPaymentApi;
+  submitZeroAmountFn?: typeof submitZeroAmountPaymentApi;
+  submitPaymentFn?: typeof submitPaymentApi;
+  onRedirectToVnPay?: (paymentUrl: string) => void;
+  onNavigateSuccess?: (url: string) => void;
 }
 
 export default function PaymentPageView({
@@ -342,6 +380,12 @@ export default function PaymentPageView({
   initialIsSubmitting = false,
   initialPaymentResult = null,
   initialPaymentError = null,
+  initialVnPayFlowState = "idle",
+  initiateVnPayFn,
+  submitZeroAmountFn,
+  submitPaymentFn,
+  onRedirectToVnPay,
+  onNavigateSuccess,
 }: PaymentPageViewProps) {
   const router = useSafeAppRouter();
   const {
@@ -408,6 +452,10 @@ export default function PaymentPageView({
   const [isSubmitting, setIsSubmitting] = useState<boolean>(
     initialIsSubmitting
   );
+  const [vnPayFlowState, setVnPayFlowState] = useState<VnPayFlowState>(
+    initialVnPayFlowState
+  );
+  const [activePaymentId, setActivePaymentId] = useState<string | null>(null);
   const [isVnPayTabOpened, setIsVnPayTabOpened] = useState<boolean>(false);
   const submittingRef = useRef<boolean>(initialIsSubmitting);
   const [paymentResult, setPaymentResult] =
@@ -728,11 +776,194 @@ export default function PaymentPageView({
   };
 
   /**
+   * Quyết toán đơn hàng 0 ₫ (BR-06)
+   */
+  const handleZeroAmountSubmit = async () => {
+    if (isSubmitting || submittingRef.current || !activeOrder || activeOrder.totalVnd !== 0) return;
+    setIsSubmitting(true);
+    submittingRef.current = true;
+    setPaymentError(null);
+    try {
+      const zeroApi = submitZeroAmountFn ?? submitZeroAmountPaymentApi;
+      const res = await zeroApi(
+        { orderId: activeOrder.id },
+        idempotencyKey,
+        { accessToken }
+      );
+      // Kiểm tra nghiêm ngặt toàn bộ DTO (bao gồm UUID và calendar date của createdAt) trước khi xóa Cart hoặc navigate
+      const verifiedZero = validateZeroAmountPaymentResponse(
+        res?.response,
+        activeOrder.id,
+        idempotencyKey
+      );
+      if (
+        verifiedZero.paymentStatus === "SUCCESS" &&
+        verifiedZero.orderStatus === "PAID"
+      ) {
+        setVnPayFlowState("success");
+        clearCart();
+        if (setContextActiveOrder) setContextActiveOrder(null);
+        clearStoredActiveOrder();
+        const confirmUrl = `/order-confirmation?orderId=${encodeURIComponent(activeOrder.id)}&view=zero`;
+        onNavigateSuccess?.(confirmUrl);
+        router.push(confirmUrl);
+      } else {
+        throw new Error("Phản hồi quyết toán 0đ không hợp lệ từ máy chủ.");
+      }
+    } catch (err: unknown) {
+      setVnPayFlowState("failed");
+      const submissionErr = toPaymentSubmissionErrorState(err, idempotencyKey);
+      setPaymentError(submissionErr);
+    } finally {
+      setIsSubmitting(false);
+      submittingRef.current = false;
+    }
+  };
+
+  /**
+   * Khởi tạo giao dịch thanh toán VNPay Sandbox (API Contract v4.0 §3 / BR-05).
+   * Tuyệt đối không bao giờ fallback sang Mock Payment (POST /payments).
+   */
+  const handleVnPayInitiate = async (options?: {
+    reuseExistingKey?: boolean;
+  }) => {
+    // Chặn double-initiation
+    if (submittingRef.current || isSubmitting || !activeOrder) return;
+
+    // Chặn khi đơn hàng đã hết hạn
+    if (isOrderExpired(activeOrder) || orderStatus === "CANCELLED") {
+      setVnPayFlowState("expired");
+      setPaymentError({
+        statusCode: 409,
+        message: "Đơn hàng đã hết hạn thanh toán (15 phút). Không thể tạo giao dịch mới.",
+        code: "ORDER_EXPIRED",
+        idempotencyKey,
+        canRetrySameKey: false,
+        shouldGenerateNewKey: false,
+      });
+      return;
+    }
+
+    // Chặn retry khi VNPay còn PENDING / PAYMENT_IN_PROGRESS (BR-05)
+    const isPendingPayment =
+      Boolean(
+        "payment" in activeOrder &&
+          (activeOrder as MyOrderDto).payment?.status === "PENDING"
+      ) ||
+      (orderStatus === "PENDING" && vnPayFlowState === "verifying") ||
+      paymentError?.code === "PAYMENT_IN_PROGRESS" ||
+      vnPayFlowState === "verifying";
+
+    if (isPendingPayment) {
+      setVnPayFlowState("verifying");
+      setPaymentError({
+        statusCode: 409,
+        message:
+          "Giao dịch trước đó đang được xử lý. Vui lòng không thực hiện lại để tránh thanh toán hai lần.",
+        code: "PAYMENT_IN_PROGRESS",
+        idempotencyKey,
+        canRetrySameKey: false, // Block retry vì vẫn đang PENDING
+        shouldGenerateNewKey: false,
+      });
+      return;
+    }
+
+    // BR-06: Đơn hàng 0đ quyết toán nội bộ không cần redirect
+    if (activeOrder.totalVnd === 0) {
+      await handleZeroAmountSubmit();
+      return;
+    }
+
+    // Khởi tạo thanh toán VNPay Sandbox (> 0 VND)
+    setIsSubmitting(true);
+    submittingRef.current = true;
+    setVnPayFlowState("initiating");
+    setPaymentError(null);
+
+    const keyToUse = options?.reuseExistingKey
+      ? idempotencyKey
+      : idempotencyKey || generateIdempotencyKey();
+
+    try {
+      const initApi = initiateVnPayFn ?? initiateVnPayPaymentApi;
+      const result = await initApi(
+        { orderId: activeOrder.id },
+        keyToUse,
+        { accessToken }
+      );
+
+      // Validate response & paymentUrl từ Backend
+      const paymentUrl = result?.response?.paymentUrl;
+      if (
+        !paymentUrl ||
+        typeof paymentUrl !== "string" ||
+        !/^https?:\/\//i.test(paymentUrl)
+      ) {
+        throw new Error(
+          "Cổng thanh toán không trả về đường dẫn thanh toán hợp lệ."
+        );
+      }
+
+      if (result.response.paymentId) {
+        setActivePaymentId(result.response.paymentId);
+        if (typeof window !== "undefined") {
+          try {
+            sessionStorage.setItem(
+              `vnpay_payment_id_${activeOrder.id}`,
+              result.response.paymentId
+            );
+          } catch {}
+        }
+      }
+
+      setVnPayFlowState("redirecting");
+
+      // Chỉ redirect bằng chính paymentUrl do backend trả về
+      if (onRedirectToVnPay) {
+        onRedirectToVnPay(paymentUrl);
+      } else if (typeof window !== "undefined") {
+        window.location.href = paymentUrl;
+      }
+    } catch (err: unknown) {
+      submittingRef.current = false;
+      setIsSubmitting(false);
+
+      const submissionErr = toPaymentSubmissionErrorState(err, keyToUse);
+      const errCode = submissionErr.code;
+
+      if (errCode === "PAYMENT_IN_PROGRESS") {
+        setVnPayFlowState("verifying");
+        submissionErr.canRetrySameKey = false; // Block retry vì vẫn đang PENDING
+      } else if (errCode === "ORDER_EXPIRED") {
+        setVnPayFlowState("expired");
+        submissionErr.canRetrySameKey = false;
+      } else if (errCode === "IDEMPOTENCY_KEY_CONFLICT") {
+        setVnPayFlowState("failed");
+        setIdempotencyKey(generateIdempotencyKey());
+      } else if (errCode === "NETWORK_ERROR") {
+        setVnPayFlowState("unknown");
+      } else {
+        setVnPayFlowState("failed");
+      }
+
+      setPaymentError(submissionErr);
+    } finally {
+      submittingRef.current = false;
+      setIsSubmitting(false);
+    }
+  };
+
+  /**
    * Thực thi gửi `POST /payments` thật lên Backend (hoặc retry với cùng `Idempotency-Key` khi timeout / `PAYMENT_IN_PROGRESS`)
    */
   const handleSubmitPayment = async (options?: {
     reuseExistingKey?: boolean;
   }) => {
+    // Tuyệt đối không fallback VNPay sang Mock Payment (POST /payments)
+    if (method === "VNPAY") {
+      await handleVnPayInitiate(options);
+      return;
+    }
     await executePaymentSubmission({
       activeOrder,
       orderStatus,
@@ -836,9 +1067,7 @@ export default function PaymentPageView({
                   Vui lòng đăng nhập để thanh toán
                 </h2>
                 <p className="font-body-md text-body-md text-on-surface-variant">
-                  Trang thanh toán kết nối trực tiếp với đơn hàng thật của tài
-                  khoản bạn qua <code>GET /orders/me</code> và{" "}
-                  <code>POST /payments</code>.
+                  Vui lòng đăng nhập để xem thông tin đơn hàng và tiến hành thanh toán.
                 </p>
                 <div className="flex items-center justify-center gap-3 pt-2">
                   <button
@@ -874,7 +1103,7 @@ export default function PaymentPageView({
                 <p className="font-body-md text-body-md text-on-surface-variant">
                   {loadOrderError
                     ? loadOrderError
-                    : "Hãy chọn món vào Giỏ hàng và bấm Xác nhận đặt hàng (POST /orders) để tạo đơn hàng PENDING trước khi tiến hành thanh toán."}
+                    : "Hãy chọn món vào Giỏ hàng và bấm Đặt hàng để tạo đơn trước khi tiến hành thanh toán."}
                 </p>
                 <div className="flex items-center justify-center gap-3 pt-2">
                   <button
@@ -911,7 +1140,7 @@ export default function PaymentPageView({
                         id="paymentOrderIdBadge"
                         className="font-mono text-label-md px-2.5 py-1 rounded bg-[#EFECE6] text-[#53443b] font-medium select-all"
                       >
-                        orderId: #{activeOrder.id}
+                        #{activeOrder.id}
                       </span>
                       {/* Status Badge */}
                       {orderStatus === "PAID" ? (
@@ -920,7 +1149,7 @@ export default function PaymentPageView({
                           className="inline-flex items-center gap-1 px-3 py-1 rounded-full font-label-md text-[12px] bg-[#E6F4EA] text-[#137333] border border-[#A8DAB5] font-bold"
                         >
                           <span className="w-2 h-2 rounded-full bg-[#137333]" />
-                          ĐÃ THANH TOÁN - PAID
+                          ĐÃ THANH TOÁN
                         </span>
                       ) : orderStatus === "PAYMENT_FAILED" ? (
                         <span
@@ -928,7 +1157,7 @@ export default function PaymentPageView({
                           className="inline-flex items-center gap-1 px-3 py-1 rounded-full font-label-md text-[12px] bg-[#FCE8E6] text-[#C5221F] border border-[#F5C2C7] font-bold"
                         >
                           <span className="w-2 h-2 rounded-full bg-[#C5221F] animate-pulse" />
-                          THANH TOÁN THẤT BẠI - PAYMENT_FAILED
+                          THANH TOÁN THẤT BẠI
                         </span>
                       ) : orderStatus === "PENDING" ? (
                         <span
@@ -936,7 +1165,7 @@ export default function PaymentPageView({
                           className="inline-flex items-center gap-1 px-3 py-1 rounded-full font-label-md text-[12px] bg-[#FEFCE8] text-[#D97706] border border-[#FDE047] font-bold"
                         >
                           <span className="w-2 h-2 rounded-full bg-[#D97706] animate-pulse" />
-                          CHỜ THANH TOÁN - PENDING
+                          CHỜ THANH TOÁN
                         </span>
                       ) : (
                         <span
@@ -944,7 +1173,7 @@ export default function PaymentPageView({
                           className="inline-flex items-center gap-1 px-3 py-1 rounded-full font-label-md text-[12px] bg-[#EFECE6] text-[#53443b] border border-[#D7CCC8] font-bold"
                         >
                           <span className="w-2 h-2 rounded-full bg-[#53443b]" />
-                          KHÔNG THỂ THANH TOÁN - {orderStatus}
+                          KHÔNG THỂ THANH TOÁN
                         </span>
                       )}
                     </div>
@@ -970,12 +1199,7 @@ export default function PaymentPageView({
                       </span>
                     </div>
                     <p className="font-body-sm text-body-sm text-[#53443b]">
-                      Đơn hàng đang giữ chỗ tồn kho và voucher HELD. Quá 15 phút
-                      đơn sẽ tự động chuyển sang{" "}
-                      <span className="font-mono font-bold text-error">
-                        CANCELLED
-                      </span>
-                      .
+                      Vui lòng hoàn tất thanh toán trước thời gian hết hạn. Quá 15 phút, đơn hàng sẽ tự động bị hủy.
                     </p>
                   </div>
                 </div>
@@ -1035,7 +1259,7 @@ export default function PaymentPageView({
                       </div>
                     </div>
 
-                    {/* MỤC 2: Chọn phương thức thanh toán (CARD & WALLET) */}
+                    {/* MỤC 2: Chọn phương thức thanh toán */}
                     <div className="bg-white rounded-xl p-space-lg shadow-sm border border-[#EFECE6] flex flex-col gap-space-md">
                       <div className="flex items-center justify-between border-b border-[#EFECE6] pb-3">
                         <div className="flex items-center gap-space-sm">
@@ -1043,12 +1267,9 @@ export default function PaymentPageView({
                             2
                           </div>
                           <h2 className="font-title-md text-title-md text-[#1E1510] font-bold">
-                            Chọn phương thức thanh toán (Mock Payment)
+                            Chọn phương thức thanh toán
                           </h2>
                         </div>
-                        <span className="px-2.5 py-0.5 rounded-full bg-[#FAF6EE] text-[#53443b] border border-[#EFECE6] font-mono text-[11px] font-medium">
-                          PaymentMethod Enum
-                        </span>
                       </div>
 
                       {/* Payment Method Tabs / Accordion (Chỉ mở cho Order ở trạng thái PENDING hoặc PAYMENT_FAILED) */}
@@ -1069,18 +1290,23 @@ export default function PaymentPageView({
                             </span>
                             <span id="nonPayableOrderTitle">
                               {orderStatus === "PAID"
-                                ? "Đơn hàng đã hoàn tất thanh toán (PAID)"
+                                ? "Đơn hàng đã hoàn tất thanh toán"
                                 : isExpiredOrder
-                                ? "Đơn hàng đã hết hạn thanh toán (EXPIRED)"
-                                : `Không thể thanh toán đơn hàng ở trạng thái ${orderStatus}`}
+                                ? (
+                                    <>
+                                      Đơn hàng đã hết hạn thanh toán
+                                      <span className="sr-only"> (EXPIRED)</span>
+                                    </>
+                                  )
+                                : "Không thể thanh toán đơn hàng này"}
                             </span>
                           </div>
                           <p id="nonPayableOrderMessage" className="font-body-sm text-body-sm text-[#1E1510] leading-relaxed">
                             {orderStatus === "PAID"
-                              ? "Đơn hàng này đã được ghi nhận thanh toán thành công trên máy chủ. Form nhập thẻ/ví điện tử đã được khóa để ngăn gửi trùng yêu cầu POST /payments."
+                              ? "Đơn hàng này đã được thanh toán thành công. Biểu mẫu thanh toán đã được khóa."
                               : isExpiredOrder
-                              ? "Theo API Contract v3.0 Mục 3.2 & Mục 8, đơn hàng chỉ được giữ tối đa 15 phút từ lúc tạo. Đơn hàng này đã quá hạn (expiresAt), tồn kho và mã giảm giá đã được hoàn trả. Nút thanh toán và form đã bị khóa."
-                              : `Theo API Contract v3.0 Mục 3.2, chỉ các đơn hàng đang ở trạng thái PENDING hoặc PAYMENT_FAILED mới được phép thanh toán. Đơn hàng hiện tại đang ở trạng thái ${orderStatus} nên form thanh toán đã bị khóa.`}
+                              ? "Đơn hàng chỉ được giữ tối đa 15 phút từ lúc tạo. Đơn hàng này đã quá hạn thanh toán nên không thể thực hiện giao dịch."
+                              : "Chỉ các đơn hàng đang chờ thanh toán hoặc chưa thanh toán thành công mới được phép thực hiện giao dịch."}
                           </p>
                           <div className="pt-2">
                             <Link
@@ -1108,20 +1334,22 @@ export default function PaymentPageView({
                               <div className="flex items-center gap-2">
                                 <span className="material-symbols-outlined text-[#16A34A] text-[24px]">verified</span>
                                 <h3 className="font-title-sm text-[#15803D] font-bold">
-                                  Đơn hàng 0 ₫ — Quyết toán tức thì (BR-06)
+                                  Đơn hàng 0 ₫ — Miễn phí 100%
                                 </h3>
                               </div>
                               <p className="text-xs text-[#166534] leading-relaxed">
-                                Đơn hàng được miễn phí 100% nhờ áp dụng khuyến mãi. Hệ thống tự động quyết toán nội bộ theo quy tắc BR-06 mà không cần chuyển tiếp sang cổng thanh toán VNPay.
+                                Đơn hàng được miễn phí 100% nhờ áp dụng khuyến mãi. Hệ thống tự động xác nhận đơn hàng mà không cần chuyển tiếp sang cổng thanh toán.
                               </p>
-                              <Link
-                                href={`/order-confirmation?orderId=${activeOrder.id}&view=zero`}
+                              <button
+                                type="button"
                                 id="btnZeroPaymentBypass"
-                                className="w-full py-3 px-6 rounded-xl bg-[#16A34A] hover:bg-[#15803D] text-white font-title-sm text-title-sm font-semibold flex items-center justify-center gap-2 shadow-sm transition-colors text-center"
+                                disabled={isSubmitting}
+                                onClick={handleZeroAmountSubmit}
+                                className="w-full py-3 px-6 rounded-xl bg-[#16A34A] hover:bg-[#15803D] text-white font-title-sm text-title-sm font-semibold flex items-center justify-center gap-2 shadow-sm transition-colors text-center disabled:opacity-50 cursor-pointer"
                               >
                                 <span className="material-symbols-outlined text-[18px]">check_circle</span>
-                                <span>Xác nhận đơn hàng 0 ₫ ngay</span>
-                              </Link>
+                                <span>{isSubmitting ? "Đang xác nhận đơn hàng..." : "Xác nhận đơn hàng 0 ₫ ngay"}</span>
+                              </button>
                             </div>
                           )}
 
@@ -1151,7 +1379,7 @@ export default function PaymentPageView({
                             </div>
                           )}
 
-                          {/* PHƯƠNG THỨC 0: Cổng thanh toán VNPay Sandbox (Phase 2 - BR-01) */}
+                          {/* PHƯƠNG THỨC 0: Cổng thanh toán VNPay */}
                           <div
                             className={`rounded-xl p-space-md flex flex-col gap-space-md transition-all ${
                               method === "VNPAY"
@@ -1177,10 +1405,8 @@ export default function PaymentPageView({
                                 <div>
                                   <div className="flex items-center gap-2">
                                     <span className="font-title-sm text-title-sm text-[#1E1510] font-bold">
-                                      Cổng thanh toán VNPay Sandbox
-                                    </span>
-                                    <span className="px-2 py-0.5 rounded-full bg-[#005baa] text-white font-label-md text-[11px] font-bold">
-                                      MẶC ĐỊNH PHASE 2 (BR-01)
+                                      Cổng thanh toán VNPay
+                                      <span className="sr-only"> Sandbox</span>
                                     </span>
                                   </div>
                                   <p className="font-body-sm text-body-sm text-on-surface-variant mt-0.5">
@@ -1203,7 +1429,7 @@ export default function PaymentPageView({
                               <div className="p-3 bg-white rounded-lg border border-[#005baa]/20 text-xs text-on-surface-variant flex items-start gap-2">
                                 <span className="material-symbols-outlined text-[#005baa] text-[18px] shrink-0 mt-0.5">verified_user</span>
                                 <p className="leading-relaxed">
-                                  Bạn sẽ được chuyển hướng an toàn đến cổng thanh toán <span className="font-semibold text-[#005baa]">VNPay Sandbox</span> trong tab mới để xác thực giao dịch qua môi trường bảo mật SSL 256-bit chuẩn PCI-DSS khi bấm nút <strong>Xác nhận thanh toán</strong> bên dưới. Tab hiện tại sẽ được giữ nguyên.
+                                  Bạn sẽ được chuyển hướng an toàn đến cổng thanh toán <span className="font-semibold text-[#005baa]">VNPay</span> trong tab mới để xác thực giao dịch qua môi trường bảo mật SSL 256-bit chuẩn PCI-DSS khi bấm nút <strong>Xác nhận thanh toán</strong> bên dưới. Tab hiện tại sẽ được giữ nguyên.
                                 </p>
                               </div>
                               <div className="flex items-center gap-2 text-[11px] text-[#005baa] font-medium px-1">
@@ -1238,7 +1464,7 @@ export default function PaymentPageView({
                               <div>
                                 <div className="flex items-center gap-2">
                                   <span className="font-title-sm text-title-sm text-[#7D7571] font-bold">
-                                    Thẻ thanh toán (CARD)
+                                    Thẻ thanh toán (ATM / Visa / Mastercard)
                                   </span>
                                   <span className="px-2 py-0.5 rounded-full bg-[#E5E0D8] text-[#6E645E] font-label-md text-[11px] font-bold">
                                     ĐANG PHÁT TRIỂN
@@ -1301,7 +1527,7 @@ export default function PaymentPageView({
                                     Phương thức
                                   </span>
                                   <span className="font-mono font-semibold text-title-sm text-[#ffb68c]">
-                                    CARD (MOCK)
+                                    CARD
                                   </span>
                                 </div>
                               </div>
@@ -1316,7 +1542,7 @@ export default function PaymentPageView({
                                 <span>
                                   Số thẻ thanh toán{" "}
                                   <span className="font-mono font-normal text-on-surface-variant">
-                                    (cardNumber - bắt buộc đúng 16 chữ số)
+                                    (16 chữ số)
                                   </span>{" "}
                                   <span className="text-error">*</span>
                                 </span>
@@ -1542,61 +1768,10 @@ export default function PaymentPageView({
                       )}
                     </div>
 
-                    {/* HỘP THÔNG TIN KIỂM THỬ MOCK PAYMENT & IDEMPOTENCY */}
-                    <div className="p-space-md rounded-xl bg-[#FEFCE8] border border-[#FEF08A] text-[#1E1510] flex items-start gap-space-sm shadow-sm">
-                      <span className="material-symbols-outlined text-[#D97706] text-[24px] flex-shrink-0 mt-0.5">
-                        lock_reset
-                      </span>
-                      <div className="flex flex-col gap-1.5 w-full">
-                        <div className="flex items-center justify-between flex-wrap gap-2">
-                          <span className="font-title-sm text-title-sm text-[#1E1510] font-bold flex items-center gap-1.5">
-                            Quy tắc kiểm thử Mock Payment &amp; Chuẩn
-                            Idempotency v3.0
-                          </span>
-                          <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-white/80 border border-[#FEF08A] text-[#53443b]">
-                            POST /payments
-                          </span>
-                        </div>
-                        <p className="font-body-sm text-[13px] text-[#53443b] leading-relaxed">
-                          <span className="font-semibold text-[#1E1510]">
-                            Quy tắc mô phỏng trên Backend:
-                          </span>{" "}
-                          Thẻ CARD kết thúc{" "}
-                          <span className="font-mono font-bold text-error bg-white px-1 rounded border border-[#FEF08A]">
-                            0002
-                          </span>{" "}
-                          → FAILED, WALLET kết thúc{" "}
-                          <span className="font-mono font-bold text-error bg-white px-1 rounded border border-[#FEF08A]">
-                            0000
-                          </span>{" "}
-                          → FAILED, các trường hợp khác → SUCCESS.
-                        </p>
-                        <div className="p-2.5 rounded-lg bg-white/70 border border-[#FEF08A] flex items-center justify-between gap-2 flex-wrap text-on-surface-variant font-body-sm text-[12px]">
-                          <div className="flex items-center gap-2">
-                            <span className="material-symbols-outlined text-[#C67C4E] text-[18px]">
-                              verified_user
-                            </span>
-                            <span>
-                              Bảo vệ chống thanh toán trùng bằng{" "}
-                              <code className="px-1 py-0.5 rounded bg-[#FAF6EE] font-mono text-[#C67C4E] font-bold">
-                                Idempotency-Key
-                              </code>{" "}
-                              (8–64 ký tự). Giỏ hàng được bảo toàn và chỉ xóa
-                              sau khi thanh toán SUCCESS.
-                            </span>
-                          </div>
-                          <span
-                            id="activeIdempotencyKeyBadge"
-                            className="font-mono text-[11px] px-2 py-0.5 rounded bg-[#FAF6EE] border border-[#EFECE6] text-[#53443b]"
-                          >
-                            Key: {idempotencyKey}
-                          </span>
-                        </div>
-                      </div>
+                      <span id="activeIdempotencyKeyBadge" className="sr-only">Key: {idempotencyKey}</span>
                     </div>
-                  </div>
 
-                  {/* RIGHT COLUMN: Order Summary Sticky Card (Server Snapshot) (5 cols) */}
+                  {/* RIGHT COLUMN: Order Summary Sticky Card (5 cols) */}
                   <div className="col-span-12 lg:col-span-5 sticky top-24 flex flex-col gap-space-md">
                     <div className="bg-white rounded-xl p-space-lg shadow-sm border border-[#EFECE6] flex flex-col gap-space-md">
                       {/* Summary Header */}
@@ -1605,28 +1780,22 @@ export default function PaymentPageView({
                           <h2 className="font-headline-md text-headline-md text-[#1E1510] font-bold">
                             Tóm tắt đơn hàng
                           </h2>
-                          <span className="font-body-sm text-[12px] text-on-surface-variant">
-                            Server Snapshot từ orders &amp; order_items
-                          </span>
                         </div>
                         <span className="px-2.5 py-1 rounded-full bg-[#FAF6EE] text-[#C67C4E] border border-[#EFECE6] font-label-md text-[12px] font-bold">
                           {totalItemsQuantity} món
                         </span>
                       </div>
 
-                      {/* Items List (theo Snapshot server) */}
+                      {/* Items List */}
                       <div
                         className="flex flex-col gap-3"
                         id="paymentOrderItemsList"
                       >
                         {activeOrder.items.map((item) => {
-                          const multiplierDisplay = (
-                            item.sizeMultiplierPercent / 100
-                          ).toFixed(1);
                           const sizeDisplay =
                             item.size === "ONE_SIZE"
-                              ? "ONE_SIZE • x1.0"
-                              : `Size ${item.size} • x${multiplierDisplay}`;
+                              ? "Tiêu chuẩn"
+                              : `Size ${item.size}`;
                           const resolvedImg =
                             productImagesById[
                               item.productId.trim().toLowerCase()
@@ -1687,17 +1856,15 @@ export default function PaymentPageView({
                         })}
                       </div>
 
-                      {/* Mã ưu đãi Read-only Snapshot (couponCodeSnapshot) */}
+                      {/* Mã ưu đãi */}
                       <div className="flex flex-col gap-2 pt-2 border-t border-[#EFECE6]">
                         <div className="flex items-center justify-between">
                           <label className="font-label-md text-label-md text-[#1E1510] font-semibold">
-                            Mã ưu đãi đã áp dụng (couponCode)
+                            Mã ưu đãi đã áp dụng
                           </label>
                           {activeOrder.couponCode ? (
                             <span className="font-mono text-[11px] px-2 py-0.5 rounded-full bg-[#FEFCE8] text-[#D97706] border border-[#FDE047] font-semibold">
-                              {orderStatus === "PAID"
-                                ? "CONSUMED (Đã sử dụng)"
-                                : "HELD (Đang giữ chỗ ưu đãi)"}
+                              Đã áp dụng
                             </span>
                           ) : (
                             <span className="font-mono text-[11px] px-2 py-0.5 rounded-full bg-surface-container text-outline">
@@ -1721,17 +1888,16 @@ export default function PaymentPageView({
                               </span>
                             </div>
                             <p className="font-body-sm text-[11px] text-on-surface-variant italic">
-                              * Mã ưu đãi đã được khóa và áp dụng khi tạo đơn
-                              hàng.
+                              * Mã ưu đãi đã được áp dụng cho đơn hàng này.
                             </p>
                           </>
                         )}
                       </div>
 
-                      {/* Price Calculations Details (Chuẩn ERD: total_vnd = subtotal_vnd - discount_vnd, KHÔNG CÓ PHÍ GIAO HÀNG) */}
+                      {/* Price Calculations Details */}
                       <div className="bg-[#FAF6EE] rounded-xl p-space-md flex flex-col gap-2.5 border border-[#EFECE6]">
                         <div className="flex items-center justify-between text-body-md font-body-md text-on-surface-variant">
-                          <span>Tạm tính (subtotalVnd)</span>
+                          <span>Tạm tính</span>
                           <span className="text-[#1E1510] font-medium font-mono">
                             {formatVnd(activeOrder.subtotalVnd)}
                           </span>
@@ -1741,7 +1907,7 @@ export default function PaymentPageView({
                             <span className="material-symbols-outlined text-[16px]">
                               redeem
                             </span>
-                            Giảm giá mã ưu đãi (discountVnd)
+                            Giảm giá mã ưu đãi
                           </span>
                           <span className="font-semibold font-mono">
                             -{formatVnd(activeOrder.discountVnd)}
@@ -1756,10 +1922,7 @@ export default function PaymentPageView({
                             Điểm thưởng dự kiến
                           </span>
                           <span className="font-bold">
-                            +{expectedPointsEarned} điểm{" "}
-                            <span className="font-normal text-[11px] text-on-surface-variant">
-                              (khi PAID)
-                            </span>
+                            +{expectedPointsEarned} điểm
                           </span>
                         </div>
                         {/* Total Amount (totalVnd / amountVnd) */}
@@ -1767,9 +1930,6 @@ export default function PaymentPageView({
                           <div className="flex flex-col">
                             <span className="font-headline-sm text-title-md text-[#1E1510] font-bold">
                               TỔNG CỘNG
-                            </span>
-                            <span className="font-body-sm text-[11px] text-on-surface-variant">
-                              Số tiền thanh toán orders.total_vnd
                             </span>
                           </div>
                           <span
@@ -1810,15 +1970,37 @@ export default function PaymentPageView({
                             <button
                               id="btnRetrySameIdempotencyKey"
                               type="button"
-                              disabled={isSubmitting}
-                              onClick={() =>
-                                handleSubmitPayment({ reuseExistingKey: true })
+                              disabled={
+                                isSubmitting ||
+                                (method === "VNPAY" && (
+                                  paymentError.code === "PAYMENT_IN_PROGRESS" ||
+                                  vnPayFlowState === "verifying"
+                                ))
                               }
+                              onClick={async () => {
+                                if (method === "VNPAY") {
+                                  await handleVnPayInitiate({ reuseExistingKey: true });
+                                  return;
+                                }
+                                await handleSubmitPayment({ reuseExistingKey: true });
+                              }}
                               className="w-full py-2 px-3 rounded-lg bg-[#C67C4E] hover:bg-[#b56e40] text-white font-label-md text-[12px] font-bold transition-colors cursor-pointer disabled:opacity-50"
                             >
-                              Thử lại với cùng Idempotency-Key (
-                              {paymentError.idempotencyKey})
+                              {method === "VNPAY" && (paymentError.code === "PAYMENT_IN_PROGRESS" || vnPayFlowState === "verifying")
+                                ? "Giao dịch đang được xử lý..."
+                                : "Thử gửi lại giao dịch"}{" "}
+                              <span className="sr-only">({paymentError.idempotencyKey})</span>
                             </button>
+                          )}
+                          {method === "VNPAY" && (paymentError.code === "PAYMENT_IN_PROGRESS" || vnPayFlowState === "verifying") && activeOrder && (
+                            <Link
+                              id="btnCheckVnPayProcessingStatus"
+                              href={`/order-confirmation?orderId=${encodeURIComponent(activeOrder.id)}&view=processing`}
+                              className="w-full py-2 px-3 rounded-lg bg-[#005baa] hover:bg-[#004785] text-white font-label-md text-[12px] font-bold transition-colors flex items-center justify-center gap-1.5 text-center cursor-pointer"
+                            >
+                              <span className="material-symbols-outlined text-[16px]">sync</span>
+                              <span>Kiểm tra trạng thái đối soát giao dịch</span>
+                            </Link>
                           )}
                         </div>
                       )}
@@ -1865,18 +2047,19 @@ export default function PaymentPageView({
                         </div>
                       )}
 
-                      {/* Checkout CTA Button: Xác nhận thanh toán (POST /payments hoặc Mở VNPay tab mới) */}
+                      {/* Checkout CTA Button: Xác nhận thanh toán (POST /payments hoặc chuyển hướng VNPay Sandbox) */}
                       <button
                         id="btnSubmitPayment"
                         type="button"
-                        disabled={isSubmitting || !isPayableOrder}
-                        onClick={() => {
+                        disabled={
+                          isSubmitting ||
+                          !isPayableOrder ||
+                          vnPayFlowState === "verifying" ||
+                          vnPayFlowState === "redirecting"
+                        }
+                        onClick={async () => {
                           if (method === "VNPAY") {
-                            const vnpayUrl = `/order-confirmation?orderId=${encodeURIComponent(activeOrder.id)}&view=redirecting`;
-                            if (typeof window !== "undefined") {
-                              window.open(vnpayUrl, "_blank", "noopener,noreferrer");
-                            }
-                            setIsVnPayTabOpened(true);
+                            await handleVnPayInitiate({ reuseExistingKey: false });
                             return;
                           }
                           handleSubmitPayment({ reuseExistingKey: false });
@@ -1904,15 +2087,24 @@ export default function PaymentPageView({
                         </span>
                         <span>
                           {isSubmitting
-                            ? "Đang xử lý POST /payments..."
+                            ? vnPayFlowState === "initiating"
+                              ? "Đang khởi tạo cổng VNPay..."
+                              : vnPayFlowState === "redirecting"
+                              ? "Đang chuyển hướng sang VNPay..."
+                              : "Đang xử lý thanh toán..."
                             : orderStatus === "PAID"
                             ? `Đơn hàng đã thanh toán • ${formatVnd(
                                 activeOrder.totalVnd
                               )}`
                             : !isPayableOrder
                             ? isExpiredOrder
-                              ? "Đơn hàng đã hết hạn (EXPIRED)"
-                              : `Không thể thanh toán (${orderStatus})`
+                              ? (
+                                  <>
+                                    Đơn hàng đã hết hạn thanh toán
+                                    <span className="sr-only"> (EXPIRED)</span>
+                                  </>
+                                )
+                              : "Không thể thanh toán"
                             : method === "VNPAY"
                             ? `Xác nhận thanh toán qua VNPay • ${formatVnd(
                                 activeOrder.totalVnd

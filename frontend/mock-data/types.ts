@@ -489,7 +489,7 @@ export interface SiteConfigData {
 
 export type PaymentMethod = "CARD" | "WALLET" | "VNPAY" | "ZERO_AMOUNT";
 
-export type PaymentStatus = "SUCCESS" | "FAILED";
+export type PaymentStatus = "SUCCESS" | "FAILED" | "PENDING";
 
 export type PaymentOrderStatus = "PAID" | "PAYMENT_FAILED";
 

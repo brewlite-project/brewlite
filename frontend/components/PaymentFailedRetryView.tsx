@@ -875,15 +875,15 @@ export function PaymentFailedRetryView({
                         </span>
                         <span>
                           {isNetworkUncertain
-                            ? "Trạng thái giao dịch chưa xác định (Network Uncertain)"
+                            ? "Trạng thái giao dịch chưa xác định"
                             : "Lỗi thanh toán"}
                         </span>
                       </div>
                       <span id="retryErrorMessage">{submitError}</span>
                       {isNetworkUncertain && (
                         <div className="pt-1 flex flex-wrap items-center justify-between gap-2 border-t border-[#FDE68A]">
-                          <span className="font-mono text-[11px] text-[#B45309]">
-                            Idempotency-Key: {currentIdempotencyKey.slice(0, 8)}...
+                          <span className="sr-only">
+                            Idempotency-Key: {currentIdempotencyKey}
                           </span>
                           <button
                             type="button"
@@ -892,7 +892,7 @@ export function PaymentFailedRetryView({
                             disabled={isSubmitting}
                             className="px-3 py-1.5 rounded-lg bg-primary hover:bg-[#70370e] text-on-primary font-bold text-xs transition-colors cursor-pointer"
                           >
-                            {isSubmitting ? "Đang gửi lại..." : "Thử lại cùng Idempotency-Key"}
+                            {isSubmitting ? "Đang gửi lại..." : "Thử gửi lại giao dịch"}
                           </button>
                         </div>
                       )}
@@ -961,7 +961,7 @@ export function PaymentFailedRetryView({
                         </span>
                       </div>
                       <p className="text-xs text-on-surface-variant mt-0.5">
-                        Size {item.size} ({item.sizeMultiplierPercent}%)
+                        {item.size === "ONE_SIZE" ? "Tiêu chuẩn" : `Size ${item.size}`}
                         {item.toppings?.length > 0 &&
                           ` • +${item.toppings.map((t) => t.name).join(", ")}`}
                       </p>
@@ -973,7 +973,7 @@ export function PaymentFailedRetryView({
               {/* Price Calculation */}
               <div className="pt-3 border-t border-[#EFECE6] space-y-2 text-xs">
                 <div className="flex justify-between text-on-surface-variant">
-                  <span>Tạm tính (subtotalVnd)</span>
+                  <span>Tạm tính</span>
                   <span className="font-semibold text-on-surface">
                     {formatVnd(activeOrder.subtotalVnd)}
                   </span>
@@ -981,11 +981,7 @@ export function PaymentFailedRetryView({
                 {activeOrder.discountVnd > 0 && (
                   <div className="flex justify-between text-tertiary font-semibold">
                     <span>
-                      Giảm giá ({activeOrder.couponCode} -{" "}
-                      <span className="px-1 py-0.2 rounded bg-tertiary-fixed text-on-tertiary-fixed text-[10px]">
-                        HELD
-                      </span>
-                      )
+                      Giảm giá ({activeOrder.couponCode})
                     </span>
                     <span>-{formatVnd(activeOrder.discountVnd)}</span>
                   </div>
@@ -997,7 +993,7 @@ export function PaymentFailedRetryView({
                       {formatVnd(activeOrder.totalVnd)}
                     </span>
                     <span className="block text-[11px] text-tertiary font-medium">
-                      Điểm nhận: 0 (sẽ +{Math.floor(activeOrder.totalVnd / 10000)} điểm khi SUCCESS)
+                      Điểm tích lũy dự kiến: +{Math.floor(activeOrder.totalVnd / 10000)} điểm khi hoàn tất
                     </span>
                   </div>
                 </div>
@@ -1011,8 +1007,8 @@ export function PaymentFailedRetryView({
                   </span>
                   <span>
                     Mã ưu đãi <strong className="font-mono text-on-surface">{activeOrder.couponCode}</strong>{" "}
-                    đang ở trạng thái <strong className="text-tertiary">HELD</strong> bảo lưu cho đơn hàng.
-                    Nếu quá 15 phút chưa thanh toán, mã sẽ tự động nhả lại vào tài khoản.
+                    đang được giữ cho đơn hàng này.
+                    Nếu quá 15 phút chưa thanh toán, mã sẽ tự động được hoàn lại.
                   </span>
                 </div>
               )}
