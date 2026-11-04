@@ -70,6 +70,11 @@ async function code(promise: Promise<unknown>) {
 }
 
 describe('SCRUM-55 immutable idempotency responses', () => {
+  beforeEach(() => {
+    vi.stubEnv('NODE_ENV', 'test');
+    vi.stubEnv('MOCK_PAYMENT_ENABLED', 'true');
+  });
+  afterEach(() => vi.unstubAllEnvs());
   it.each(['SUCCESS', 'FAILED'] as const)(
     'replays saved %s without acquiring a processing lock or evaluating mock',
     async (status) => {

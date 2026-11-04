@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import type { PipeTransform } from '@nestjs/common';
 import { isUUID } from 'class-validator';
 import type { CreatePaymentDto } from './dto/create-payment.dto.js';
+import type { ZeroAmountPaymentDto } from './dto/zero-amount-payment.dto.js';
 function invalid(message: string): never {
   throw new BadRequestException({
     statusCode: 400,
@@ -44,6 +45,19 @@ export class CreatePaymentPipe implements PipeTransform<
           ? { cardNumber: credential }
           : { phoneNumber: credential },
     };
+  }
+}
+@Injectable()
+export class ZeroAmountPaymentPipe implements PipeTransform<
+  unknown,
+  ZeroAmountPaymentDto
+> {
+  transform(value: unknown): ZeroAmountPaymentDto {
+    if (!isRecord(value)) invalid('body must be an object');
+    if (typeof value.orderId !== 'string' || !isUUID(value.orderId))
+      invalid('orderId must be a UUID');
+    // Amount, provider and owner come exclusively from persisted data/JWT.
+    return { orderId: value.orderId.toLowerCase() };
   }
 }
 @Injectable()

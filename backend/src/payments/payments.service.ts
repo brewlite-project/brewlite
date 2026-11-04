@@ -14,6 +14,7 @@ import type { CreatePaymentDto } from './dto/create-payment.dto.js';
 import type { PaymentResponseDto } from './dto/payment-response.dto.js';
 import { PaymentProcessor } from './payment-processor.js';
 import { MockPaymentService } from './mock-payment.service.js';
+import { assertMockPaymentEnabled } from './mock-payment.policy.js';
 import {
   CreatePaymentPipe,
   IdempotencyKeyPipe,
@@ -73,6 +74,8 @@ export class PaymentsService extends PaymentProcessor {
     key: string,
     input: CreatePaymentDto,
   ): Promise<Result> {
+    // Enforce the same policy for direct callers before any validation/DB/replay.
+    assertMockPaymentEnabled();
     // PostgreSQL UUID equality is case-insensitive; the key lock must use the same identity.
     const userId = authenticatedUserId.toLowerCase();
     const dto = this.bodyPipe.transform(input);
