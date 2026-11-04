@@ -53,9 +53,29 @@ export function isValidIsoUtcString(val: unknown): val is string {
   const trimmed = val.trim();
   if (trimmed !== val) return false;
   const ISO_UTC_REGEX =
-    /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,9})?Z$/;
-  if (!ISO_UTC_REGEX.test(val)) return false;
-  return Number.isFinite(Date.parse(val));
+    /^(\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])T([01]\d|2[0-3]):([0-5]\d):([0-5]\d)(?:\.(\d{1,9}))?Z$/;
+  const match = ISO_UTC_REGEX.exec(val);
+  if (!match) return false;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6]);
+
+  const parsedMs = Date.parse(val);
+  if (!Number.isFinite(parsedMs)) return false;
+
+  const parsedDate = new Date(parsedMs);
+  return (
+    parsedDate.getUTCFullYear() === year &&
+    parsedDate.getUTCMonth() + 1 === month &&
+    parsedDate.getUTCDate() === day &&
+    parsedDate.getUTCHours() === hour &&
+    parsedDate.getUTCMinutes() === minute &&
+    parsedDate.getUTCSeconds() === second
+  );
 }
 
 /**
@@ -1572,6 +1592,63 @@ export async function initiateVnPayPaymentApi(
 }
 
 /**
+ * Kiểm tra nghiêm ngặt toàn bộ các trường của `ZeroAmountPaymentResponseDto` trả về từ Backend (BR-06).
+ * - Bắt buộc đầy đủ `paymentId` (UUID), `orderId` (UUID khớp đơn hàng), `provider === 'ZERO_AMOUNT'`,
+ *   `paymentStatus === 'SUCCESS'`, `orderStatus === 'PAID'`, `amountVnd === 0`, `pointsEarned === 0`,
+ *   và `createdAt` đúng chuẩn ISO 8601 UTC kèm ngày/tháng/năm thực sự tồn tại trên lịch.
+ */
+export function validateZeroAmountPaymentResponse(
+  raw: unknown,
+  expectedOrderId: string,
+  idempotencyKey = "",
+  statusCode = 500
+): ZeroAmountPaymentResponseDto {
+  const cleanOrderId =
+    typeof expectedOrderId === "string"
+      ? expectedOrderId.trim().toLowerCase()
+      : "";
+  const record = (
+    raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}
+  ) as Record<string, unknown>;
+
+  if (
+    !cleanOrderId ||
+    !isValidUuid(cleanOrderId) ||
+    typeof record.paymentId !== "string" ||
+    !isValidUuid(record.paymentId.trim()) ||
+    typeof record.orderId !== "string" ||
+    !isValidUuid(record.orderId.trim()) ||
+    record.orderId.trim().toLowerCase() !== cleanOrderId ||
+    record.provider !== "ZERO_AMOUNT" ||
+    record.paymentStatus !== "SUCCESS" ||
+    record.orderStatus !== "PAID" ||
+    record.amountVnd !== 0 ||
+    record.pointsEarned !== 0 ||
+    typeof record.createdAt !== "string" ||
+    !isValidIsoUtcString(record.createdAt)
+  ) {
+    throw createPaymentError(
+      "Dữ liệu phản hồi quyết toán 0đ từ máy chủ không hợp lệ hoặc thiếu trường bắt buộc.",
+      statusCode || 500,
+      "SERVER_ERROR",
+      idempotencyKey,
+      { canRetrySameKey: true }
+    );
+  }
+
+  return {
+    paymentId: record.paymentId.trim(),
+    orderId: record.orderId.trim().toLowerCase(),
+    provider: "ZERO_AMOUNT",
+    paymentStatus: "SUCCESS",
+    orderStatus: "PAID",
+    amountVnd: 0,
+    pointsEarned: 0,
+    createdAt: record.createdAt,
+  };
+}
+
+/**
  * Quyết toán đơn hàng 0 VND nội bộ qua `POST /payments/zero-amount` (API Contract v4.0 §6 / BR-06).
  */
 export async function submitZeroAmountPaymentApi(
@@ -1678,43 +1755,17 @@ export async function submitZeroAmountPaymentApi(
     throw createPaymentError(errMsg, res.status, errCode as PaymentErrorCode, cleanKey);
   }
 
-  // Bắt buộc kiểm tra đầy đủ các trường của DTO trả về từ Backend (BLOCKER: Không tự điền fallback hay hardcode SUCCESS/PAID)
-  if (
-    typeof record.paymentId !== "string" ||
-    !isValidUuid(record.paymentId.trim()) ||
-    typeof record.orderId !== "string" ||
-    !isValidUuid(record.orderId.trim()) ||
-    record.orderId.trim().toLowerCase() !== cleanOrderId ||
-    record.provider !== "ZERO_AMOUNT" ||
-    record.paymentStatus !== "SUCCESS" ||
-    record.orderStatus !== "PAID" ||
-    record.amountVnd !== 0 ||
-    record.pointsEarned !== 0 ||
-    typeof record.createdAt !== "string" ||
-    !isValidIsoUtcString(record.createdAt)
-  ) {
-    throw createPaymentError(
-      "Dữ liệu phản hồi quyết toán 0đ từ máy chủ không hợp lệ hoặc thiếu trường bắt buộc.",
-      res.status || 500,
-      "SERVER_ERROR",
-      cleanKey,
-      { canRetrySameKey: true }
-    );
-  }
+  const validatedResponse = validateZeroAmountPaymentResponse(
+    record,
+    cleanOrderId,
+    cleanKey,
+    res.status || 500
+  );
 
   const isReplayed = res.headers.get("Idempotency-Replayed") === "true";
 
   return {
-    response: {
-      paymentId: record.paymentId.trim(),
-      orderId: record.orderId.trim().toLowerCase(),
-      provider: "ZERO_AMOUNT",
-      paymentStatus: "SUCCESS",
-      orderStatus: "PAID",
-      amountVnd: 0,
-      pointsEarned: 0,
-      createdAt: record.createdAt,
-    },
+    response: validatedResponse,
     replayed: isReplayed,
   };
 }

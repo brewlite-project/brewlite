@@ -44,6 +44,7 @@ import {
   validatePaymentResponseData,
   initiateVnPayPaymentApi,
   submitZeroAmountPaymentApi,
+  validateZeroAmountPaymentResponse,
   type SubmitPaymentApiResult,
 } from "@/services/payment.service";
 
@@ -347,6 +348,7 @@ export interface PaymentPageViewProps {
   initiateVnPayFn?: typeof initiateVnPayPaymentApi;
   submitZeroAmountFn?: typeof submitZeroAmountPaymentApi;
   onRedirectToVnPay?: (paymentUrl: string) => void;
+  onNavigateSuccess?: (url: string) => void;
 }
 
 export default function PaymentPageView({
@@ -362,6 +364,7 @@ export default function PaymentPageView({
   initiateVnPayFn,
   submitZeroAmountFn,
   onRedirectToVnPay,
+  onNavigateSuccess,
 }: PaymentPageViewProps) {
   const router = useSafeAppRouter();
   const {
@@ -766,18 +769,23 @@ export default function PaymentPageView({
         idempotencyKey,
         { accessToken }
       );
-      // Chỉ hiển thị SUCCESS khi backend thực sự xác nhận đầy đủ DTO
+      // Kiểm tra nghiêm ngặt toàn bộ DTO (bao gồm UUID và calendar date của createdAt) trước khi xóa Cart hoặc navigate
+      const verifiedZero = validateZeroAmountPaymentResponse(
+        res?.response,
+        activeOrder.id,
+        idempotencyKey
+      );
       if (
-        res?.response?.paymentStatus === "SUCCESS" &&
-        res?.response?.orderStatus === "PAID"
+        verifiedZero.paymentStatus === "SUCCESS" &&
+        verifiedZero.orderStatus === "PAID"
       ) {
         setVnPayFlowState("success");
         clearCart();
         if (setContextActiveOrder) setContextActiveOrder(null);
         clearStoredActiveOrder();
-        router.push(
-          `/order-confirmation?orderId=${encodeURIComponent(activeOrder.id)}&view=zero`
-        );
+        const confirmUrl = `/order-confirmation?orderId=${encodeURIComponent(activeOrder.id)}&view=zero`;
+        onNavigateSuccess?.(confirmUrl);
+        router.push(confirmUrl);
       } else {
         throw new Error("Phản hồi quyết toán 0đ không hợp lệ từ máy chủ.");
       }
@@ -1910,39 +1918,7 @@ export default function PaymentPageView({
 
                             // BR-06: Đơn hàng 0đ quyết toán nội bộ không cần redirect
                             if (activeOrder.totalVnd === 0) {
-                              setIsSubmitting(true);
-                              submittingRef.current = true;
-                              setPaymentError(null);
-                              try {
-                                const zeroApi = submitZeroAmountFn ?? submitZeroAmountPaymentApi;
-                                const res = await zeroApi(
-                                  { orderId: activeOrder.id },
-                                  idempotencyKey,
-                                  { accessToken }
-                                );
-                                // Chỉ hiển thị SUCCESS khi backend thực sự xác nhận
-                                if (
-                                  res?.response?.paymentStatus === "SUCCESS" &&
-                                  res?.response?.orderStatus === "PAID"
-                                ) {
-                                  setVnPayFlowState("success");
-                                  clearCart();
-                                  if (setContextActiveOrder) setContextActiveOrder(null);
-                                  clearStoredActiveOrder();
-                                  router.push(
-                                    `/order-confirmation?orderId=${encodeURIComponent(activeOrder.id)}&view=zero`
-                                  );
-                                } else {
-                                  throw new Error("Phản hồi quyết toán 0đ không hợp lệ từ máy chủ.");
-                                }
-                              } catch (err: unknown) {
-                                setVnPayFlowState("failed");
-                                const submissionErr = toPaymentSubmissionErrorState(err, idempotencyKey);
-                                setPaymentError(submissionErr);
-                              } finally {
-                                setIsSubmitting(false);
-                                submittingRef.current = false;
-                              }
+                              await handleZeroAmountSubmit();
                               return;
                             }
 
