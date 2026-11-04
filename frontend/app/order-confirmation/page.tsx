@@ -344,10 +344,13 @@ function OrderConfirmationContent() {
       viewParam === "vnpay_failed");
 
   if (isVnPayFailed) {
+    const failureReason = order.payment?.failureReason;
     const derivedResponseCode =
       vnpResponseCode ||
-      (order.payment?.failureReason?.startsWith("VNPAY_RESPONSE_")
-        ? order.payment.failureReason.replace("VNPAY_RESPONSE_", "")
+      (failureReason?.startsWith("VNPAY_RESPONSE_")
+        ? failureReason.replace("VNPAY_RESPONSE_", "")
+        : failureReason?.startsWith("VNPAY_STATUS_")
+        ? failureReason.replace("VNPAY_STATUS_", "")
         : "24");
     return (
       <VnPayFailedRetryView

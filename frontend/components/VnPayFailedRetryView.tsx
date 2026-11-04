@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { formatVnd, FALLBACK_DRINK_IMAGE } from "@/services/api.service";
+import { formatVnd } from "@/services/api.service";
 import {
   type OrderConfirmationData,
   computeOrderRemainingSeconds,

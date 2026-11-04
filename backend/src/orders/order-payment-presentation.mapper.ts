@@ -81,7 +81,7 @@ function compareDesc(a: OrderHistoryPaymentRow, b: OrderHistoryPaymentRow): numb
 }
 
 function hasPaymentExceptionEvidence(payment: OrderHistoryPaymentRow): boolean {
-  if (Boolean(payment.hasFinancialException)) return true;
+  if (payment.hasFinancialException) return true;
   const events = Array.isArray(payment.gatewayEvents) ? payment.gatewayEvents : [];
   return events.some(
     (event) =>
@@ -156,12 +156,16 @@ function readFailureReason(
   orderId: string,
 ): string | null {
   if (provider === 'MOCK') {
-    const snapshot = readPaymentSnapshot(
-      payment.responseSnapshot,
-      payment.id,
-      orderId,
-    );
-    return snapshot.failureReason;
+    try {
+      const snapshot = readPaymentSnapshot(
+        payment.responseSnapshot,
+        payment.id,
+        orderId,
+      );
+      return snapshot.failureReason;
+    } catch {
+      return payment.status === 'FAILED' ? 'PAYMENT_DECLINED' : null;
+    }
   }
   if (provider === 'ZERO_AMOUNT') {
     if (payment.status !== 'SUCCESS') {
