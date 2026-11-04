@@ -8,6 +8,38 @@ amount, userId, status, points hoặc kết quả mock từ client. CARD đúng 
 WALLET đúng 10 chữ số; không trim/coerce credential. Mock CARD đuôi 0002 và
 WALLET đuôi 0000 FAILED, còn lại SUCCESS. Cả hai trả HTTP 200.
 
+### Phase 2 — SCRUM-85 / P2-11: quyền truy cập Mock
+
+Theo API Contract v4.0 (API-05, Phụ lục E), `POST /payments` chỉ hoạt động
+khi backend có `MOCK_PAYMENT_ENABLED=true` và `NODE_ENV` khác `production`.
+Thiếu biến hoặc giá trị khác chuỗi `true` chính xác đều bị từ chối; production
+luôn từ chối kể cả khi bật cờ. Cấu hình mẫu mặc định `false`.
+
+JWT Guard → MockPaymentGuard → validation/Controller → PaymentsService →
+shared Finalization → Prisma/PostgreSQL. Mock Guard chạy trước body/key pipes;
+Service kiểm tra lại cùng policy trước validation, DB lookup và replay để bảo vệ
+lời gọi nội bộ. Khi disabled: HTTP 403 `MOCK_PAYMENT_DISABLED`, kể cả receipt cũ;
+không trả snapshot/replay header hoặc thay đổi Payment, Order, coupon, stock, points.
+JWT thiếu/sai vẫn trả 401 vì authentication chạy trước policy.
+
+Chỉ đặt cờ ở backend. Với local test/demo, đặt `MOCK_PAYMENT_ENABLED=true` trong
+`backend/.env`, bảo đảm môi trường không phải production rồi khởi động lại backend.
+Docker runtime hiện đặt `NODE_ENV=production`, vì vậy Mock bị chặn trong Compose.
+Policy không áp dụng vào VNPay hoặc ZERO_AMOUNT; ZERO_AMOUNT HTTP endpoint thuộc
+task P2-10, không được bổ sung trong P2-11.
+
+Khi enabled, giữ nguyên CARD/WALLET, HTTP 200 cho SUCCESS/FAILED, snapshot,
+idempotency và ownership. Shared Finalization tiếp tục kiểm tra sau Order lock:
+VNPay PENDING/chưa rõ kết quả → 409 `PAYMENT_IN_PROGRESS`; financial exception
+hoặc REQUIRES_REVIEW → 409 `FINANCIAL_EXCEPTION_REQUIRES_REVIEW`; Order 0đ →
+409 `INVALID_TRANSITION`. Timeout/lỗi mạng không cho phép chuyển sang Mock.
+Chỉ VNPay terminal FAILED mới cho phép một Mock attempt được yêu cầu rõ ràng,
+khi Order còn hạn và đáp ứng các điều kiện khác. Không có fallback tự động.
+
+Các suite regression dùng Mock phải opt-in bằng `vi.stubEnv` trong test setup
+của suite rồi restore environment sau khi chạy; không bật Mock toàn cục cho test.
+Chi tiết kiểm tra: [SCRUM-85](../../../docs/api/SCRUM85_Mock_Payment_Environment_Access_Policy.md).
+
 PaymentsService triển khai PaymentProcessor của phần foundation. Nó dùng
 Prisma schema Payment từ dev bad180d, không sửa schema/migration/seed chung.
 Không thêm Order API hay Scheduler; OrdersService hiện có được giữ nguyên.
