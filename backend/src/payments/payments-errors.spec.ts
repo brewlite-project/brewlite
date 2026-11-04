@@ -14,7 +14,14 @@ const dto = {
   paymentDetails: { cardNumber: '1234567890121234' },
 };
 describe('Payment transaction error contract', () => {
-  afterEach(() => vi.restoreAllMocks());
+  beforeEach(() => {
+    vi.stubEnv('NODE_ENV', 'test');
+    vi.stubEnv('MOCK_PAYMENT_ENABLED', 'true');
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
   function service(error: unknown) {
     const transaction = vi.fn().mockRejectedValue(error);
     const value = new PaymentsService(

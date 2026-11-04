@@ -120,7 +120,7 @@ export function VnPaySuccessView({
                   Thanh toán thành công qua VNPay!
                 </h1>
                 <p className="font-body-lg text-body-lg text-on-surface-variant max-w-[560px]">
-                  Cảm ơn <strong className="text-on-surface">{customerName}</strong>! Đơn hàng của bạn đã được xác nhận. Hóa đơn điện tử và chi tiết giao dịch đã được ghi nhận an toàn trên máy chủ.
+                  Cảm ơn <strong className="text-on-surface">{customerName}</strong>! Đơn hàng của bạn đã được xác nhận. Hóa đơn điện tử và chi tiết giao dịch đã được lưu trữ an toàn.
                 </p>
               </div>
 
@@ -159,7 +159,7 @@ export function VnPaySuccessView({
 
                   <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 font-label-md text-label-md font-bold border border-emerald-200">
                     <span className="w-2 h-2 rounded-full bg-emerald-600"></span>
-                    ĐÃ THANH TOÁN (PAID)
+                    ĐÃ THANH TOÁN<span className="sr-only"> (PAID)</span>
                   </span>
                 </div>
 

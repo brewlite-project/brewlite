@@ -27,6 +27,8 @@ describe('SCRUM-56 promotion and loyalty PostgreSQL integration', () => {
         'Set AUTH_TEST_DATABASE_URL to a migrated test database.',
       );
     vi.stubEnv('DATABASE_URL', url);
+    vi.stubEnv('NODE_ENV', 'test');
+    vi.stubEnv('MOCK_PAYMENT_ENABLED', 'true');
     const module = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();

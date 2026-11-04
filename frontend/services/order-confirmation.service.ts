@@ -100,7 +100,7 @@ export interface GetMyOrdersResponse {
 export interface PaymentApiResponse {
   paymentId: string;
   orderId: string;
-  paymentStatus: "SUCCESS" | "FAILED";
+  paymentStatus: "SUCCESS" | "FAILED" | "PENDING";
   orderStatus: "PAID" | "PAYMENT_FAILED";
   amountVnd: number;
   method: PaymentMethodType;

@@ -26,6 +26,7 @@ import { PaymentResponseDto } from './dto/payment-response.dto.js';
 import { InitiateVnpayDto, VnpayInitiationResponseDto } from './dto/initiate-vnpay.dto.js';
 import { VnpayInitiationService } from './vnpay-initiation.service.js';
 import { PaymentProcessor } from './payment-processor.js';
+import { MockPaymentGuard } from './mock-payment.guard.js';
 import {
   CreatePaymentPipe,
   IdempotencyKeyPipe,
@@ -42,11 +43,12 @@ export class PaymentsController {
     private readonly vnpay: VnpayInitiationService,
   ) {}
   @Post()
+  @UseGuards(MockPaymentGuard)
   @HttpCode(200)
   @ApiOperation({
     summary: 'Mock payment for an owned Order',
     description:
-      'CARD ending 0002 or WALLET ending 0000 declines; other valid test details succeed. Both return HTTP 200. Retry a timed-out request with the same key.',
+      'Requires MOCK_PAYMENT_ENABLED=true and NODE_ENV other than production; otherwise returns 403 MOCK_PAYMENT_DISABLED, including replays. CARD ending 0002 or WALLET ending 0000 declines; other valid test details succeed. Both return HTTP 200. Retry a timed-out request with the same key. Never falls back from an unresolved VNPay payment.',
   })
   @ApiHeader({
     name: 'Idempotency-Key',
@@ -67,6 +69,7 @@ export class PaymentsController {
   })
   @ApiResponse({ status: 400, description: 'VALIDATION_ERROR' })
   @ApiResponse({ status: 401, description: 'UNAUTHORIZED' })
+  @ApiResponse({ status: 403, description: 'MOCK_PAYMENT_DISABLED' })
   @ApiResponse({
     status: 404,
     description: 'NOT_FOUND: missing Order or another owner',
@@ -74,7 +77,7 @@ export class PaymentsController {
   @ApiResponse({
     status: 409,
     description:
-      'INVALID_TRANSITION | IDEMPOTENCY_KEY_CONFLICT | PAYMENT_IN_PROGRESS',
+      'INVALID_TRANSITION | IDEMPOTENCY_KEY_CONFLICT | PAYMENT_IN_PROGRESS | FINANCIAL_EXCEPTION_REQUIRES_REVIEW',
   })
   @ApiResponse({ status: 500, description: 'INTERNAL_ERROR' })
   async create(

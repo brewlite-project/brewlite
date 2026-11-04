@@ -1,11 +1,26 @@
 "use client";
 
 import React, { Suspense, useEffect, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
 import { useCart, clearStoredActiveOrder } from "@/context/CartContext";
 import { getStoredToken } from "@/services/auth.service";
+
+function useSafeAppRouter() {
+  try {
+    return useRouter();
+  } catch {
+    return {
+      push: (url: string) => {
+        if (typeof window !== "undefined") window.location.href = url;
+      },
+      replace: (url: string) => {
+        if (typeof window !== "undefined") window.location.replace(url);
+      },
+    };
+  }
+}
 import {
   type OrderConfirmationData,
   fetchMyOrdersApi,
@@ -14,13 +29,13 @@ import {
 } from "@/services/order-confirmation.service";
 import { OrderSuccessView } from "@/components/OrderSuccessView";
 import { PaymentFailedRetryView } from "@/components/PaymentFailedRetryView";
-import { VnPayRedirectingView } from "@/components/VnPayRedirectingView";
 import { VnPayProcessingView } from "@/components/VnPayProcessingView";
 import { VnPaySuccessView } from "@/components/VnPaySuccessView";
 import { VnPayFailedRetryView } from "@/components/VnPayFailedRetryView";
 import { ZeroPaymentBypassView } from "@/components/ZeroPaymentBypassView";
 
 function OrderConfirmationContent() {
+  const router = useSafeAppRouter();
   const searchParams = useSearchParams();
   const orderIdParam = searchParams.get("orderId");
   const vnpResponseCode = searchParams.get("vnp_ResponseCode");
@@ -239,7 +254,7 @@ function OrderConfirmationContent() {
   }
 
   // VNPay Processing / Reconciling:
-  // Khi có vnp_ResponseCode=00 hoặc view=processing và đơn hàng chưa PAID,
+  // Khi có vnp_ResponseCode hoặc view=processing và đơn hàng chưa PAID,
   // HOẶC khi payment đang ở trạng thái PENDING / PROCESSING / RECONCILING (theo BR-04 & BR-05: không mở Retry khi đang chờ đối soát).
   const isPaymentPendingReconcile =
     order.payment?.status === "PENDING" ||
@@ -340,7 +355,13 @@ function OrderConfirmationContent() {
         vnpTxnRef={vnpTxnRef}
         token={token}
         onRetryVnPay={async () => {
-          await handleReloadOrder(false);
+          if (order.payment?.status === "PENDING") {
+            // Không retry khi Payment vẫn PENDING
+            await handleReloadOrder(false);
+            return;
+          }
+          // Retry terminal FAILED: thực sự quay lại Payment để khởi tạo attempt mới hợp lệ
+          router.push(`/payment?orderId=${encodeURIComponent(order.id)}&method=VNPAY`);
         }}
       />
     );

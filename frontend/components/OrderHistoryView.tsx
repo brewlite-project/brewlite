@@ -280,9 +280,9 @@ function formatSizeShort(size: string): string {
 
 function formatSizeLabel(size: string, multiplierPercent: number): string {
   if (size === "ONE_SIZE") {
-    return `Tiêu chuẩn (${multiplierPercent}%)`;
+    return "Tiêu chuẩn";
   }
-  return `Size ${size} (${multiplierPercent}%)`;
+  return `Size ${size}`;
 }
 
 function formatTimeOnlyVi(isoString: string): string {
@@ -319,7 +319,7 @@ function getStitchStatusBadgeConfig(status: OrderStatus): {
   switch (status) {
     case "PENDING":
       return {
-        badgeText: "ĐANG CHỜ THANH TOÁN (PENDING)",
+        badgeText: "ĐANG CHỜ THANH TOÁN",
         pillClass: "bg-[#FEFCE8] text-[#D97706] border border-[#FDE68A]",
         dotClass: "bg-[#EAB308]",
         isPing: true,
@@ -327,7 +327,7 @@ function getStitchStatusBadgeConfig(status: OrderStatus): {
       };
     case "PAYMENT_FAILED":
       return {
-        badgeText: "THANH TOÁN THẤT BẠI (PAYMENT_FAILED)",
+        badgeText: "THANH TOÁN THẤT BẠI",
         pillClass: "bg-[#FEF2F2] text-[#DC2626] border border-[#FECACA]",
         dotClass: "bg-[#DC2626]",
         isPing: false,
@@ -335,7 +335,7 @@ function getStitchStatusBadgeConfig(status: OrderStatus): {
       };
     case "PAID":
       return {
-        badgeText: "ĐÃ THANH TOÁN (PAID)",
+        badgeText: "ĐÃ THANH TOÁN",
         pillClass: "bg-[#F0FDF4] text-[#16A34A] border border-[#BBF7D0]",
         dotClass: "bg-[#16A34A]",
         isPing: false,
@@ -343,7 +343,7 @@ function getStitchStatusBadgeConfig(status: OrderStatus): {
       };
     case "PREPARING":
       return {
-        badgeText: "ĐANG PHA CHẾ (PREPARING)",
+        badgeText: "ĐANG PHA CHẾ",
         pillClass: "bg-[#F0FDF4] text-[#16A34A] border border-[#BBF7D0]",
         dotClass: "bg-[#16A34A]",
         isPing: true,
@@ -351,7 +351,7 @@ function getStitchStatusBadgeConfig(status: OrderStatus): {
       };
     case "READY":
       return {
-        badgeText: "SẴN SÀNG NHẬN MÓN (READY)",
+        badgeText: "SẴN SÀNG NHẬN MÓN",
         pillClass: "bg-[#F0FDF4] text-[#16A34A] border border-[#BBF7D0]",
         dotClass: "bg-[#16A34A]",
         isPing: true,
@@ -359,7 +359,7 @@ function getStitchStatusBadgeConfig(status: OrderStatus): {
       };
     case "COMPLETED":
       return {
-        badgeText: "HOÀN TẤT (COMPLETED)",
+        badgeText: "HOÀN TẤT",
         pillClass: "bg-[#F0FDF4] text-[#16A34A] border border-[#BBF7D0]",
         dotClass: "bg-[#16A34A]",
         isPing: false,
@@ -368,7 +368,7 @@ function getStitchStatusBadgeConfig(status: OrderStatus): {
     case "CANCELLED":
     default:
       return {
-        badgeText: "ĐÃ HỦY (CANCELLED)",
+        badgeText: "ĐÃ HỦY",
         pillClass:
           "bg-surface-container-high text-outline border border-outline-variant/40",
         dotClass: "bg-outline",
@@ -538,7 +538,7 @@ export function OrderSnapshotModal({
                 id="orderSnapshotModalTitle"
                 className="font-headline-md text-headline-md text-on-surface"
               >
-                Chi tiết Snapshot Đơn hàng
+                Chi tiết Đơn hàng
               </h3>
               <span
                 className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full font-label-md text-[11px] font-semibold ${modalStatus.pillClass}`}
@@ -565,11 +565,11 @@ export function OrderSnapshotModal({
           </button>
         </div>
 
-        {/* Thông tin thời gian tạo & hết hạn giữ chỗ 15 phút */}
+        {/* Thông tin thời gian tạo & hạn thanh toán */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-surface-container-low p-3.5 rounded-xl text-body-sm">
           <div>
             <span className="text-on-surface-variant block">
-              Thời điểm tạo đơn (createdAt):
+              Thời điểm tạo đơn:
             </span>
             <strong className="text-on-surface">
               {formatOrderTimestampVi(order.createdAt)}
@@ -577,7 +577,7 @@ export function OrderSnapshotModal({
           </div>
           <div>
             <span className="text-on-surface-variant block">
-              Hết hạn giữ chỗ 15 phút (expiresAt):
+              Hạn thanh toán:
             </span>
             <strong className="text-on-surface">
               {formatOrderTimestampVi(order.expiresAt)}
@@ -585,10 +585,10 @@ export function OrderSnapshotModal({
           </div>
         </div>
 
-        {/* Danh sách dòng món Snapshot kèm ảnh sản phẩm */}
+        {/* Danh sách dòng món kèm ảnh sản phẩm */}
         <div className="space-y-2.5">
           <h4 className="font-title-sm text-title-sm text-on-surface">
-            Danh sách món đã lưu Snapshot ({order.items.length} dòng)
+            Danh sách món ({order.items.length} món)
           </h4>
           <div className="space-y-2.5">
             {order.items.map((item: OrderItemSnapshotDto) => {
@@ -621,8 +621,7 @@ export function OrderSnapshotModal({
                         </span>
                       </div>
                       <div className="font-body-sm text-[12px] text-outline">
-                        Giá gốc: {formatVnd(item.basePriceVnd)} • Đơn giá:{" "}
-                        {formatVnd(item.unitPriceVnd)} × {item.quantity}
+                        Đơn giá: {formatVnd(item.unitPriceVnd)} × {item.quantity}
                       </div>
                       {item.toppings.length > 0 && (
                         <div className="font-body-sm text-[12px] text-on-surface-variant">
@@ -643,10 +642,10 @@ export function OrderSnapshotModal({
           </div>
         </div>
 
-        {/* Tóm tắt giao dịch thanh toán (Payment Summary) */}
+        {/* Tóm tắt giao dịch thanh toán */}
         <div className="p-3.5 rounded-xl bg-surface-container-low border border-outline-variant/30 space-y-1.5 text-body-sm">
           <h4 className="font-title-sm text-title-sm text-on-surface">
-            Thông tin thanh toán (Payment Summary)
+            Thông tin thanh toán
           </h4>
           {order.payment ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -704,37 +703,36 @@ export function OrderSnapshotModal({
             </div>
           ) : (
             <p className="text-on-surface-variant">
-              Chưa phát sinh giao dịch thanh toán (
-              <code className="font-mono">payment: null</code>).
+              Chưa phát sinh giao dịch thanh toán.
             </p>
           )}
         </div>
 
-        {/* Bảng đối soát tổng tiền chuẩn ERD */}
+        {/* Bảng tổng tiền */}
         <div className="p-3.5 rounded-xl bg-surface-container rounded-lg flex flex-col gap-1.5 text-body-sm">
           <div className="flex justify-between text-on-surface-variant">
-            <span>Tạm tính (subtotalVnd):</span>
+            <span>Tạm tính:</span>
             <strong className="text-on-surface">
               {formatVnd(order.subtotalVnd)}
             </strong>
           </div>
           <div className="flex justify-between text-tertiary font-medium">
             <span>
-              Giảm giá (discountVnd
-              {order.couponCode ? ` • ${order.couponCode}` : ""}):
+              Giảm giá
+              {order.couponCode ? ` (${order.couponCode})` : ""}:
             </span>
             <span>-{formatVnd(order.discountVnd)}</span>
           </div>
           <div className="flex justify-between pt-2 border-t border-outline/15 text-title-sm">
             <span className="font-bold text-on-surface">
-              Tổng thanh toán (totalVnd):
+              Tổng thanh toán:
             </span>
             <span className="font-bold text-primary">
               {formatVnd(order.totalVnd)}
             </span>
           </div>
           <div className="flex justify-between text-on-surface-variant pt-0.5">
-            <span>Điểm tích lũy đã cộng (pointsEarned):</span>
+            <span>Điểm tích lũy đã cộng:</span>
             <strong className="text-tertiary">
               +{order.pointsEarned} điểm
             </strong>
@@ -1110,19 +1108,11 @@ export default function OrderHistoryView() {
                   <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-primary" />
                 </span>
                 <span className="font-medium text-on-surface">
-                  Đang đồng bộ lịch sử đơn hàng:
+                  Đang tải dữ liệu:
                 </span>
                 <span>
-                  Đang truy xuất dữ liệu từ máy chủ{" "}
-                  <code className="font-mono text-primary">GET /orders/me</code>
-                  ...
+                  Đang đồng bộ lịch sử đơn hàng...
                 </span>
-              </div>
-              <div className="hidden lg:flex items-center gap-space-xs font-label-md text-label-md text-on-surface-variant">
-                <span className="material-symbols-outlined text-[16px] text-tertiary">
-                  bolt
-                </span>
-                <span>API Contract v3.0 • Bảo mật JWT Bearer</span>
               </div>
             </div>
           </div>
@@ -1330,10 +1320,7 @@ export default function OrderHistoryView() {
                   visibility
                 </span>
                 <span>
-                  Đang hiển thị{" "}
-                  <strong>4 đơn hàng mẫu chuẩn thiết kế Stitch</strong> (PENDING,
-                  PAYMENT_FAILED, PAID, CANCELLED). Bạn có thể chuyển về dữ liệu
-                  API thật bất cứ lúc nào.
+                  Đang hiển thị <strong>4 đơn hàng mẫu giao diện</strong>. Bạn có thể chuyển về dữ liệu tài khoản bất cứ lúc nào.
                 </span>
               </div>
               <button
@@ -1956,14 +1943,13 @@ export default function OrderHistoryView() {
                               timer
                             </span>
                             <span>
-                              Đơn hàng sẽ tự động hủy sau khi hết hạn 15 phút (
+                              Đơn hàng sẽ tự động hủy sau 15 phút (
                               {formatDateDotTimeVi(order.expiresAt)}) nếu chưa
-                              thanh toán — tồn kho và voucher HELD được bảo
-                              toàn.
+                              thanh toán. Sản phẩm và mã ưu đãi sẽ được hoàn lại.
                             </span>
                           </div>
                           <span className="text-on-surface-variant text-[12px] whitespace-nowrap">
-                            Hủy đơn: Tự động bởi Scheduler
+                            Tự động hủy khi hết hạn
                           </span>
                         </div>
                       )}
@@ -1999,9 +1985,7 @@ export default function OrderHistoryView() {
                     <strong className="text-on-surface">
                       {filteredOrders.length}
                     </strong>{" "}
-                    đơn hàng
-                    {meta ? ` • tổng máy chủ: ${meta.total}` : ""} • limit:{" "}
-                    {DEFAULT_CLIENT_PAGE_SIZE})
+                    đơn hàng)
                   </span>
                 </div>
 

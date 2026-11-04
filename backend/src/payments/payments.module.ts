@@ -1,32 +1,65 @@
+
 import { Module } from '@nestjs/common';
 import type { DynamicModule, ModuleMetadata, Type } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module.js';
 import { PrismaModule } from '../prisma/prisma.module.js';
+
 import { MockPaymentService } from './mock-payment.service.js';
+import { MockPaymentGuard } from './mock-payment.guard.js';
 import { PaymentProcessor } from './payment-processor.js';
 import { PaymentsService } from './payments.service.js';
 import { PaymentsController } from './payments.controller.js';
 import { PaymentFinalizationService } from './payment-finalization.service.js';
+
 import { VnpayInitiationService } from './vnpay-initiation.service.js';
 import { VnpayIpnController } from './vnpay-ipn.controller.js';
 import { VnpayIpnService } from './vnpay-ipn.service.js';
 import { VnpayQueryDrService } from './vnpay-querydr.service.js';
+
+import { PaymentReconciliationScheduler } from './payment-reconciliation.scheduler.js';
+import {
+  PAYMENT_RECONCILIATION_OPTIONS,
+  getPaymentReconciliationOptions,
+} from './payment-reconciliation.config.js';
+
+import { ZeroAmountPaymentController } from './zero-amount-payment.controller.js';
+import { ZeroAmountPaymentService } from './zero-amount-payment.service.js';
+
 import {
   CreatePaymentPipe,
   IdempotencyKeyPipe,
+  ZeroAmountPaymentPipe,
 } from './payment-validation.pipe.js';
+
 @Module({
   imports: [AuthModule, PrismaModule],
-  controllers: [PaymentsController, VnpayIpnController],
+  controllers: [
+    PaymentsController,
+    VnpayIpnController,
+    ZeroAmountPaymentController,
+  ],
   providers: [
+    MockPaymentGuard,
     MockPaymentService,
     PaymentFinalizationService,
     VnpayInitiationService,
     VnpayIpnService,
     VnpayQueryDrService,
+
+    // SCRUM-82: VNPay Payment Reconciliation Scheduler
+    PaymentReconciliationScheduler,
+    {
+      provide: PAYMENT_RECONCILIATION_OPTIONS,
+      useFactory: getPaymentReconciliationOptions,
+    },
+
+    // SCRUM-84: ZERO_AMOUNT Payment
+    ZeroAmountPaymentService,
+
     PaymentsService,
     CreatePaymentPipe,
     IdempotencyKeyPipe,
+    ZeroAmountPaymentPipe,
     { provide: PaymentProcessor, useExisting: PaymentsService },
   ],
   exports: [MockPaymentService, PaymentsService, PaymentFinalizationService],

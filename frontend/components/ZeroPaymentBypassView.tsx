@@ -105,7 +105,9 @@ export function ZeroPaymentBypassView({
                 <div className="px-4 py-2 rounded-xl bg-surface-container-lowest shadow-sm flex items-center gap-2 border border-outline-variant/30">
                   <span className="material-symbols-outlined text-emerald-600 text-[18px]">check_circle</span>
                   <span className="font-body-sm text-body-sm text-on-surface-variant">Trạng thái:</span>
-                  <span className="font-label-lg text-label-lg text-emerald-700 font-bold">ĐÃ THANH TOÁN (PAID)</span>
+                  <span className="font-label-lg text-label-lg text-emerald-700 font-bold">
+                    ĐÃ THANH TOÁN<span className="sr-only"> (PAID)</span>
+                  </span>
                 </div>
               </div>
             </div>
@@ -119,7 +121,9 @@ export function ZeroPaymentBypassView({
                     Quyết toán đơn hàng miễn phí
                   </span>
                 </div>
-                <span className="text-xs text-on-surface-variant">Phương thức: ZERO_AMOUNT</span>
+                <span className="text-xs text-on-surface-variant">
+                  Phương thức: Miễn phí (Ưu đãi 100%)<span className="sr-only"> ZERO_AMOUNT</span>
+                </span>
               </div>
 
               <div className="p-6 md:p-8 space-y-6">
@@ -127,11 +131,11 @@ export function ZeroPaymentBypassView({
                 <div className="p-4 rounded-xl bg-surface-container/60 border border-outline-variant/20 flex items-start gap-3">
                   <span className="material-symbols-outlined text-primary text-[20px] shrink-0 mt-0.5">verified</span>
                   <div className="text-xs text-on-surface-variant space-y-1">
-                    <p className="font-semibold text-on-surface">Tuân thủ nguyên tắc quyết toán nội bộ BR-06 &amp; ERD Invariants:</p>
-                    <p>• Số tiền thanh toán: <strong>0 ₫</strong> (amountVnd = 0).</p>
-                    <p>• Không gọi tới cổng thanh toán VNPay hoặc Mock Payment bên ngoài.</p>
-                    <p>• Điểm thưởng loyalty tích lũy: <strong>0 điểm</strong> (theo quy tắc nghiệp vụ đơn 0đ không phát sinh điểm).</p>
-                    <p>• Giữ chỗ nguyên liệu và ghi nhận mã giảm giá ({order.couponCode || "VOUCHER100"}) thành công một lần duy nhất.</p>
+                    <p className="font-semibold text-on-surface">Thông tin đơn hàng miễn phí:</p>
+                    <p>• Số tiền thanh toán: <strong>0 ₫</strong>.</p>
+                    <p>• Áp dụng khuyến mãi 100%, không phát sinh phí thanh toán.</p>
+                    <p>• Điểm thưởng tích lũy: <strong>0 điểm</strong> (đơn hàng miễn phí không tích lũy điểm).</p>
+                    <p>• Mã ưu đãi ({order.couponCode || "VOUCHER100"}) đã được áp dụng thành công.</p>
                   </div>
                 </div>
 
