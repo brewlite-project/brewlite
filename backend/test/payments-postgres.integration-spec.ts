@@ -32,6 +32,8 @@ describe('Payments real database transactions', () => {
         'Set AUTH_TEST_DATABASE_URL to a migrated test database.',
       );
     vi.stubEnv('DATABASE_URL', url);
+    vi.stubEnv('NODE_ENV', 'test');
+    vi.stubEnv('MOCK_PAYMENT_ENABLED', 'true');
     const module = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
@@ -173,6 +175,175 @@ describe('Payments real database transactions', () => {
   async function count(f: Fixture) {
     return prisma.payment.count({ where: { orderId: f.orderId } });
   }
+
+  describe('SCRUM-85 Mock environment and cross-provider policy', () => {
+    afterEach(() => {
+      vi.stubEnv('NODE_ENV', 'test');
+      vi.stubEnv('MOCK_PAYMENT_ENABLED', 'true');
+    });
+
+    async function state(f: Fixture) {
+      return {
+        order: await prisma.order.findUniqueOrThrow({ where: { id: f.orderId } }),
+        payments: await prisma.payment.findMany({
+          where: { orderId: f.orderId },
+        }),
+        user: await prisma.user.findUniqueOrThrow({ where: { id: f.userId } }),
+        product: await prisma.product.findUniqueOrThrow({
+          where: { id: productId },
+        }),
+        coupon: f.couponId
+          ? await prisma.coupon.findUniqueOrThrow({ where: { id: f.couponId } })
+          : null,
+        redemptions: await prisma.couponRedemption.findMany({
+          where: { orderId: f.orderId },
+        }),
+      };
+    }
+
+    it.each([
+      ['test', undefined],
+      ['test', 'false'],
+      ['test', 'TRUE'],
+      ['production', 'true'],
+    ])(
+      'rejects a new attempt without side effects: %s, flag %s',
+      async (environment, flag) => {
+        const f = await fixture({ coupon: true, points: 10 });
+        const before = await state(f);
+        vi.stubEnv('NODE_ENV', environment);
+        vi.stubEnv('MOCK_PAYMENT_ENABLED', flag);
+        await pay(f)
+          .expect(403)
+          .expect((r) => expect(r.body.code).toBe('MOCK_PAYMENT_DISABLED'));
+        expect(await state(f)).toEqual(before);
+      },
+    );
+
+    it.each(['SUCCESS', 'FAILED'])(
+      'blocks an actual saved %s receipt after disabling Mock, then permits replay when re-enabled',
+      async (status) => {
+        const f = await fixture({ coupon: true });
+        const key = randomUUID();
+        const details = {
+          cardNumber: status === 'SUCCESS' ? fullCard : '1234567890120002',
+        };
+        const first = await pay(f, key, details).expect(200);
+        expect(first.body.paymentStatus).toBe(status);
+        // Old receipts remain immutable even after expiry and a policy change.
+        await prisma.order.update({
+          where: { id: f.orderId },
+          data: { expiresAt: new Date(0) },
+        });
+        const before = await state(f);
+        for (const [environment, flag] of [
+          ['production', 'true'],
+          ['test', 'false'],
+        ]) {
+          vi.stubEnv('NODE_ENV', environment);
+          vi.stubEnv('MOCK_PAYMENT_ENABLED', flag);
+          const denied = await pay(f, key, details).expect(403);
+          expect(denied.body.code).toBe('MOCK_PAYMENT_DISABLED');
+          expect(denied.headers['idempotency-replayed']).toBeUndefined();
+          expect(await state(f)).toEqual(before);
+        }
+        vi.stubEnv('NODE_ENV', 'test');
+        vi.stubEnv('MOCK_PAYMENT_ENABLED', 'true');
+        await pay(f, key, details)
+          .expect(200)
+          .expect('Idempotency-Replayed', 'true')
+          .expect(first.body);
+        expect(await state(f)).toEqual(before);
+      },
+    );
+
+    async function priorVnpay(
+      f: Fixture,
+      options: {
+        failed?: boolean;
+        error?: string;
+        review?: boolean;
+        exception?: boolean;
+      } = {},
+    ) {
+      const order = await prisma.order.findUniqueOrThrow({
+        where: { id: f.orderId },
+      });
+      const [clock] = await prisma.$queryRaw<
+        { now: Date }[]
+      >`SELECT clock_timestamp() AS now`;
+      return prisma.payment.create({
+        data: {
+          orderId: f.orderId,
+          userId: f.userId,
+          idempotencyKey: randomUUID(),
+          requestHash: 'vnpay-policy-fixture',
+          provider: 'VNPAY',
+          status: options.failed ? 'FAILED' : 'PENDING',
+          amountVnd: order.totalVnd,
+          vnpTxnRef: randomUUID().replaceAll('-', ''),
+          vnpTmnCode: 'POLICY_TEST',
+          vnpCreateDate: '20261103120000',
+          gatewayExpiresAt: order.expiresAt,
+          initiationSnapshot: { schemaVersion: 1, fixture: true },
+          reconcileUntil: new Date(order.expiresAt.getTime() + 65 * 60_000),
+          reconciliationState: options.review
+            ? 'REQUIRES_REVIEW'
+            : options.failed
+              ? 'RESOLVED'
+              : 'SCHEDULED',
+          nextQueryAt: options.review || options.failed ? null : order.expiresAt,
+          reviewReason: options.review ? 'Policy test: unresolved outcome' : null,
+          hasFinancialException: options.exception ?? false,
+          lastQueryError: options.error ?? null,
+          queryAttempts: options.error ? 1 : 0,
+          lastQueryAt: options.error ? clock.now : null,
+          lastQueryRequestId: options.error ? randomUUID() : null,
+          ...(options.failed
+            ? {
+                finalOutcomeSnapshot: { outcome: 'FAILED' },
+                verifiedAt: clock.now,
+                finalizedAt: clock.now,
+              }
+            : {}),
+        },
+      });
+    }
+
+    it.each([
+      { options: {}, code: 'PAYMENT_IN_PROGRESS' },
+      { options: { error: 'TIMEOUT' }, code: 'PAYMENT_IN_PROGRESS' },
+      { options: { error: 'NETWORK_ERROR' }, code: 'PAYMENT_IN_PROGRESS' },
+      { options: { review: true }, code: 'FINANCIAL_EXCEPTION_REQUIRES_REVIEW' },
+      {
+        options: { failed: true, review: true, exception: true },
+        code: 'FINANCIAL_EXCEPTION_REQUIRES_REVIEW',
+      },
+    ])(
+      'blocks a direct Mock attempt for unresolved/exception VNPay: $options',
+      async ({ options, code }) => {
+        const f = await fixture({ coupon: true });
+        await priorVnpay(f, options);
+        const before = await state(f);
+        await pay(f)
+          .expect(409)
+          .expect((r) => expect(r.body.code).toBe(code));
+        expect(await state(f)).toEqual(before);
+      },
+    );
+
+    it('allows an explicitly requested Mock attempt after terminal VNPay FAILED while Order remains valid', async () => {
+      const f = await fixture({ status: 'PAYMENT_FAILED' });
+      const prior = await priorVnpay(f, { failed: true });
+      await pay(f)
+        .expect(200)
+        .expect((r) => expect(r.body.paymentStatus).toBe('SUCCESS'));
+      expect(await count(f)).toBe(2);
+      expect(
+        await prisma.payment.findUniqueOrThrow({ where: { id: prior.id } }),
+      ).toEqual(prior);
+    });
+  });
 
   it('persists SUCCESS, safe snapshot, PAID and points atomically using server amount; consumes coupon once', async () => {
     const f = await fixture({ coupon: true });
