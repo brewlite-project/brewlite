@@ -9,6 +9,17 @@ const unavailable = () =>
     code: 'COUPON_UNAVAILABLE',
     message: 'Coupon usage limit reached',
   });
+
+export function assertCouponQuotaAvailable(
+  coupon: Pick<Coupon, 'activeUsageCount' | 'usageLimit' | 'perUserLimit'>,
+  userUsageCount: number,
+): void {
+  if (
+    coupon.activeUsageCount >= coupon.usageLimit ||
+    userUsageCount >= coupon.perUserLimit
+  )
+    throw unavailable();
+}
 export function assertCouponValid(
   coupon: ValidityCoupon | null,
   subtotal: bigint,
@@ -66,24 +77,29 @@ export async function reserveCoupon(
   userId: string,
   couponId: string,
   subtotal: bigint,
+  expectedCode: string,
 ) {
   // Lock before re-reading BOTH global and per-user quota. Under READ COMMITTED,
   // a waiting request sees the preceding holder's committed redemption rows.
   await tx.$queryRaw`SELECT id FROM coupons WHERE id = ${couponId}::uuid FOR UPDATE`;
   const coupon = await tx.coupon.findUnique({ where: { id: couponId } });
-  assertCouponValid(coupon, subtotal, new Date());
-  if (coupon.activeUsageCount >= coupon.usageLimit) throw unavailable();
+  const [clock] = await tx.$queryRaw<{ now: Date }[]>`
+    SELECT clock_timestamp() AS now`;
+  if (!clock) throw new Error('Missing locked coupon validation clock');
+  if (!coupon || coupon.code !== expectedCode)
+    assertCouponValid(null, subtotal, clock.now);
+  assertCouponValid(coupon, subtotal, clock.now);
   const used = await tx.couponRedemption.count({
     where: { userId, couponId, status: { in: ['HELD', 'CONSUMED'] } },
   });
-  if (used >= coupon.perUserLimit) throw unavailable();
+  assertCouponQuotaAvailable(coupon, used);
   const discount = calculateDiscount(subtotal, coupon);
   const reserved = await tx.coupon.updateMany({
     where: { id: couponId, activeUsageCount: { lt: coupon.usageLimit } },
     data: { activeUsageCount: { increment: 1 } },
   });
   if (reserved.count !== 1) throw unavailable();
-  return { coupon, discount };
+  return { coupon, discount, now: clock.now };
 }
 /** Lifecycle/Scheduler calls AFTER setting CANCELLED, in the SAME transaction.
  * Does not commit cancellation, release inventory or change loyalty itself. */

@@ -12,7 +12,8 @@ size check to allow ONE_SIZE with a 100% multiplier.
    line. The service rejects duplicate/more than three toppings as INVALID_CART.
    Extra price/owner/status fields are stripped.
 3. OrdersService reads current database prices, calculates with BigInt, rounds
-   down (floor) for size pricing, and aggregates stock across sizes per product.
+   size prices half-up before adding toppings, and aggregates stock across sizes
+   per product.
    It verifies active category, the product's sizePolicy, and that every topping
    is available and linked to that product.
 4. In one Prisma transaction it conditionally decrements stock, reserves coupon
@@ -72,7 +73,7 @@ set ORDERS_TEST_DATABASE_URL, then run:
 npx vitest run --config vitest.config.integration.ts test/orders.integration-spec.ts
 ```
 
-These tests verify persisted snapshots, floor pricing, stock/quota rollback,
+These tests verify persisted snapshots, half-up size pricing, stock/quota rollback,
 active-order rejection, category/topping validation and ONE_SIZE database checks.
 A real test database is required; the HTTP test suite is no substitute.
 
