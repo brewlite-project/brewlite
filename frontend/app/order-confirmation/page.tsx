@@ -32,6 +32,7 @@ import { PaymentFailedRetryView } from "@/components/PaymentFailedRetryView";
 import { VnPayProcessingView } from "@/components/VnPayProcessingView";
 import { VnPaySuccessView } from "@/components/VnPaySuccessView";
 import { VnPayFailedRetryView } from "@/components/VnPayFailedRetryView";
+import { VnPayRedirectingView } from "@/components/VnPayRedirectingView";
 import { ZeroPaymentBypassView } from "@/components/ZeroPaymentBypassView";
 
 function OrderConfirmationContent() {

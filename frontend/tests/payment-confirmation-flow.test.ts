@@ -263,6 +263,8 @@ describe("SCRUM-69: End-to-End Payment & Confirmation Flow Integration Tests", (
       process.env.JWT_SECRET =
         process.env.JWT_SECRET || "brewlite-test-only-secret-at-least-32-bytes";
       process.env.ORDER_EXPIRATION_ENABLED = "false";
+      process.env.PAYMENT_RECONCILIATION_ENABLED = "false";
+      process.env.MOCK_PAYMENT_ENABLED = "true";
 
       const { NestFactory } = backendRequire("@nestjs/core") as {
         NestFactory: {
