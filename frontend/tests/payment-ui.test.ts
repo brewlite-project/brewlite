@@ -575,7 +575,7 @@ describe("SCRUM-67 Payment UI & Real API Integration (POST /payments & GET /orde
     assert.equal(cancelledHtml.includes('id="radioWallet"'), false);
     assert.equal(cancelledHtml.includes('id="cardInputNumber"'), false);
     assert.equal(cancelledHtml.includes('id="walletInputPhone"'), false);
-    assert.ok(cancelledHtml.includes("Không thể thanh toán (CANCELLED)"));
+    assert.ok(cancelledHtml.includes("Không thể thanh toán"));
 
     const paidOrder = createSampleOrderSnapshot("PAID");
     const paidHtml = renderPaymentMarkup({ initialOrder: paidOrder });
@@ -961,7 +961,7 @@ describe("SCRUM-67 Payment UI & Real API Integration (POST /payments & GET /orde
     assert.ok(defaultHtml.includes('id="btnSubmitPayment"'));
 
     const loadingHtml = renderPaymentMarkup({ initialIsSubmitting: true });
-    assert.ok(loadingHtml.includes("Đang xử lý POST /payments..."));
+    assert.ok(loadingHtml.includes("Đang xử lý thanh toán..."));
 
     const errorHtml = renderPaymentMarkup({
       initialPaymentError: {

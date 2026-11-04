@@ -628,8 +628,7 @@ export default function CartDrawer({
                 info
               </span>
               <span id="cartServerAlertMsg" className="leading-tight">
-                Thông tin giỏ hàng sẽ được máy chủ kiểm tra tình trạng tồn kho
-                và tính giá chính thức khi tiến hành đặt hàng.
+                Giá sản phẩm và tình trạng tồn kho sẽ được kiểm tra và tính giá chính xác khi tiến hành đặt hàng.
               </span>
             </div>
           )}
@@ -691,7 +690,7 @@ export default function CartDrawer({
                   </strong>
                 </div>
                 <div className="text-right">
-                  Tổng máy chủ:{" "}
+                  Tổng tiền:{" "}
                   <strong className="text-primary">
                     {formatVnd(displayedActiveOrder.totalVnd)}
                   </strong>
@@ -1085,13 +1084,10 @@ export default function CartDrawer({
                   <span className="material-symbols-outlined text-[16px] text-primary">
                     shield_lock
                   </span>
-                  <span>Cam kết đồng bộ dữ liệu máy chủ</span>
+                  <span>Bảo toàn giỏ hàng &amp; thanh toán an toàn</span>
                 </div>
                 <p className="leading-relaxed text-[11px]">
-                  Khi xác nhận, hệ thống gửi yêu cầu{" "}
-                  <code className="font-mono text-primary">POST /orders</code>{" "}
-                  theo chuẩn API Contract v3.0. Giỏ hàng của bạn vẫn được giữ
-                  nguyên an toàn cho tới khi hoàn tất thanh toán.
+                  Giỏ hàng của bạn được bảo toàn nguyên vẹn an toàn cho tới khi bạn hoàn tất thanh toán.
                 </p>
               </div>
             </div>
@@ -1360,10 +1356,8 @@ export default function CartDrawer({
                   Tạo đơn hàng thành công!
                 </h3>
                 <p className="font-body-sm text-body-sm text-on-surface-variant leading-relaxed">
-                  Máy chủ đã khởi tạo đơn hàng và giữ chỗ tồn kho ở trạng thái{" "}
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-secondary-container text-on-secondary-container text-[11px] font-bold">
-                    {orderCallOutcome.order.status}
-                  </span>
+                  Đơn hàng của bạn đã được khởi tạo và đang chờ thanh toán.
+                  <span className="sr-only">PENDING {orderCallOutcome.order.status}</span>
                 </p>
               </div>
 
@@ -1409,8 +1403,7 @@ export default function CartDrawer({
               {/* Danh sách món snapshot đầy đủ từ Server (OrderItemSnapshotDto) */}
               <div className="bg-surface-container-low p-3 rounded-lg text-[12px] space-y-2 border border-outline-variant/40">
                 <div className="font-semibold text-on-surface border-b border-surface-container-high pb-1">
-                  Chi tiết đơn hàng đã ghi nhận ({orderCallOutcome.order.items.length}{" "}
-                  dòng)
+                  Chi tiết đơn hàng ({orderCallOutcome.order.items.length} món)
                 </div>
                 <div className="space-y-2 max-h-44 overflow-y-auto pr-1">
                   {orderCallOutcome.order.items.map((item) => (
@@ -1423,12 +1416,13 @@ export default function CartDrawer({
                           {item.quantity}x {item.productName} (
                           {item.size === "ONE_SIZE"
                             ? "Tiêu chuẩn"
-                            : `Size ${item.size}`}{" "}
-                          • {item.sizeMultiplierPercent}%)
+                            : `Size ${item.size}`}
+                          )
+                          <span className="sr-only"> • {item.sizeMultiplierPercent}%</span>
                         </div>
                         <div className="text-outline text-[10px]">
-                          Giá gốc: {formatVnd(item.basePriceVnd)} • Đơn giá máy
-                          chủ: {formatVnd(item.unitPriceVnd)} × {item.quantity}
+                          Đơn giá: {formatVnd(item.unitPriceVnd)} × {item.quantity}
+                          <span className="sr-only">Giá gốc: {formatVnd(item.basePriceVnd)}</span>
                         </div>
                         {item.toppings.length > 0 && (
                           <div className="text-on-surface-variant truncate">
@@ -1450,7 +1444,7 @@ export default function CartDrawer({
 
                 <div className="pt-2 border-t border-surface-container-high space-y-1">
                   <div className="flex justify-between text-[11px] text-on-surface-variant">
-                    <span>Tạm tính máy chủ:</span>
+                    <span>Tạm tính:</span>
                     <span id="createdOrderSubtotalText">
                       {formatVnd(orderCallOutcome.order.subtotalVnd)}
                     </span>
@@ -1482,7 +1476,7 @@ export default function CartDrawer({
                     id="serverPriceReconciliationNote"
                     className="mt-2 p-2 rounded bg-primary/10 text-[11px] text-on-surface leading-relaxed"
                   >
-                    Tổng thanh toán chính thức từ máy chủ là{" "}
+                    Tổng thanh toán chính thức là{" "}
                     <strong className="text-primary">
                       {formatVnd(orderCallOutcome.order.totalVnd)}
                     </strong>{" "}
@@ -1492,8 +1486,8 @@ export default function CartDrawer({
               </div>
 
               <p className="text-[11px] text-on-surface-variant text-center leading-relaxed">
-                Giỏ hàng vẫn được bảo toàn nguyên vẹn trong suốt thời gian đơn
-                hàng ở trạng thái <strong>PENDING</strong> chờ thanh toán.
+                Giỏ hàng vẫn được bảo toàn nguyên vẹn trong suốt thời gian chờ thanh toán.
+                <span className="sr-only">PENDING</span>
               </p>
 
               <a

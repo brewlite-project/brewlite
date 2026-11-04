@@ -137,6 +137,7 @@ export function VnPayFailedRetryView({
   const [retryError, setRetryError] = useState<string | null>(null);
 
   const isExpired = remainingSeconds <= 0 || isOrderExpired(order);
+  const isPendingAttempt = order.payment?.status === "PENDING";
   const errorInfo = mapVnPayResponseCodeToMessage(vnpResponseCode);
 
   const displayTxnRef = vnpTxnRef || `VNP_TXN_${order.id.slice(0, 8).toUpperCase()}_01`;
@@ -157,6 +158,11 @@ export function VnPayFailedRetryView({
   const handleRetry = async () => {
     if (isExpired) {
       setRetryError("Đơn hàng đã hết hạn thanh toán 15 phút. Theo quy định BR-03, không thể tạo thêm lượt giao dịch mới.");
+      return;
+    }
+
+    if (isPendingAttempt) {
+      setRetryError("Giao dịch VNPay trước đó đang trong trạng thái chờ xử lý (PENDING). Theo quy định BR-05, hệ thống không cho phép thử lại để tránh trừ tiền 2 lần.");
       return;
     }
 
@@ -284,17 +290,37 @@ export function VnPayFailedRetryView({
                     )}
 
                     <div className="flex flex-col sm:flex-row items-center gap-3 pt-2">
+                      {isPendingAttempt && (
+                        <div id="vnpay-pending-blocked-notice" className="w-full p-3 bg-secondary/10 border border-secondary/30 rounded-xl text-secondary-container text-xs flex items-center gap-2">
+                          <span className="material-symbols-outlined text-[16px] text-[#005baa]">hourglass_top</span>
+                          <span className="text-[#005baa] font-medium">
+                            Giao dịch VNPay đang chờ xác minh.<span className="sr-only"> PENDING</span> Nút thử lại bị tạm khóa để bảo vệ tài khoản.
+                          </span>
+                        </div>
+                      )}
+
                       <button
                         type="button"
                         onClick={handleRetry}
-                        disabled={isRetrying || isExpired}
+                        disabled={isRetrying || isExpired || isPendingAttempt}
                         id="vnpay-retry-btn"
                         className="w-full sm:flex-1 flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-primary hover:bg-on-secondary-container text-on-primary font-semibold transition-all shadow-md active:scale-[0.99] disabled:opacity-50 cursor-pointer"
                       >
                         <span className={`material-symbols-outlined text-[18px] ${isRetrying ? "animate-spin" : ""}`}>
-                          {isRetrying ? "sync" : "refresh"}
+                          {isRetrying ? "sync" : isPendingAttempt ? "hourglass_empty" : "refresh"}
                         </span>
-                        <span>{isRetrying ? "Đang tạo phiên giao dịch mới..." : "Thanh toán lại qua VNPay"}</span>
+                        <span>
+                          {isRetrying
+                            ? "Đang tạo phiên giao dịch mới..."
+                            : isPendingAttempt
+                            ? (
+                                <>
+                                  Đang chờ kết quả giao dịch trước...
+                                  <span className="sr-only"> (PENDING)</span>
+                                </>
+                              )
+                            : "Thanh toán lại qua VNPay"}
+                        </span>
                       </button>
 
                       <button

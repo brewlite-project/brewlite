@@ -1,3 +1,19 @@
+
+function createTestJwt(
+  sub = "550e8400-e29b-41d4-a716-446655440000",
+  expiresInSeconds = 3600
+): string {
+  const header = Buffer.from(
+    JSON.stringify({ alg: "HS256", typ: "JWT" })
+  ).toString("base64url");
+  const payload = Buffer.from(
+    JSON.stringify({
+      sub,
+      exp: Math.floor(Date.now() / 1000) + expiresInSeconds,
+    })
+  ).toString("base64url");
+  return `${header}.${payload}.signature`;
+}
 import assert from "node:assert/strict";
 import React, { act } from "react";
 import { createRoot, Root } from "react-dom/client";
@@ -16,6 +32,7 @@ import PaymentPageView from "../components/PaymentPageView";
 import { AuthContext, type AuthContextType } from "../context/AuthContext";
 import { CartContext, type CartContextValue } from "../context/CartContext";
 import type { OrderConfirmationData } from "../services/order-confirmation.service";
+import type { CreateOrderRequestDto, CreateOrderResponseDto } from "../mock-data";
 
 function createSampleOrder(overrides: Partial<OrderConfirmationData> = {}): OrderConfirmationData {
   return {
@@ -451,87 +468,127 @@ describe("VNPay Phase 2 UI & Flow Deep Test Suite", () => {
       closeCart: () => {},
       toggleCart: () => {},
       dismissFeedback: () => {},
-      mapToCreateOrderPayload: () => ({} as any),
+      mapToCreateOrderPayload: () =>
+        ({ items: [] } as unknown as CreateOrderRequestDto),
       activeOrder: null,
       setActiveOrder: () => {},
     };
 
-    it("removes inline btnSubmitVnPay and verifies main btnSubmitPayment opens VNPay in new tab", async () => {
+    it("7.1 verifies main btnSubmitPayment initiates VNPay and redirects directly to backend paymentUrl on success", async () => {
       const order = createSampleOrder({ status: "PENDING" });
-      const openedUrls: Array<{ url: string; target: string }> = [];
+      const redirectedUrls: string[] = [];
 
-      // Mock window.open
-      const originalOpen = (globalThis as any).window.open;
-      (globalThis as any).window.open = (url: string, target: string) => {
-        openedUrls.push({ url, target });
-        return null;
+      const mockInitiate = async () => ({
+        response: {
+          paymentId: "pay-vnpay-live-01",
+          orderId: order.id,
+          provider: "VNPAY" as const,
+          paymentStatus: "PENDING" as const,
+          orderStatus: "PENDING" as const,
+          amountVnd: 98000,
+          paymentUrl:
+            "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html?vnp_Amount=9800000&vnp_TxnRef=live-01",
+          expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+        },
+        replayed: false,
+      });
+
+      await act(async () => {
+        root = createRoot(container);
+        root.render(
+          React.createElement(
+            AuthContext.Provider,
+            { value: mockAuthContext },
+            React.createElement(
+              CartContext.Provider,
+              { value: mockCartContext },
+              React.createElement(PaymentPageView, {
+                initialOrder: order as unknown as CreateOrderResponseDto,
+                initialMethod: "VNPAY",
+                initiateVnPayFn: mockInitiate,
+                onRedirectToVnPay: (url: string) => {
+                  redirectedUrls.push(url);
+                },
+              })
+            )
+          )
+        );
+      });
+
+      // 1. btnSubmitVnPay is removed
+      const inlineVnPayBtn = container.querySelector("#btnSubmitVnPay");
+      assert.strictEqual(inlineVnPayBtn, null, "Inline btnSubmitVnPay must NOT exist in the DOM");
+
+      // 2. Main submit button is adapted for VNPay
+      const submitBtn = container.querySelector("#btnSubmitPayment") as HTMLButtonElement;
+      assert.ok(submitBtn, "Main submit button #btnSubmitPayment must exist");
+      assert.ok(
+        submitBtn.textContent?.includes("Xác nhận thanh toán qua VNPay"),
+        "Submit button label should reflect VNPay payment confirmation"
+      );
+      assert.ok(
+        submitBtn.textContent?.includes("98.000"),
+        "Submit button label should display order total"
+      );
+
+      // 3. User clicks main submit button
+      await act(async () => {
+        submitBtn.click();
+      });
+
+      // 4. Verify redirected directly to backend paymentUrl (NOT fake local url)
+      assert.strictEqual(redirectedUrls.length, 1, "Must redirect exactly once");
+      assert.ok(
+        redirectedUrls[0].startsWith("https://sandbox.vnpayment.vn/paymentv2/vpcpay.html"),
+        "Must redirect directly to backend paymentUrl"
+      );
+    });
+
+    it("7.2 blocks redirect when VNPay initiation fails (e.g. 409 ORDER_EXPIRED)", async () => {
+      const order = createSampleOrder({ status: "PENDING" });
+      const redirectedUrls: string[] = [];
+
+      const mockFailingInitiate = async () => {
+        const err = new Error("Đơn hàng đã hết hạn thanh toán.") as Error & {
+          statusCode: number;
+          code: string;
+        };
+        err.statusCode = 409;
+        err.code = "ORDER_EXPIRED";
+        throw err;
       };
 
-      try {
-        await act(async () => {
-          root = createRoot(container);
-          root.render(
+      await act(async () => {
+        root = createRoot(container);
+        root.render(
+          React.createElement(
+            AuthContext.Provider,
+            { value: mockAuthContext },
             React.createElement(
-              AuthContext.Provider,
-              { value: mockAuthContext },
-              React.createElement(
-                CartContext.Provider,
-                { value: mockCartContext },
-                React.createElement(PaymentPageView, {
-                  initialOrder: order as any,
-                  initialMethod: "VNPAY",
-                })
-              )
+              CartContext.Provider,
+              { value: mockCartContext },
+              React.createElement(PaymentPageView, {
+                initialOrder: order as unknown as CreateOrderResponseDto,
+                initialMethod: "VNPAY",
+                initiateVnPayFn: mockFailingInitiate,
+                onRedirectToVnPay: (url: string) => {
+                  redirectedUrls.push(url);
+                },
+              })
             )
-          );
-        });
-
-        // 1. btnSubmitVnPay is removed
-        const inlineVnPayBtn = container.querySelector("#btnSubmitVnPay");
-        assert.strictEqual(inlineVnPayBtn, null, "Inline btnSubmitVnPay must NOT exist in the DOM");
-
-        // 2. Main submit button is adapted for VNPay
-        const submitBtn = container.querySelector("#btnSubmitPayment") as HTMLButtonElement;
-        assert.ok(submitBtn, "Main submit button #btnSubmitPayment must exist");
-        assert.ok(
-          submitBtn.textContent?.includes("Xác nhận thanh toán qua VNPay"),
-          "Submit button label should reflect VNPay payment confirmation"
+          )
         );
-        assert.ok(
-          submitBtn.textContent?.includes("98.000"),
-          "Submit button label should display order total"
-        );
+      });
 
-        // Notice not displayed before clicking
-        assert.strictEqual(container.querySelector("#vnpayTabNotice"), null);
+      const submitBtn = container.querySelector("#btnSubmitPayment") as HTMLButtonElement;
+      assert.ok(submitBtn);
 
-        // 3. User clicks main submit button
-        await act(async () => {
-          submitBtn.click();
-        });
+      await act(async () => {
+        submitBtn.click();
+      });
 
-        // 4. Verify window.open called with new tab
-        assert.strictEqual(openedUrls.length, 1, "window.open must be called exactly once");
-        assert.strictEqual(openedUrls[0].target, "_blank", "Must open in a new tab (_blank)");
-        assert.ok(
-          openedUrls[0].url.includes(`/order-confirmation?orderId=${order.id}&view=redirecting`),
-          "Must redirect to VNPay redirecting view for the specific order"
-        );
-
-        // 5. Verify current tab remains intact and displays notification banner
-        const tabNotice = container.querySelector("#vnpayTabNotice");
-        assert.ok(tabNotice, "Tab notice banner #vnpayTabNotice must appear on current tab");
-        assert.ok(
-          tabNotice.textContent?.includes("Cổng thanh toán VNPay đã được mở trong tab mới!"),
-          "Notice must inform user that VNPay was opened in a new tab"
-        );
-        assert.ok(
-          tabNotice.textContent?.includes("Tab thanh toán hiện tại vẫn được giữ nguyên"),
-          "Notice must clarify current tab is retained"
-        );
-      } finally {
-        (globalThis as any).window.open = originalOpen;
-      }
+      // Redirect MUST NOT be triggered on failure
+      assert.strictEqual(redirectedUrls.length, 0, "Must NOT redirect when initiation fails");
     });
   });
 
@@ -825,7 +882,8 @@ describe("VNPay Phase 2 UI & Flow Deep Test Suite", () => {
       closeCart: () => {},
       toggleCart: () => {},
       dismissFeedback: () => {},
-      mapToCreateOrderPayload: () => ({} as any),
+      mapToCreateOrderPayload: () =>
+        ({ items: [] } as unknown as CreateOrderRequestDto),
       activeOrder: null,
       setActiveOrder: () => {},
     };
@@ -843,7 +901,7 @@ describe("VNPay Phase 2 UI & Flow Deep Test Suite", () => {
               CartContext.Provider,
               { value: mockCartContext },
               React.createElement(PaymentPageView, {
-                initialOrder: order as any,
+                initialOrder: order as unknown as CreateOrderResponseDto,
               })
             )
           )
@@ -885,7 +943,7 @@ describe("VNPay Phase 2 UI & Flow Deep Test Suite", () => {
               CartContext.Provider,
               { value: mockCartContext },
               React.createElement(PaymentPageView, {
-                initialOrder: order as any,
+                initialOrder: order as unknown as CreateOrderResponseDto,
               })
             )
           )
@@ -927,6 +985,948 @@ describe("VNPay Phase 2 UI & Flow Deep Test Suite", () => {
         "Notice must state that WALLET is under development"
       );
       assert.strictEqual(radioVnpay.checked, true, "VNPAY must still be checked");
+    });
+  });
+  // =========================================================================
+  // SUITE 10: VNPay Initiation, Zero-Amount & Status APIs (API Contract v4.0)
+  // =========================================================================
+  describe("10. VNPay Initiation, Zero-Amount & Status APIs (API Contract v4.0)", () => {
+    const originalFetch = globalThis.fetch;
+
+    afterEach(() => {
+      globalThis.fetch = originalFetch;
+    });
+
+    it("10.1 initiateVnPayPaymentApi sends POST /payments/vnpay/initiate with JWT and Idempotency-Key", async () => {
+      const { initiateVnPayPaymentApi } = await import("../services/payment.service");
+
+      let capturedUrl = "";
+      let capturedMethod = "";
+      let capturedHeaders: Record<string, string> = {};
+      let capturedBody = "";
+
+      globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        capturedUrl = String(input);
+        capturedMethod = init?.method || "";
+        capturedHeaders = (init?.headers as Record<string, string>) || {};
+        capturedBody = String(init?.body || "");
+
+        return new Response(
+          JSON.stringify({
+            paymentId: "pay-vnpay-test-01",
+            orderId: "550e8400-e29b-41d4-a716-446655440000",
+            provider: "VNPAY",
+            paymentStatus: "PENDING",
+            orderStatus: "PENDING",
+            amountVnd: 85000,
+            paymentUrl: "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html?test=1",
+            expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+          }),
+          {
+            status: 201,
+            headers: {
+              "Content-Type": "application/json",
+              "Idempotency-Replayed": "false",
+            },
+          }
+        );
+      };
+
+      const result = await initiateVnPayPaymentApi(
+        { orderId: "550e8400-e29b-41d4-a716-446655440000" },
+        "idem-vnpay-initiate-key-01",
+        { accessToken: createTestJwt() }
+      );
+
+      assert.ok(capturedUrl.includes("/payments/vnpay/initiate"));
+      assert.strictEqual(capturedMethod, "POST");
+      assert.ok(capturedHeaders["Authorization"]?.startsWith("Bearer eyJ"));
+      assert.strictEqual(capturedHeaders["Idempotency-Key"], "idem-vnpay-initiate-key-01");
+      assert.strictEqual(JSON.parse(capturedBody).orderId, "550e8400-e29b-41d4-a716-446655440000");
+
+      assert.strictEqual(result.response.paymentId, "pay-vnpay-test-01");
+      assert.strictEqual(result.response.provider, "VNPAY");
+      assert.strictEqual(result.response.paymentStatus, "PENDING");
+      assert.strictEqual(result.replayed, false);
+      assert.ok(result.response.paymentUrl.includes("sandbox.vnpayment.vn"));
+    });
+
+    it("10.2 initiateVnPayPaymentApi maps error codes (ORDER_EXPIRED, PAYMENT_IN_PROGRESS, ZERO_AMOUNT_REQUIRED) per Contract v4.0", async () => {
+      const { initiateVnPayPaymentApi } = await import("../services/payment.service");
+
+      // 409 ORDER_EXPIRED
+      globalThis.fetch = async () =>
+        new Response(
+          JSON.stringify({
+            statusCode: 409,
+            code: "ORDER_EXPIRED",
+            message: "Đơn hàng đã hết hạn thanh toán.",
+          }),
+          { status: 409, headers: { "Content-Type": "application/json" } }
+        );
+
+      await assert.rejects(
+        async () => {
+          await initiateVnPayPaymentApi(
+            { orderId: "550e8400-e29b-41d4-a716-446655440000" },
+            "idem-key-expired",
+            { accessToken: createTestJwt() }
+          );
+        },
+        (err: unknown) => {
+          const e = err as { statusCode?: number; code?: string };
+          assert.strictEqual(e.statusCode, 409);
+          assert.strictEqual(e.code, "ORDER_EXPIRED");
+          return true;
+        }
+      );
+
+      // 409 PAYMENT_IN_PROGRESS
+      globalThis.fetch = async () =>
+        new Response(
+          JSON.stringify({
+            statusCode: 409,
+            code: "PAYMENT_IN_PROGRESS",
+            message: "Giao dịch trước đó đang được xử lý.",
+          }),
+          { status: 409, headers: { "Content-Type": "application/json" } }
+        );
+
+      await assert.rejects(
+        async () => {
+          await initiateVnPayPaymentApi(
+            { orderId: "550e8400-e29b-41d4-a716-446655440000" },
+            "idem-key-in-prog",
+            { accessToken: createTestJwt() }
+          );
+        },
+        (err: unknown) => {
+          const e = err as {
+            statusCode?: number;
+            code?: string;
+            canRetrySameKey?: boolean;
+          };
+          assert.strictEqual(e.statusCode, 409);
+          assert.strictEqual(e.code, "PAYMENT_IN_PROGRESS");
+          assert.strictEqual(e.canRetrySameKey, true);
+          return true;
+        }
+      );
+    });
+
+    it("10.3 submitZeroAmountPaymentApi completes 0 VND order via POST /payments/zero-amount (BR-06)", async () => {
+      const { submitZeroAmountPaymentApi } = await import("../services/payment.service");
+
+      let capturedUrl = "";
+      globalThis.fetch = async (input: RequestInfo | URL) => {
+        capturedUrl = String(input);
+        return new Response(
+          JSON.stringify({
+            paymentId: "550e8400-e29b-41d4-a716-446655440020",
+            orderId: "550e8400-e29b-41d4-a716-446655440000",
+            provider: "ZERO_AMOUNT",
+            paymentStatus: "SUCCESS",
+            orderStatus: "PAID",
+            amountVnd: 0,
+            pointsEarned: 0,
+            createdAt: new Date().toISOString(),
+          }),
+          {
+            status: 201,
+            headers: {
+              "Content-Type": "application/json",
+              "Idempotency-Replayed": "false",
+            },
+          }
+        );
+      };
+
+      const result = await submitZeroAmountPaymentApi(
+        { orderId: "550e8400-e29b-41d4-a716-446655440000" },
+        "idem-zero-key-01",
+        { accessToken: createTestJwt() }
+      );
+
+      assert.ok(capturedUrl.includes("/payments/zero-amount"));
+      assert.strictEqual(result.response.provider, "ZERO_AMOUNT");
+      assert.strictEqual(result.response.paymentStatus, "SUCCESS");
+      assert.strictEqual(result.response.orderStatus, "PAID");
+      assert.strictEqual(result.response.amountVnd, 0);
+      assert.strictEqual(result.response.pointsEarned, 0);
+    });
+
+    it("10.4 fetchPaymentStatusApi returns status, resolution and canRetry per Contract v4.0 §5", async () => {
+      const { fetchPaymentStatusApi } = await import("../services/payment.service");
+
+      let capturedUrl = "";
+      globalThis.fetch = async (input: RequestInfo | URL) => {
+        capturedUrl = String(input);
+        return new Response(
+          JSON.stringify({
+            paymentId: "pay-vnpay-test-01",
+            orderId: "550e8400-e29b-41d4-a716-446655440000",
+            provider: "VNPAY",
+            paymentStatus: "PENDING",
+            orderStatus: "PENDING",
+            amountVnd: 85000,
+            resolution: "RECONCILING",
+            requiresReview: false,
+            canRetry: false,
+            createdAt: new Date().toISOString(),
+            orderExpiresAt: new Date().toISOString(),
+            lastUpdatedAt: new Date().toISOString(),
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      };
+
+      const result = await fetchPaymentStatusApi("pay-vnpay-test-01", {
+        accessToken: createTestJwt(),
+      });
+
+      assert.ok(capturedUrl.includes("/payments/pay-vnpay-test-01/status"));
+      assert.strictEqual(result.paymentId, "pay-vnpay-test-01");
+      assert.strictEqual(result.resolution, "RECONCILING");
+      assert.strictEqual(result.canRetry, false);
+      assert.strictEqual(result.requiresReview, false);
+    });
+
+    it("10.5 submitZeroAmountPaymentApi throws real 404 without faking SUCCESS/PAID when backend returns 404", async () => {
+      const { submitZeroAmountPaymentApi } = await import("../services/payment.service");
+
+      globalThis.fetch = async () =>
+        new Response(
+          JSON.stringify({
+            statusCode: 404,
+            error: "Not Found",
+            message: "Cannot POST /payments/zero-amount",
+          }),
+          { status: 404, headers: { "Content-Type": "application/json" } }
+        );
+
+      await assert.rejects(
+        async () => {
+          await submitZeroAmountPaymentApi(
+            { orderId: "550e8400-e29b-41d4-a716-446655440000" },
+            "idem-key-zero-404",
+            { accessToken: createTestJwt() }
+          );
+        },
+        (err: unknown) => {
+          const e = err as { statusCode?: number };
+          assert.strictEqual(e.statusCode, 404, "Must throw real 404 without faking SUCCESS/PAID");
+          return true;
+        }
+      );
+    });
+
+    it("10.6 initiateVnPayPaymentApi throws real 404 without faking sandboxUrl/mockhash when backend returns 404", async () => {
+      const { initiateVnPayPaymentApi } = await import("../services/payment.service");
+
+      globalThis.fetch = async () =>
+        new Response(
+          JSON.stringify({
+            statusCode: 404,
+            error: "Not Found",
+            message: "Cannot POST /payments/vnpay/initiate",
+          }),
+          { status: 404, headers: { "Content-Type": "application/json" } }
+        );
+
+      await assert.rejects(
+        async () => {
+          await initiateVnPayPaymentApi(
+            { orderId: "550e8400-e29b-41d4-a716-446655440000" },
+            "idem-key-vnpay-404",
+            { accessToken: createTestJwt() }
+          );
+        },
+        (err: unknown) => {
+          const e = err as { statusCode?: number };
+          assert.strictEqual(e.statusCode, 404, "Must throw real 404 without faking sandboxUrl/mockhash");
+          return true;
+        }
+      );
+    });
+
+    it("10.7 fetchPaymentStatusApi throws real 404 without faking PENDING when backend returns 404", async () => {
+      const { fetchPaymentStatusApi } = await import("../services/payment.service");
+
+      globalThis.fetch = async () =>
+        new Response(
+          JSON.stringify({
+            statusCode: 404,
+            error: "Not Found",
+            message: "Cannot GET /payments/pay-123/status",
+          }),
+          { status: 404, headers: { "Content-Type": "application/json" } }
+        );
+
+      await assert.rejects(
+        async () => {
+          await fetchPaymentStatusApi("pay-123", {
+            accessToken: createTestJwt(),
+          });
+        },
+        (err: unknown) => {
+          const e = err as { statusCode?: number };
+          assert.strictEqual(e.statusCode, 404, "Must throw real 404 without faking PENDING");
+          return true;
+        }
+      );
+    });
+
+    it("10.8 submitZeroAmountPaymentApi test matrix: strictly rejects malformed ZERO_AMOUNT DTOs", async () => {
+      const { submitZeroAmountPaymentApi, isValidIsoUtcString } = await import("../services/payment.service");
+
+      assert.strictEqual(isValidIsoUtcString("2026-02-30T10:00:00.000Z"), false, "2026-02-30 must be rejected as non-existent calendar date");
+      assert.strictEqual(isValidIsoUtcString("2025-02-29T10:00:00.000Z"), false, "2025-02-29 (non-leap year) must be rejected");
+      assert.strictEqual(isValidIsoUtcString("2024-02-29T10:00:00.000Z"), true, "2024-02-29 (leap year) must be accepted");
+
+      const validOrderId = "550e8400-e29b-41d4-a716-446655440000";
+      const validPayload = {
+        paymentId: "550e8400-e29b-41d4-a716-446655440020",
+        orderId: validOrderId,
+        provider: "ZERO_AMOUNT",
+        paymentStatus: "SUCCESS",
+        orderStatus: "PAID",
+        amountVnd: 0,
+        pointsEarned: 0,
+        createdAt: "2026-11-04T00:00:00.000Z",
+      };
+
+      const testCases: Array<{ name: string; malformed: Record<string, unknown> }> = [
+        // 1. invalid paymentId
+        {
+          name: "invalid paymentId (non-UUID string)",
+          malformed: { ...validPayload, paymentId: "not-a-valid-uuid" },
+        },
+        {
+          name: "invalid paymentId (empty string)",
+          malformed: { ...validPayload, paymentId: "" },
+        },
+        {
+          name: "invalid paymentId (missing/null)",
+          malformed: { ...validPayload, paymentId: null },
+        },
+        // 2. orderId mismatch
+        {
+          name: "orderId mismatch (different UUID)",
+          malformed: { ...validPayload, orderId: "660e8400-e29b-41d4-a716-446655440099" },
+        },
+        {
+          name: "orderId invalid (non-UUID)",
+          malformed: { ...validPayload, orderId: "order-12345" },
+        },
+        // 3. provider mismatch
+        {
+          name: "provider mismatch (VNPAY instead of ZERO_AMOUNT)",
+          malformed: { ...validPayload, provider: "VNPAY" },
+        },
+        // 4. paymentStatus mismatch
+        {
+          name: "paymentStatus mismatch (PENDING instead of SUCCESS)",
+          malformed: { ...validPayload, paymentStatus: "PENDING" },
+        },
+        {
+          name: "paymentStatus mismatch (FAILED instead of SUCCESS)",
+          malformed: { ...validPayload, paymentStatus: "FAILED" },
+        },
+        // 5. orderStatus mismatch
+        {
+          name: "orderStatus mismatch (PENDING instead of PAID)",
+          malformed: { ...validPayload, orderStatus: "PENDING" },
+        },
+        {
+          name: "orderStatus mismatch (CANCELLED instead of PAID)",
+          malformed: { ...validPayload, orderStatus: "CANCELLED" },
+        },
+        // 6. amount != 0
+        {
+          name: "amount != 0 (positive amount)",
+          malformed: { ...validPayload, amountVnd: 50000 },
+        },
+        {
+          name: "amount != 0 (negative amount)",
+          malformed: { ...validPayload, amountVnd: -1000 },
+        },
+        // 7. pointsEarned !== 0
+        {
+          name: "pointsEarned !== 0 (positive pointsEarned = 10)",
+          malformed: { ...validPayload, pointsEarned: 10 },
+        },
+        {
+          name: "pointsEarned !== 0 (negative pointsEarned = -1)",
+          malformed: { ...validPayload, pointsEarned: -1 },
+        },
+        {
+          name: "pointsEarned !== 0 (string '0' instead of number 0)",
+          malformed: { ...validPayload, pointsEarned: "0" },
+        },
+        // 8. invalid/non-ISO createdAt & impossible calendar dates normalized by JS Date
+        {
+          name: "invalid createdAt (impossible calendar date 2026-02-30T10:00:00.000Z normalized by JS Date)",
+          malformed: { ...validPayload, createdAt: "2026-02-30T10:00:00.000Z" },
+        },
+        {
+          name: "invalid createdAt (non-leap year 2025-02-29T10:00:00.000Z normalized by JS Date)",
+          malformed: { ...validPayload, createdAt: "2025-02-29T10:00:00.000Z" },
+        },
+        {
+          name: "invalid createdAt (impossible 30-day month date 2026-04-31T10:00:00.000Z)",
+          malformed: { ...validPayload, createdAt: "2026-04-31T10:00:00.000Z" },
+        },
+        {
+          name: "invalid createdAt (non-ISO format with spaces)",
+          malformed: { ...validPayload, createdAt: "2026-11-04 10:00:00" },
+        },
+        {
+          name: "invalid createdAt (non-UTC offset +07:00)",
+          malformed: { ...validPayload, createdAt: "2026-11-04T10:00:00+07:00" },
+        },
+        {
+          name: "invalid createdAt (unparseable string)",
+          malformed: { ...validPayload, createdAt: "invalid-date-string" },
+        },
+        {
+          name: "invalid createdAt (epoch number instead of string)",
+          malformed: { ...validPayload, createdAt: Date.now() },
+        },
+        // 9. missing each required field individually
+        {
+          name: "missing required field: paymentId",
+          malformed: (() => { const { paymentId: _p, ...rest } = validPayload; return rest; })(),
+        },
+        {
+          name: "missing required field: orderId",
+          malformed: (() => { const { orderId: _o, ...rest } = validPayload; return rest; })(),
+        },
+        {
+          name: "missing required field: provider",
+          malformed: (() => { const { provider: _pr, ...rest } = validPayload; return rest; })(),
+        },
+        {
+          name: "missing required field: paymentStatus",
+          malformed: (() => { const { paymentStatus: _ps, ...rest } = validPayload; return rest; })(),
+        },
+        {
+          name: "missing required field: orderStatus",
+          malformed: (() => { const { orderStatus: _os, ...rest } = validPayload; return rest; })(),
+        },
+        {
+          name: "missing required field: amountVnd",
+          malformed: (() => { const { amountVnd: _a, ...rest } = validPayload; return rest; })(),
+        },
+        {
+          name: "missing required field: pointsEarned",
+          malformed: (() => { const { pointsEarned: _pe, ...rest } = validPayload; return rest; })(),
+        },
+        {
+          name: "missing required field: createdAt",
+          malformed: (() => { const { createdAt: _c, ...rest } = validPayload; return rest; })(),
+        },
+      ];
+
+      for (const tc of testCases) {
+        globalThis.fetch = async () =>
+          new Response(JSON.stringify(tc.malformed), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+
+        await assert.rejects(
+          async () => {
+            await submitZeroAmountPaymentApi(
+              { orderId: validOrderId },
+              `idem-matrix-${tc.name.replace(/[^a-zA-Z0-9]/g, "-")}`.slice(0, 60),
+              { accessToken: createTestJwt() }
+            );
+          },
+          (err: unknown) => {
+            const e = err as { code?: string; message?: string };
+            assert.strictEqual(
+              e.code,
+              "SERVER_ERROR",
+              `Test case [${tc.name}] must throw SERVER_ERROR`
+            );
+            assert.ok(
+              e.message?.includes("không hợp lệ hoặc thiếu trường bắt buộc"),
+              `Test case [${tc.name}] error message should explain invalid response: ${e.message}`
+            );
+            return true;
+          }
+        );
+      }
+    });
+  });
+
+  // =========================================================================
+  // SUITE 11: VNPay PENDING Retry Blocking Invariant (BR-05)
+  // =========================================================================
+  describe("11. VNPay PENDING Retry Blocking Invariant (BR-05)", () => {
+    it("disables retry action and displays PENDING notice when order payment is still PENDING", async () => {
+      const pendingOrder = createSampleOrder({
+        status: "PENDING",
+        payment: {
+          id: "pay-vnpay-pending",
+          status: "PENDING",
+          method: "VNPAY",
+          methodLast4: null,
+          amountVnd: 98000,
+          mockReference: null,
+          failureReason: null,
+          createdAt: new Date().toISOString(),
+        },
+      });
+
+      await act(async () => {
+        root = createRoot(container);
+        root.render(
+          React.createElement(VnPayFailedRetryView, {
+            order: pendingOrder,
+            vnpResponseCode: "11",
+          })
+        );
+      });
+
+      // 1. Notice about PENDING is rendered
+      const pendingNotice = container.querySelector("#vnpay-pending-blocked-notice");
+      assert.ok(pendingNotice, "Must render #vnpay-pending-blocked-notice when payment is PENDING");
+      assert.ok(
+        pendingNotice.textContent?.includes("PENDING"),
+        "Notice must state that payment is PENDING"
+      );
+
+      // 2. Retry button is disabled
+      const retryBtn = container.querySelector("#vnpay-retry-btn") as HTMLButtonElement;
+      assert.ok(retryBtn, "Retry button must exist");
+      assert.strictEqual(retryBtn.disabled, true, "Retry button must be disabled when payment is PENDING");
+      assert.ok(
+        retryBtn.textContent?.includes("PENDING"),
+        "Button text must indicate waiting for PENDING transaction"
+      );
+    });
+
+    it("enforces VNPay initiate 409 PAYMENT_IN_PROGRESS -> user retry -> NEVER calls POST /payments and NEVER renders MOCK_PAYMENT_DISABLED", async () => {
+      const suite11AuthContext: AuthContextType = {
+        user: {
+          id: "user-vnpay-retry-test",
+          email: "vnpay-retry@brewlite.vn",
+          fullName: "VNPay Retry Tester",
+        },
+        accessToken: "mock-vnpay-jwt",
+        isAuthenticated: true,
+        isLoading: false,
+        isAuthModalOpen: false,
+        authModalMode: "login",
+        authModalMessage: null,
+        openAuthModal: () => {},
+        closeAuthModal: () => {},
+        login: async () => {},
+        register: async () => ({ id: "user-vnpay-retry-test", email: "vnpay-retry@brewlite.vn", fullName: "VNPay Retry Tester" }),
+        logout: () => {},
+        verifySession: () => true,
+        handleUnauthorizedCheckout: () => {},
+        pendingCheckout: false,
+        setPendingCheckout: () => {},
+      };
+
+      const suite11CartContext: CartContextValue = {
+        items: [],
+        totalQuantity: 0,
+        totalLines: 0,
+        subtotalVnd: 0,
+        formattedSubtotal: "0 ₫",
+        isCartOpen: false,
+        couponCode: "",
+        setCouponCode: () => {},
+        feedbackMessage: null,
+        feedbackType: null,
+        addToCart: () => ({ success: true, message: "OK" }),
+        updateQuantity: () => {},
+        incrementQuantity: () => {},
+        decrementQuantity: () => {},
+        removeFromCart: () => {},
+        clearCart: () => {},
+        openCart: () => {},
+        closeCart: () => {},
+        toggleCart: () => {},
+        dismissFeedback: () => {},
+        mapToCreateOrderPayload: () =>
+          ({ items: [] } as unknown as CreateOrderRequestDto),
+        activeOrder: null,
+        setActiveOrder: () => {},
+      };
+
+      const order = createSampleOrder({ status: "PENDING", totalVnd: 98000 });
+      let mockPaymentCalled = false;
+      let vnpayInitiateCallCount = 0;
+
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes("/payments") && !url.includes("/payments/vnpay") && !url.includes("/payments/zero-amount")) {
+          mockPaymentCalled = true;
+          return new Response(JSON.stringify({
+            statusCode: 403,
+            message: "Mock payment is disabled in this environment",
+            error: "Forbidden",
+            code: "MOCK_PAYMENT_DISABLED",
+          }), { status: 403, headers: { "Content-Type": "application/json" } });
+        }
+        return originalFetch(input, init);
+      };
+
+      const failingInitiateVnPay = async () => {
+        vnpayInitiateCallCount++;
+        const err = new Error("Giao dịch trước đó đang được xử lý.") as Error & {
+          statusCode: number;
+          code: string;
+        };
+        err.statusCode = 409;
+        err.code = "PAYMENT_IN_PROGRESS";
+        throw err;
+      };
+
+      const spySubmitPaymentFn = async () => {
+        mockPaymentCalled = true;
+        throw new Error("MOCK_PAYMENT_DISABLED: Mock payment is disabled in this environment");
+      };
+
+      try {
+        await act(async () => {
+          root = createRoot(container);
+          root.render(
+            React.createElement(
+              AuthContext.Provider,
+              { value: suite11AuthContext },
+              React.createElement(
+                CartContext.Provider,
+                { value: suite11CartContext },
+                React.createElement(PaymentPageView, {
+                  initialOrder: order as unknown as CreateOrderResponseDto,
+                  initialMethod: "VNPAY",
+                  initiateVnPayFn: failingInitiateVnPay,
+                  submitPaymentFn: spySubmitPaymentFn,
+                })
+              )
+            )
+          );
+        });
+
+      // 1. Click Xác nhận thanh toán qua VNPay lần đầu
+      const submitBtn = container.querySelector("#btnSubmitPayment") as HTMLButtonElement;
+      assert.ok(submitBtn, "Must render #btnSubmitPayment");
+
+      await act(async () => {
+        submitBtn.click();
+        await new Promise((r) => setTimeout(r, 50));
+      });
+
+      // Verify VNPay initiate được gọi 1 lần và trả về 409 PAYMENT_IN_PROGRESS
+      assert.strictEqual(vnpayInitiateCallCount, 1, "VNPay initiate must be called once");
+      assert.strictEqual(mockPaymentCalled, false, "Must NEVER call POST /payments on initial submission");
+
+      // Verify error banner hiển thị PAYMENT_IN_PROGRESS
+      const errorBanner = container.querySelector("#paymentErrorBanner");
+      assert.ok(errorBanner, "Must render paymentErrorBanner on 409");
+      const bannerText = errorBanner.textContent || "";
+      assert.ok(
+        bannerText.includes("PAYMENT_IN_PROGRESS") || bannerText.includes("đang được xử lý"),
+        "Banner must mention PAYMENT_IN_PROGRESS"
+      );
+
+      // Verify UI block retry hoặc nút retry bị disabled
+      const retryBtn = container.querySelector("#btnRetrySameIdempotencyKey") as HTMLButtonElement | null;
+      if (retryBtn) {
+        assert.strictEqual(
+          retryBtn.disabled,
+          true,
+          "btnRetrySameIdempotencyKey must be disabled when VNPay is PAYMENT_IN_PROGRESS"
+        );
+        // User clicks retry button anyway (simulated event)
+        await act(async () => {
+          retryBtn.click();
+          await new Promise((r) => setTimeout(r, 50));
+        });
+      }
+
+      // User clicks main submit button again
+      await act(async () => {
+        submitBtn.click();
+        await new Promise((r) => setTimeout(r, 50));
+      });
+
+      // Verification: Tuyệt đối KHÔNG BAO GIỜ gọi POST /payments (Mock)
+      assert.strictEqual(
+        mockPaymentCalled,
+        false,
+        "CRITICAL INVARIANT: Flow VNPay must NEVER fallback to POST /payments (Mock)"
+      );
+
+      // Verification: Tuyệt đối không hiển thị lỗi MOCK_PAYMENT_DISABLED
+      const fullPageText = container.textContent || "";
+      assert.strictEqual(
+        fullPageText.includes("MOCK_PAYMENT_DISABLED"),
+        false,
+        "Must NEVER display MOCK_PAYMENT_DISABLED error to user"
+      );
+
+      // Verification: Giữ trạng thái processing / verifying
+      assert.ok(
+        fullPageText.includes("PAYMENT_IN_PROGRESS") ||
+        fullPageText.includes("đang được xử lý") ||
+        container.querySelector("#btnCheckVnPayProcessingStatus"),
+        "Must preserve processing/verifying state"
+      );
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+  });
+
+  // =========================================================================
+  // SUITE 12: Zero-Amount Payment Flow in PaymentPageView (BR-06)
+  // =========================================================================
+  describe("12. Zero-Amount Payment Flow in PaymentPageView (BR-06)", () => {
+    const mockAuthContext: AuthContextType = {
+      user: {
+        id: "user-zero-test",
+        email: "zero@brewlite.vn",
+        fullName: "Tran Van Zero",
+      },
+      accessToken: "mock-jwt-zero",
+      isAuthenticated: true,
+      isLoading: false,
+      isAuthModalOpen: false,
+      authModalMode: "login",
+      authModalMessage: null,
+      openAuthModal: () => {},
+      closeAuthModal: () => {},
+      login: async () => {},
+      register: async () => ({ id: "user-zero-test", email: "zero@brewlite.vn", fullName: "Tran Van Zero" }),
+      logout: () => {},
+      verifySession: () => true,
+      handleUnauthorizedCheckout: () => {},
+      pendingCheckout: false,
+      setPendingCheckout: () => {},
+    };
+
+    const mockCartContext: CartContextValue = {
+      items: [],
+      totalQuantity: 0,
+      totalLines: 0,
+      subtotalVnd: 0,
+      formattedSubtotal: "0 ₫",
+      isCartOpen: false,
+      couponCode: "FREE100",
+      setCouponCode: () => {},
+      feedbackMessage: null,
+      feedbackType: null,
+      addToCart: () => ({ success: true, message: "OK" }),
+      updateQuantity: () => {},
+      incrementQuantity: () => {},
+      decrementQuantity: () => {},
+      removeFromCart: () => {},
+      clearCart: () => {},
+      openCart: () => {},
+      closeCart: () => {},
+      toggleCart: () => {},
+      dismissFeedback: () => {},
+      mapToCreateOrderPayload: () =>
+        ({ items: [] } as unknown as CreateOrderRequestDto),
+      activeOrder: null,
+      setActiveOrder: () => {},
+    };
+
+    it("renders zero payment bypass and executes without redirecting to VNPay when totalVnd is 0", async () => {
+      const zeroOrder = createSampleOrder({
+        status: "PENDING",
+        totalVnd: 0,
+        subtotalVnd: 70000,
+        discountVnd: 70000,
+      });
+
+      await act(async () => {
+        root = createRoot(container);
+        root.render(
+          React.createElement(
+            AuthContext.Provider,
+            { value: mockAuthContext },
+            React.createElement(
+              CartContext.Provider,
+              { value: mockCartContext },
+              React.createElement(PaymentPageView, {
+                initialOrder: zeroOrder as unknown as CreateOrderResponseDto,
+                initialMethod: "VNPAY",
+              })
+            )
+          )
+        );
+      });
+
+      // Renders Zero Payment Bypass box
+      const zeroBypassBtn = container.querySelector("#btnZeroPaymentBypass");
+      assert.ok(zeroBypassBtn, "Should render #btnZeroPaymentBypass when totalVnd === 0");
+
+      const submitBtn = container.querySelector("#btnSubmitPayment") as HTMLButtonElement;
+      assert.ok(submitBtn, "Should render main submit button");
+      assert.ok(
+        (submitBtn.textContent?.replace(/\s+/g, " ").includes("0 ₫") || submitBtn.textContent?.includes("0")),
+        "Submit button should indicate 0 ₫ payment"
+      );
+    });
+
+    it("does NOT clear cart when submitZeroAmountPayment fails or returns 404", async () => {
+      let cartCleared = false;
+      const customCartContext: CartContextValue = {
+        ...mockCartContext,
+        clearCart: () => {
+          cartCleared = true;
+        },
+      };
+
+      const zeroOrder = createSampleOrder({
+        status: "PENDING",
+        totalVnd: 0,
+        subtotalVnd: 70000,
+        discountVnd: 70000,
+      });
+
+      const failingZeroApi = async () => {
+        const err = new Error("Route not found") as Error & { statusCode: number };
+        err.statusCode = 404;
+        throw err;
+      };
+
+      await act(async () => {
+        root = createRoot(container);
+        root.render(
+          React.createElement(
+            AuthContext.Provider,
+            { value: mockAuthContext },
+            React.createElement(
+              CartContext.Provider,
+              { value: customCartContext },
+              React.createElement(PaymentPageView, {
+                initialOrder: zeroOrder as unknown as CreateOrderResponseDto,
+                initialMethod: "VNPAY",
+                submitZeroAmountFn: failingZeroApi,
+              })
+            )
+          )
+        );
+      });
+
+      const submitBtn = container.querySelector("#btnSubmitPayment") as HTMLButtonElement;
+      assert.ok(submitBtn);
+
+      await act(async () => {
+        submitBtn.click();
+      });
+
+      assert.strictEqual(
+        cartCleared,
+        false,
+        "Cart must NOT be cleared when zero amount payment fails with 404"
+      );
+    });
+
+    it("does NOT clear cart or navigate success when zero-amount response has normalized calendar date (2026-02-30T10:00:00.000Z), pointsEarned !== 0, or missing required fields", async () => {
+      let cartCleared = false;
+      const navigatedUrls: string[] = [];
+      const customCartContext: CartContextValue = {
+        ...mockCartContext,
+        clearCart: () => {
+          cartCleared = true;
+        },
+      };
+
+      const zeroOrder = createSampleOrder({
+        status: "PENDING",
+        totalVnd: 0,
+        subtotalVnd: 70000,
+        discountVnd: 70000,
+      });
+
+      const validZeroResponse = {
+        paymentId: "550e8400-e29b-41d4-a716-446655440020",
+        orderId: zeroOrder.id,
+        provider: "ZERO_AMOUNT" as const,
+        paymentStatus: "SUCCESS" as const,
+        orderStatus: "PAID" as const,
+        amountVnd: 0 as const,
+        pointsEarned: 0 as const,
+        createdAt: "2026-11-04T00:00:00.000Z",
+      };
+
+      const malformedPayloads = [
+        { ...validZeroResponse, createdAt: "2026-02-30T10:00:00.000Z" },
+        { ...validZeroResponse, pointsEarned: 5 as unknown as 0 },
+        (() => {
+          const { paymentId: _p, ...rest } = validZeroResponse;
+          return rest as unknown as typeof validZeroResponse;
+        })(),
+      ];
+
+      for (const badResponse of malformedPayloads) {
+        const malformedZeroApi = async () => ({
+          response: badResponse,
+          replayed: false,
+        });
+
+        await act(async () => {
+          root = createRoot(container);
+          root.render(
+            React.createElement(
+              AuthContext.Provider,
+              { value: mockAuthContext },
+              React.createElement(
+                CartContext.Provider,
+                { value: customCartContext },
+                React.createElement(PaymentPageView, {
+                  initialOrder: zeroOrder as unknown as CreateOrderResponseDto,
+                  initialMethod: "VNPAY",
+                  submitZeroAmountFn: malformedZeroApi,
+                  onNavigateSuccess: (url: string) => {
+                    navigatedUrls.push(url);
+                  },
+                })
+              )
+            )
+          );
+        });
+
+        const bypassBtn = container.querySelector("#btnZeroPaymentBypass") as HTMLButtonElement;
+        assert.ok(bypassBtn, "Must render #btnZeroPaymentBypass");
+
+        await act(async () => {
+          bypassBtn.click();
+          await new Promise((r) => setTimeout(r, 50));
+        });
+
+        assert.strictEqual(
+          cartCleared,
+          false,
+          "Cart must NOT be cleared when zero amount response validation fails"
+        );
+        assert.strictEqual(
+          navigatedUrls.length,
+          0,
+          "Must NOT navigate to success when zero amount response validation fails"
+        );
+
+        // Verify error notice is displayed on the page
+        const errorBanner = container.querySelector("#paymentErrorBanner");
+        assert.ok(
+          errorBanner || container.textContent?.includes("không hợp lệ"),
+          "Error banner or message must be presented to user when DTO is malformed"
+        );
+
+        await act(async () => {
+          root?.unmount();
+        });
+      }
     });
   });
 });
