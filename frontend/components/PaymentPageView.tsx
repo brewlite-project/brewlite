@@ -117,6 +117,25 @@ export async function executePaymentSubmission(
     ? deps.idempotencyKey
     : deps.idempotencyKey || generateIdempotencyKey("idem");
 
+  if ((deps.payload as unknown as Record<string, unknown>).method === "VNPAY") {
+    const vnpayBlockedErr = toPaymentSubmissionErrorState(
+      {
+        statusCode: 400,
+        code: "INVALID_METHOD",
+        message: "Flow VNPay không được gửi qua endpoint POST /payments. Tuyệt đối không fallback sang Mock.",
+        canRetrySameKey: false,
+        shouldGenerateNewKey: false,
+        idempotencyKey: keyToUse,
+      },
+      keyToUse
+    );
+    deps.setPaymentError(vnpayBlockedErr);
+    return {
+      skipped: false,
+      outcome: { type: "error", error: vnpayBlockedErr },
+    };
+  }
+
   if (!isOrderPayable(deps.activeOrder, effectiveStatus)) {
     const isExpired =
       effectiveStatus !== "CANCELLED" &&
@@ -347,6 +366,7 @@ export interface PaymentPageViewProps {
   initialVnPayFlowState?: VnPayFlowState;
   initiateVnPayFn?: typeof initiateVnPayPaymentApi;
   submitZeroAmountFn?: typeof submitZeroAmountPaymentApi;
+  submitPaymentFn?: typeof submitPaymentApi;
   onRedirectToVnPay?: (paymentUrl: string) => void;
   onNavigateSuccess?: (url: string) => void;
 }
@@ -363,6 +383,7 @@ export default function PaymentPageView({
   initialVnPayFlowState = "idle",
   initiateVnPayFn,
   submitZeroAmountFn,
+  submitPaymentFn,
   onRedirectToVnPay,
   onNavigateSuccess,
 }: PaymentPageViewProps) {
@@ -800,11 +821,149 @@ export default function PaymentPageView({
   };
 
   /**
+   * Khởi tạo giao dịch thanh toán VNPay Sandbox (API Contract v4.0 §3 / BR-05).
+   * Tuyệt đối không bao giờ fallback sang Mock Payment (POST /payments).
+   */
+  const handleVnPayInitiate = async (options?: {
+    reuseExistingKey?: boolean;
+  }) => {
+    // Chặn double-initiation
+    if (submittingRef.current || isSubmitting || !activeOrder) return;
+
+    // Chặn khi đơn hàng đã hết hạn
+    if (isOrderExpired(activeOrder) || orderStatus === "CANCELLED") {
+      setVnPayFlowState("expired");
+      setPaymentError({
+        statusCode: 409,
+        message: "Đơn hàng đã hết hạn thanh toán (15 phút). Không thể tạo giao dịch mới.",
+        code: "ORDER_EXPIRED",
+        idempotencyKey,
+        canRetrySameKey: false,
+        shouldGenerateNewKey: false,
+      });
+      return;
+    }
+
+    // Chặn retry khi VNPay còn PENDING / PAYMENT_IN_PROGRESS (BR-05)
+    const isPendingPayment =
+      Boolean(
+        "payment" in activeOrder &&
+          (activeOrder as MyOrderDto).payment?.status === "PENDING"
+      ) ||
+      (orderStatus === "PENDING" && vnPayFlowState === "verifying") ||
+      paymentError?.code === "PAYMENT_IN_PROGRESS" ||
+      vnPayFlowState === "verifying";
+
+    if (isPendingPayment) {
+      setVnPayFlowState("verifying");
+      setPaymentError({
+        statusCode: 409,
+        message:
+          "Giao dịch trước đó đang được xử lý. Vui lòng không thực hiện lại để tránh thanh toán hai lần.",
+        code: "PAYMENT_IN_PROGRESS",
+        idempotencyKey,
+        canRetrySameKey: false, // Block retry vì vẫn đang PENDING
+        shouldGenerateNewKey: false,
+      });
+      return;
+    }
+
+    // BR-06: Đơn hàng 0đ quyết toán nội bộ không cần redirect
+    if (activeOrder.totalVnd === 0) {
+      await handleZeroAmountSubmit();
+      return;
+    }
+
+    // Khởi tạo thanh toán VNPay Sandbox (> 0 VND)
+    setIsSubmitting(true);
+    submittingRef.current = true;
+    setVnPayFlowState("initiating");
+    setPaymentError(null);
+
+    const keyToUse = options?.reuseExistingKey
+      ? idempotencyKey
+      : idempotencyKey || generateIdempotencyKey();
+
+    try {
+      const initApi = initiateVnPayFn ?? initiateVnPayPaymentApi;
+      const result = await initApi(
+        { orderId: activeOrder.id },
+        keyToUse,
+        { accessToken }
+      );
+
+      // Validate response & paymentUrl từ Backend
+      const paymentUrl = result?.response?.paymentUrl;
+      if (
+        !paymentUrl ||
+        typeof paymentUrl !== "string" ||
+        !/^https?:\/\//i.test(paymentUrl)
+      ) {
+        throw new Error(
+          "Cổng thanh toán không trả về đường dẫn thanh toán hợp lệ."
+        );
+      }
+
+      if (result.response.paymentId) {
+        setActivePaymentId(result.response.paymentId);
+        if (typeof window !== "undefined") {
+          try {
+            sessionStorage.setItem(
+              `vnpay_payment_id_${activeOrder.id}`,
+              result.response.paymentId
+            );
+          } catch {}
+        }
+      }
+
+      setVnPayFlowState("redirecting");
+
+      // Chỉ redirect bằng chính paymentUrl do backend trả về
+      if (onRedirectToVnPay) {
+        onRedirectToVnPay(paymentUrl);
+      } else if (typeof window !== "undefined") {
+        window.location.href = paymentUrl;
+      }
+    } catch (err: unknown) {
+      submittingRef.current = false;
+      setIsSubmitting(false);
+
+      const submissionErr = toPaymentSubmissionErrorState(err, keyToUse);
+      const errCode = submissionErr.code;
+
+      if (errCode === "PAYMENT_IN_PROGRESS") {
+        setVnPayFlowState("verifying");
+        submissionErr.canRetrySameKey = false; // Block retry vì vẫn đang PENDING
+      } else if (errCode === "ORDER_EXPIRED") {
+        setVnPayFlowState("expired");
+        submissionErr.canRetrySameKey = false;
+      } else if (errCode === "IDEMPOTENCY_KEY_CONFLICT") {
+        setVnPayFlowState("failed");
+        setIdempotencyKey(generateIdempotencyKey());
+      } else if (errCode === "NETWORK_ERROR") {
+        setVnPayFlowState("unknown");
+      } else {
+        setVnPayFlowState("failed");
+      }
+
+      setPaymentError(submissionErr);
+    } finally {
+      submittingRef.current = false;
+      setIsSubmitting(false);
+    }
+  };
+
+  /**
    * Thực thi gửi `POST /payments` thật lên Backend (hoặc retry với cùng `Idempotency-Key` khi timeout / `PAYMENT_IN_PROGRESS`)
    */
   const handleSubmitPayment = async (options?: {
     reuseExistingKey?: boolean;
   }) => {
+    // Tuyệt đối không fallback VNPay sang Mock Payment (POST /payments)
+    if (method === "VNPAY") {
+      await handleVnPayInitiate(options);
+      return;
+    }
     await executePaymentSubmission({
       activeOrder,
       orderStatus,
@@ -1811,15 +1970,37 @@ export default function PaymentPageView({
                             <button
                               id="btnRetrySameIdempotencyKey"
                               type="button"
-                              disabled={isSubmitting}
-                              onClick={() =>
-                                handleSubmitPayment({ reuseExistingKey: true })
+                              disabled={
+                                isSubmitting ||
+                                (method === "VNPAY" && (
+                                  paymentError.code === "PAYMENT_IN_PROGRESS" ||
+                                  vnPayFlowState === "verifying"
+                                ))
                               }
+                              onClick={async () => {
+                                if (method === "VNPAY") {
+                                  await handleVnPayInitiate({ reuseExistingKey: true });
+                                  return;
+                                }
+                                await handleSubmitPayment({ reuseExistingKey: true });
+                              }}
                               className="w-full py-2 px-3 rounded-lg bg-[#C67C4E] hover:bg-[#b56e40] text-white font-label-md text-[12px] font-bold transition-colors cursor-pointer disabled:opacity-50"
                             >
-                              Thử gửi lại giao dịch{" "}
+                              {method === "VNPAY" && (paymentError.code === "PAYMENT_IN_PROGRESS" || vnPayFlowState === "verifying")
+                                ? "Giao dịch đang được xử lý..."
+                                : "Thử gửi lại giao dịch"}{" "}
                               <span className="sr-only">({paymentError.idempotencyKey})</span>
                             </button>
+                          )}
+                          {method === "VNPAY" && (paymentError.code === "PAYMENT_IN_PROGRESS" || vnPayFlowState === "verifying") && activeOrder && (
+                            <Link
+                              id="btnCheckVnPayProcessingStatus"
+                              href={`/order-confirmation?orderId=${encodeURIComponent(activeOrder.id)}&view=processing`}
+                              className="w-full py-2 px-3 rounded-lg bg-[#005baa] hover:bg-[#004785] text-white font-label-md text-[12px] font-bold transition-colors flex items-center justify-center gap-1.5 text-center cursor-pointer"
+                            >
+                              <span className="material-symbols-outlined text-[16px]">sync</span>
+                              <span>Kiểm tra trạng thái đối soát giao dịch</span>
+                            </Link>
                           )}
                         </div>
                       )}
@@ -1878,116 +2059,7 @@ export default function PaymentPageView({
                         }
                         onClick={async () => {
                           if (method === "VNPAY") {
-                            // Chặn double-initiation
-                            if (submittingRef.current || isSubmitting) return;
-
-                            // Chặn khi đơn hàng đã hết hạn
-                            if (isOrderExpired(activeOrder) || orderStatus === "CANCELLED") {
-                              setVnPayFlowState("expired");
-                              setPaymentError({
-                                statusCode: 409,
-                                message: "Đơn hàng đã hết hạn thanh toán (15 phút). Không thể tạo giao dịch mới.",
-                                code: "ORDER_EXPIRED",
-                                idempotencyKey,
-                                canRetrySameKey: false,
-                                shouldGenerateNewKey: false,
-                              });
-                              return;
-                            }
-
-                            // Chặn retry khi VNPay còn PENDING (BR-05)
-                            const isPendingPayment =
-                              "payment" in activeOrder &&
-                              (activeOrder as MyOrderDto).payment?.status === "PENDING";
-                            if (
-                              isPendingPayment ||
-                              (orderStatus === "PENDING" && vnPayFlowState === "verifying")
-                            ) {
-                              setVnPayFlowState("verifying");
-                              setPaymentError({
-                                statusCode: 409,
-                                message:
-                                  "Giao dịch trước đó đang được xử lý. Vui lòng không thực hiện lại để tránh thanh toán hai lần.",
-                                code: "PAYMENT_IN_PROGRESS",
-                                idempotencyKey,
-                                canRetrySameKey: true,
-                                shouldGenerateNewKey: false,
-                              });
-                              return;
-                            }
-
-                            // BR-06: Đơn hàng 0đ quyết toán nội bộ không cần redirect
-                            if (activeOrder.totalVnd === 0) {
-                              await handleZeroAmountSubmit();
-                              return;
-                            }
-
-                            // Khởi tạo thanh toán VNPay Sandbox (> 0 VND)
-                            setIsSubmitting(true);
-                            submittingRef.current = true;
-                            setVnPayFlowState("initiating");
-                            setPaymentError(null);
-
-                            try {
-                              const initApi = initiateVnPayFn ?? initiateVnPayPaymentApi;
-                              const result = await initApi(
-                                { orderId: activeOrder.id },
-                                idempotencyKey,
-                                { accessToken }
-                              );
-
-                              // Validate response & paymentUrl từ Backend
-                              const paymentUrl = result?.response?.paymentUrl;
-                              if (
-                                !paymentUrl ||
-                                typeof paymentUrl !== "string" ||
-                                !/^https?:\/\//i.test(paymentUrl)
-                              ) {
-                                throw new Error("Cổng thanh toán không trả về đường dẫn thanh toán hợp lệ.");
-                              }
-
-                              if (result.response.paymentId) {
-                                setActivePaymentId(result.response.paymentId);
-                                if (typeof window !== "undefined") {
-                                  try {
-                                    sessionStorage.setItem(
-                                      `vnpay_payment_id_${activeOrder.id}`,
-                                      result.response.paymentId
-                                    );
-                                  } catch {}
-                                }
-                              }
-
-                              setVnPayFlowState("redirecting");
-
-                              // Chỉ redirect bằng chính paymentUrl do backend trả về
-                              if (onRedirectToVnPay) {
-                                onRedirectToVnPay(paymentUrl);
-                              } else if (typeof window !== "undefined") {
-                                window.location.href = paymentUrl;
-                              }
-                            } catch (err: unknown) {
-                              submittingRef.current = false;
-                              setIsSubmitting(false);
-
-                              const submissionErr = toPaymentSubmissionErrorState(err, idempotencyKey);
-                              const errCode = submissionErr.code;
-
-                              if (errCode === "PAYMENT_IN_PROGRESS") {
-                                setVnPayFlowState("verifying");
-                              } else if (errCode === "ORDER_EXPIRED") {
-                                setVnPayFlowState("expired");
-                              } else if (errCode === "IDEMPOTENCY_KEY_CONFLICT") {
-                                setVnPayFlowState("failed");
-                                setIdempotencyKey(generateIdempotencyKey());
-                              } else if (errCode === "NETWORK_ERROR") {
-                                setVnPayFlowState("unknown");
-                              } else {
-                                setVnPayFlowState("failed");
-                              }
-
-                              setPaymentError(submissionErr);
-                            }
+                            await handleVnPayInitiate({ reuseExistingKey: false });
                             return;
                           }
                           handleSubmitPayment({ reuseExistingKey: false });

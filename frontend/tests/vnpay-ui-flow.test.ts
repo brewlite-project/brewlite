@@ -1506,6 +1506,183 @@ describe("VNPay Phase 2 UI & Flow Deep Test Suite", () => {
         "Button text must indicate waiting for PENDING transaction"
       );
     });
+
+    it("enforces VNPay initiate 409 PAYMENT_IN_PROGRESS -> user retry -> NEVER calls POST /payments and NEVER renders MOCK_PAYMENT_DISABLED", async () => {
+      const suite11AuthContext: AuthContextType = {
+        user: {
+          id: "user-vnpay-retry-test",
+          email: "vnpay-retry@brewlite.vn",
+          fullName: "VNPay Retry Tester",
+        },
+        accessToken: "mock-vnpay-jwt",
+        isAuthenticated: true,
+        isLoading: false,
+        isAuthModalOpen: false,
+        authModalMode: "login",
+        authModalMessage: null,
+        openAuthModal: () => {},
+        closeAuthModal: () => {},
+        login: async () => {},
+        register: async () => ({ id: "user-vnpay-retry-test", email: "vnpay-retry@brewlite.vn", fullName: "VNPay Retry Tester" }),
+        logout: () => {},
+        verifySession: () => true,
+        handleUnauthorizedCheckout: () => {},
+        pendingCheckout: false,
+        setPendingCheckout: () => {},
+      };
+
+      const suite11CartContext: CartContextValue = {
+        items: [],
+        totalQuantity: 0,
+        totalLines: 0,
+        subtotalVnd: 0,
+        formattedSubtotal: "0 ₫",
+        isCartOpen: false,
+        couponCode: "",
+        setCouponCode: () => {},
+        feedbackMessage: null,
+        feedbackType: null,
+        addToCart: () => ({ success: true, message: "OK" }),
+        updateQuantity: () => {},
+        incrementQuantity: () => {},
+        decrementQuantity: () => {},
+        removeFromCart: () => {},
+        clearCart: () => {},
+        openCart: () => {},
+        closeCart: () => {},
+        toggleCart: () => {},
+        dismissFeedback: () => {},
+        mapToCreateOrderPayload: () =>
+          ({ items: [] } as unknown as CreateOrderRequestDto),
+        activeOrder: null,
+        setActiveOrder: () => {},
+      };
+
+      const order = createSampleOrder({ status: "PENDING", totalVnd: 98000 });
+      let mockPaymentCalled = false;
+      let vnpayInitiateCallCount = 0;
+
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes("/payments") && !url.includes("/payments/vnpay") && !url.includes("/payments/zero-amount")) {
+          mockPaymentCalled = true;
+          return new Response(JSON.stringify({
+            statusCode: 403,
+            message: "Mock payment is disabled in this environment",
+            error: "Forbidden",
+            code: "MOCK_PAYMENT_DISABLED",
+          }), { status: 403, headers: { "Content-Type": "application/json" } });
+        }
+        return originalFetch(input, init);
+      };
+
+      const failingInitiateVnPay = async () => {
+        vnpayInitiateCallCount++;
+        const err = new Error("Giao dịch trước đó đang được xử lý.") as Error & {
+          statusCode: number;
+          code: string;
+        };
+        err.statusCode = 409;
+        err.code = "PAYMENT_IN_PROGRESS";
+        throw err;
+      };
+
+      const spySubmitPaymentFn = async () => {
+        mockPaymentCalled = true;
+        throw new Error("MOCK_PAYMENT_DISABLED: Mock payment is disabled in this environment");
+      };
+
+      try {
+        await act(async () => {
+          root = createRoot(container);
+          root.render(
+            React.createElement(
+              AuthContext.Provider,
+              { value: suite11AuthContext },
+              React.createElement(
+                CartContext.Provider,
+                { value: suite11CartContext },
+                React.createElement(PaymentPageView, {
+                  initialOrder: order as unknown as CreateOrderResponseDto,
+                  initialMethod: "VNPAY",
+                  initiateVnPayFn: failingInitiateVnPay,
+                  submitPaymentFn: spySubmitPaymentFn,
+                })
+              )
+            )
+          );
+        });
+
+      // 1. Click Xác nhận thanh toán qua VNPay lần đầu
+      const submitBtn = container.querySelector("#btnSubmitPayment") as HTMLButtonElement;
+      assert.ok(submitBtn, "Must render #btnSubmitPayment");
+
+      await act(async () => {
+        submitBtn.click();
+        await new Promise((r) => setTimeout(r, 50));
+      });
+
+      // Verify VNPay initiate được gọi 1 lần và trả về 409 PAYMENT_IN_PROGRESS
+      assert.strictEqual(vnpayInitiateCallCount, 1, "VNPay initiate must be called once");
+      assert.strictEqual(mockPaymentCalled, false, "Must NEVER call POST /payments on initial submission");
+
+      // Verify error banner hiển thị PAYMENT_IN_PROGRESS
+      const errorBanner = container.querySelector("#paymentErrorBanner");
+      assert.ok(errorBanner, "Must render paymentErrorBanner on 409");
+      const bannerText = errorBanner.textContent || "";
+      assert.ok(
+        bannerText.includes("PAYMENT_IN_PROGRESS") || bannerText.includes("đang được xử lý"),
+        "Banner must mention PAYMENT_IN_PROGRESS"
+      );
+
+      // Verify UI block retry hoặc nút retry bị disabled
+      const retryBtn = container.querySelector("#btnRetrySameIdempotencyKey") as HTMLButtonElement | null;
+      if (retryBtn) {
+        assert.strictEqual(
+          retryBtn.disabled,
+          true,
+          "btnRetrySameIdempotencyKey must be disabled when VNPay is PAYMENT_IN_PROGRESS"
+        );
+        // User clicks retry button anyway (simulated event)
+        await act(async () => {
+          retryBtn.click();
+          await new Promise((r) => setTimeout(r, 50));
+        });
+      }
+
+      // User clicks main submit button again
+      await act(async () => {
+        submitBtn.click();
+        await new Promise((r) => setTimeout(r, 50));
+      });
+
+      // Verification: Tuyệt đối KHÔNG BAO GIỜ gọi POST /payments (Mock)
+      assert.strictEqual(
+        mockPaymentCalled,
+        false,
+        "CRITICAL INVARIANT: Flow VNPay must NEVER fallback to POST /payments (Mock)"
+      );
+
+      // Verification: Tuyệt đối không hiển thị lỗi MOCK_PAYMENT_DISABLED
+      const fullPageText = container.textContent || "";
+      assert.strictEqual(
+        fullPageText.includes("MOCK_PAYMENT_DISABLED"),
+        false,
+        "Must NEVER display MOCK_PAYMENT_DISABLED error to user"
+      );
+
+      // Verification: Giữ trạng thái processing / verifying
+      assert.ok(
+        fullPageText.includes("PAYMENT_IN_PROGRESS") ||
+        fullPageText.includes("đang được xử lý") ||
+        container.querySelector("#btnCheckVnPayProcessingStatus"),
+        "Must preserve processing/verifying state"
+      );
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
   });
 
   // =========================================================================
