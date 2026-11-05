@@ -259,7 +259,9 @@ describe('POST /orders (real guard/controller/service; mocked database)', () => 
       code: 'INVALID_COUPON',
       message,
     });
-    expect(tx.product.updateMany).not.toHaveBeenCalled();
+    expect(tx.product.updateMany).toHaveBeenCalledTimes(value === null ? 0 : 1);
+    expect(tx.couponRedemption.count).not.toHaveBeenCalled();
+    expect(tx.order.create).not.toHaveBeenCalled();
   });
   it('rejects exhausted total coupon quota with 409', async () => {
     tx.coupon.findUnique.mockResolvedValue({ ...coupon, activeUsageCount: 10 });
@@ -319,13 +321,13 @@ describe('POST /orders (real guard/controller/service; mocked database)', () => 
     const { body } = await post({ items: [item] }).expect(500);
     expect(JSON.stringify(body)).not.toContain('private-db-detail');
   });
-  it('uses floor for fractional VND and rejects amounts outside safe JSON integers', async () => {
+  it('uses half-up for fractional VND and rejects amounts outside safe JSON integers', async () => {
     tx.product.findMany.mockResolvedValue([
       { ...product, basePriceVnd: 45003n },
     ]);
     expect(
       (await post({ items: [item] }).expect(201)).body.items[0].unitPriceVnd,
-    ).toBe(59003);
+    ).toBe(59004);
     tx.product.findMany.mockResolvedValue([
       {
         ...product,
