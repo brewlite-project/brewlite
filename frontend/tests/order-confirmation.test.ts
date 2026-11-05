@@ -3,6 +3,8 @@ import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { JSDOM } from "jsdom";
 import { PaymentFailedRetryView } from "../components/PaymentFailedRetryView";
+import OrderConfirmationPage from "../app/order-confirmation/page";
+import { AuthContext, type AuthContextType } from "../context/AuthContext";
 import { CartProvider, useCart, clearStoredActiveOrder } from "../context/CartContext";
 import { beforeEach, describe, it } from "node:test";
 import {
@@ -18,6 +20,9 @@ import {
   computeOrderRemainingSeconds,
   isOrderExpired,
   canOrderRetryPayment,
+  shouldPollOrderConfirmation,
+  setOrderConfirmationPollingConfig,
+  resetOrderConfirmationPollingConfig,
   fetchPaymentStatusApi,
   formatRemainingTime,
   findOrderForConfirmation,
@@ -2596,6 +2601,829 @@ describe("SCRUM-68: Order Confirmation Service & Logic Automated Tests", () => {
       const apiRes = await fetchPaymentStatusApi(rawStatus.paymentId, validToken);
       assert.equal(apiRes.resolution, "RECONCILING");
       assert.equal(apiRes.orderStatus, "CANCELLED");
+    });
+  });
+
+  describe("10. SCRUM-88 Review Fixes: Bounded Polling & Server Truth Precedence over Query Params", () => {
+    let dom: JSDOM;
+    let originalWindow: unknown;
+    let originalDocument: unknown;
+    let originalSelf: unknown;
+    let originalLocalStorage: unknown;
+    let originalSessionStorage: unknown;
+    let globalTarget: {
+      window: unknown;
+      document: unknown;
+      self: unknown;
+      localStorage: unknown;
+      sessionStorage: unknown;
+      IS_REACT_ACT_ENVIRONMENT?: boolean;
+    };
+    let originalActEnv: boolean | undefined;
+
+    const setupDomWithUrl = (url: string) => {
+      dom = new JSDOM('<!DOCTYPE html><html><body><div id="root"></div></body></html>', {
+        url,
+      });
+      globalTarget = globalThis as unknown as typeof globalTarget;
+      originalWindow = globalTarget.window;
+      originalDocument = globalTarget.document;
+      originalSelf = globalTarget.self;
+      originalLocalStorage = globalTarget.localStorage;
+      originalSessionStorage = globalTarget.sessionStorage;
+      originalActEnv = globalTarget.IS_REACT_ACT_ENVIRONMENT;
+
+      globalTarget.window = dom.window;
+      globalTarget.document = dom.window.document;
+      globalTarget.self = dom.window;
+      globalTarget.localStorage = dom.window.localStorage;
+      globalTarget.sessionStorage = dom.window.sessionStorage;
+      globalTarget.IS_REACT_ACT_ENVIRONMENT = true;
+    };
+
+    const cleanupDom = () => {
+      resetOrderConfirmationPollingConfig();
+      globalTarget.window = originalWindow;
+      globalTarget.document = originalDocument;
+      globalTarget.self = originalSelf;
+      globalTarget.localStorage = originalLocalStorage;
+      globalTarget.sessionStorage = originalSessionStorage;
+      globalTarget.IS_REACT_ACT_ENVIRONMENT = originalActEnv;
+      dom.window.close();
+    };
+
+    const createMockAuthContext = (token: string): AuthContextType => ({
+      user: {
+        id: "550e8400-e29b-41d4-a716-446655440001",
+        email: "khachhang@brewlite.vn",
+        fullName: "Nguyễn Văn A",
+      },
+      accessToken: token,
+      isAuthenticated: true,
+      isLoading: false,
+      isAuthModalOpen: false,
+      authModalMode: "login",
+      authModalMessage: null,
+      openAuthModal: () => {},
+      closeAuthModal: () => {},
+      login: async () => {},
+      register: async () => ({
+        id: "550e8400-e29b-41d4-a716-446655440001",
+        email: "khachhang@brewlite.vn",
+        fullName: "Nguyễn Văn A",
+      }),
+      logout: () => {},
+      verifySession: () => true,
+      handleUnauthorizedCheckout: () => {},
+      pendingCheckout: false,
+      setPendingCheckout: () => {},
+    });
+
+    it("10.1 shouldPollOrderConfirmation: polls on PENDING / PROCESSING / RECONCILING and stops on terminal states (PAID, FAILED, CANCELLED, Financial Exception)", () => {
+      const baseOrder: OrderConfirmationData = {
+        id: "550e8400-e29b-41d4-a716-446655440088",
+        status: "PENDING",
+        createdAt: "2026-10-29T10:00:00.000Z",
+        expiresAt: "2026-10-29T10:15:00.000Z",
+        subtotalVnd: 85000,
+        discountVnd: 0,
+        totalVnd: 85000,
+        couponCode: null,
+        pointsEarned: 0,
+        hasFinancialException: false,
+        items: [],
+        payment: {
+          id: "550e8400-e29b-41d4-a716-446655440089",
+          status: "PENDING",
+          provider: "VNPAY",
+          method: null,
+          methodLast4: null,
+          amountVnd: 85000,
+          mockReference: null,
+          failureReason: null,
+          resolution: "PROCESSING",
+          requiresReview: false,
+          canRetry: false,
+          createdAt: "2026-10-29T10:01:00.000Z",
+        },
+      };
+
+      // Active pollable states: PENDING, PROCESSING, RECONCILING
+      assert.equal(shouldPollOrderConfirmation(baseOrder), true);
+      assert.equal(
+        shouldPollOrderConfirmation({
+          ...baseOrder,
+          payment: { ...baseOrder.payment!, resolution: "RECONCILING" },
+        }),
+        true
+      );
+      assert.equal(
+        shouldPollOrderConfirmation({ ...baseOrder, payment: null }),
+        true
+      );
+
+      // Stop on SUCCESS / PAID terminal states
+      assert.equal(
+        shouldPollOrderConfirmation({
+          ...baseOrder,
+          status: "PAID",
+          payment: {
+            ...baseOrder.payment!,
+            status: "SUCCESS",
+            resolution: "PAYMENT_ACCEPTED",
+          },
+        }),
+        false
+      );
+      assert.equal(
+        shouldPollOrderConfirmation({ ...baseOrder, status: "PREPARING" }),
+        false
+      );
+      assert.equal(
+        shouldPollOrderConfirmation({ ...baseOrder, status: "READY" }),
+        false
+      );
+      assert.equal(
+        shouldPollOrderConfirmation({ ...baseOrder, status: "COMPLETED" }),
+        false
+      );
+
+      // Stop on FAILED terminal states
+      assert.equal(
+        shouldPollOrderConfirmation({
+          ...baseOrder,
+          status: "PAYMENT_FAILED",
+          payment: {
+            ...baseOrder.payment!,
+            status: "FAILED",
+            resolution: "FAILED",
+          },
+        }),
+        false
+      );
+
+      // Stop on CANCELLED terminal state
+      assert.equal(
+        shouldPollOrderConfirmation({
+          ...baseOrder,
+          status: "CANCELLED",
+        }),
+        false
+      );
+
+      // Stop on Financial Exception / Requires Review
+      assert.equal(
+        shouldPollOrderConfirmation({
+          ...baseOrder,
+          hasFinancialException: true,
+        }),
+        false
+      );
+      assert.equal(
+        shouldPollOrderConfirmation({
+          ...baseOrder,
+          payment: {
+            ...baseOrder.payment!,
+            requiresReview: true,
+            resolution: "FINANCIAL_EXCEPTION",
+          },
+        }),
+        false
+      );
+    });
+
+    it("10.2 Bounded Polling Flow: PENDING -> server changes to SUCCESS + PAID -> UI automatically transitions to Success without user refresh and stops polling", async () => {
+      const targetOrderId = "550e8400-e29b-41d4-a716-446655440088";
+      setupDomWithUrl(
+        `http://localhost/order-confirmation?orderId=${targetOrderId}&vnp_ResponseCode=00`
+      );
+      setOrderConfirmationPollingConfig({ intervalMs: 35, maxAttempts: 5 });
+
+      const container = dom.window.document.getElementById("root")!;
+      const root = createRoot(container);
+      const mockToken = createValidMockJwt();
+      dom.window.localStorage.setItem("brewlite_auth_token", mockToken);
+
+      let ordersMeCallCount = 0;
+
+      const pendingVnPayOrder: OrderConfirmationData = {
+        id: targetOrderId,
+        status: "PENDING",
+        createdAt: new Date(Date.now() - 60000).toISOString(),
+        expiresAt: new Date(Date.now() + 600000).toISOString(),
+        subtotalVnd: 98000,
+        discountVnd: 0,
+        totalVnd: 98000,
+        couponCode: null,
+        pointsEarned: 0,
+        hasFinancialException: false,
+        items: [
+          {
+            id: "550e8400-e29b-41d4-a716-446655440011",
+            productId: "550e8400-e29b-41d4-a716-446655440001",
+            productName: "Cà Phê Muối",
+            size: "M",
+            sizeMultiplierPercent: 120,
+            basePriceVnd: 40000,
+            quantity: 2,
+            unitPriceVnd: 49000,
+            lineTotalVnd: 98000,
+            toppings: [],
+          },
+        ],
+        payment: {
+          id: "550e8400-e29b-41d4-a716-446655440090",
+          status: "PENDING",
+          provider: "VNPAY",
+          method: null,
+          methodLast4: null,
+          amountVnd: 98000,
+          mockReference: null,
+          failureReason: null,
+          resolution: "PROCESSING",
+          requiresReview: false,
+          canRetry: false,
+          createdAt: new Date().toISOString(),
+        },
+      };
+
+      const paidVnPayOrder: OrderConfirmationData = {
+        ...pendingVnPayOrder,
+        status: "PAID",
+        pointsEarned: 9,
+        payment: {
+          ...pendingVnPayOrder.payment!,
+          status: "SUCCESS",
+          resolution: "PAYMENT_ACCEPTED",
+        },
+      };
+
+      // Call 1 (initial mount): returns PENDING + PROCESSING
+      // Call 2+ (background poll after IPN/QueryDR): returns PAID + SUCCESS
+      global.fetch = async (url) => {
+        const u = String(url);
+        if (u.includes("/orders/me")) {
+          ordersMeCallCount += 1;
+          const currentOrder = ordersMeCallCount === 1 ? pendingVnPayOrder : paidVnPayOrder;
+          return new Response(
+            JSON.stringify({
+              items: [currentOrder],
+              meta: { page: 1, limit: 10, total: 1, totalPages: 1 },
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        if (u.includes("/auth/me")) {
+          return new Response(
+            JSON.stringify({
+              id: "550e8400-e29b-41d4-a716-446655440001",
+              email: "khachhang@brewlite.vn",
+              fullName: "Nguyễn Văn A",
+              loyaltyPoints: ordersMeCallCount === 1 ? 0 : 9,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        return new Response("Not found", { status: 404 });
+      };
+
+      try {
+        await act(async () => {
+          root.render(
+            React.createElement(
+              AuthContext.Provider,
+              { value: createMockAuthContext(mockToken) },
+              React.createElement(
+                CartProvider as React.ComponentType<{ key?: string }>,
+                { key: "poll-transition-test" },
+                React.createElement(OrderConfirmationPage)
+              )
+            )
+          );
+        });
+
+        // Ngay lúc mount (Call 1): UI hiển thị màn hình đang đối soát VNPay (VnPayProcessingView)
+        assert.equal(ordersMeCallCount, 1);
+        assert.ok(
+          container.textContent?.includes("Đang kiểm tra kết quả giao dịch..."),
+          "Ban đầu khi payment còn PENDING/PROCESSING phải hiển thị VnPayProcessingView"
+        );
+
+        // Chờ chu kỳ bounded polling tự động chạy mà KHÔNG cần user bấm refresh
+        await act(async () => {
+          await new Promise((r) => setTimeout(r, 110));
+        });
+
+        // UI đã tự động chuyển sang màn hình VnPaySuccessView ("Thanh toán thành công qua VNPay!")
+        assert.ok(ordersMeCallCount >= 2, "Polling tự động phải gọi lại GET /orders/me");
+        assert.ok(
+          container.textContent?.includes("Thanh toán thành công qua VNPay!"),
+          "UI phải tự động chuyển sang VnPaySuccessView khi server đổi sang SUCCESS + PAID"
+        );
+        assert.equal(
+          container.textContent?.includes("Đang kiểm tra kết quả giao dịch..."),
+          false,
+          "Màn hình chờ đối soát phải biến mất sau khi đơn đã PAID"
+        );
+
+        // Kiểm chứng polling đã dừng hẳn sau khi gặp terminal state PAID
+        const callsAtPaid = ordersMeCallCount;
+        await act(async () => {
+          await new Promise((r) => setTimeout(r, 120));
+        });
+        assert.equal(
+          ordersMeCallCount,
+          callsAtPaid,
+          "Polling BẮT BUỘC phải dừng ngay sau khi gặp trạng thái kết thúc PAID"
+        );
+      } finally {
+        await act(async () => {
+          root.unmount();
+        });
+        cleanupDom();
+      }
+    });
+
+    it("10.3 Bounded Polling Limits & Unmount Cleanup: stops after maxAttempts when remaining PENDING and cleans up on unmount", async () => {
+      const targetOrderId = "550e8400-e29b-41d4-a716-446655440088";
+      setupDomWithUrl(`http://localhost/order-confirmation?orderId=${targetOrderId}`);
+      setOrderConfirmationPollingConfig({ intervalMs: 25, maxAttempts: 3 });
+
+      const container = dom.window.document.getElementById("root")!;
+      const root = createRoot(container);
+      const mockToken = createValidMockJwt();
+      dom.window.localStorage.setItem("brewlite_auth_token", mockToken);
+
+      let ordersMeCallCount = 0;
+
+      const stillPendingOrder: OrderConfirmationData = {
+        id: targetOrderId,
+        status: "PENDING",
+        createdAt: new Date(Date.now() - 60000).toISOString(),
+        expiresAt: new Date(Date.now() + 600000).toISOString(),
+        subtotalVnd: 98000,
+        discountVnd: 0,
+        totalVnd: 98000,
+        couponCode: null,
+        pointsEarned: 0,
+        hasFinancialException: false,
+        items: [
+          {
+            id: "550e8400-e29b-41d4-a716-446655440011",
+            productId: "550e8400-e29b-41d4-a716-446655440001",
+            productName: "Cà Phê Muối",
+            size: "M",
+            sizeMultiplierPercent: 120,
+            basePriceVnd: 40000,
+            quantity: 2,
+            unitPriceVnd: 49000,
+            lineTotalVnd: 98000,
+            toppings: [],
+          },
+        ],
+        payment: {
+          id: "550e8400-e29b-41d4-a716-446655440090",
+          status: "PENDING",
+          provider: "VNPAY",
+          method: null,
+          methodLast4: null,
+          amountVnd: 98000,
+          mockReference: null,
+          failureReason: null,
+          resolution: "RECONCILING",
+          requiresReview: false,
+          canRetry: false,
+          createdAt: new Date().toISOString(),
+        },
+      };
+
+      global.fetch = async (url) => {
+        const u = String(url);
+        if (u.includes("/orders/me")) {
+          ordersMeCallCount += 1;
+          return new Response(
+            JSON.stringify({
+              items: [stillPendingOrder],
+              meta: { page: 1, limit: 10, total: 1, totalPages: 1 },
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        if (u.includes("/auth/me")) {
+          return new Response(
+            JSON.stringify({
+              id: "550e8400-e29b-41d4-a716-446655440001",
+              email: "khachhang@brewlite.vn",
+              fullName: "Nguyễn Văn A",
+              loyaltyPoints: 0,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        return new Response("Not found", { status: 404 });
+      };
+
+      try {
+        await act(async () => {
+          root.render(
+            React.createElement(
+              AuthContext.Provider,
+              { value: createMockAuthContext(mockToken) },
+              React.createElement(
+                CartProvider as React.ComponentType<{ key?: string }>,
+                { key: "poll-bound-test" },
+                React.createElement(OrderConfirmationPage)
+              )
+            )
+          );
+        });
+
+        assert.equal(ordersMeCallCount, 1);
+
+        // Chờ 220ms (vượt xa 3 lần * 25ms) -> tổng số lần gọi phải dừng đúng ở 1 (mount) + 3 (maxAttempts) = 4
+        await act(async () => {
+          await new Promise((r) => setTimeout(r, 220));
+        });
+
+        assert.equal(
+          ordersMeCallCount,
+          4,
+          "Polling BẮT BUỘC phải dừng đúng ở giới hạn maxAttempts (1 mount + 3 polls = 4), không gọi vô hạn"
+        );
+
+        // Unmount và xác minh không còn bất kỳ cuộc gọi nào sau khi unmount
+        await act(async () => {
+          root.unmount();
+        });
+        await new Promise((r) => setTimeout(r, 80));
+        assert.equal(ordersMeCallCount, 4);
+      } finally {
+        cleanupDom();
+      }
+    });
+
+    it("10.4 Server Truth Precedence #1: PAID + ZERO_AMOUNT + view=redirecting MUST render ZeroPaymentBypassView and NEVER render VnPayRedirectingView", async () => {
+      const targetOrderId = "550e8400-e29b-41d4-a716-446655440091";
+      setupDomWithUrl(
+        `http://localhost/order-confirmation?orderId=${targetOrderId}&view=redirecting&vnp_ResponseCode=00`
+      );
+
+      const container = dom.window.document.getElementById("root")!;
+      const root = createRoot(container);
+      const mockToken = createValidMockJwt();
+      dom.window.localStorage.setItem("brewlite_auth_token", mockToken);
+
+      const paidZeroOrder: OrderConfirmationData = {
+        id: targetOrderId,
+        status: "PAID",
+        createdAt: new Date(Date.now() - 60000).toISOString(),
+        expiresAt: new Date(Date.now() + 600000).toISOString(),
+        subtotalVnd: 55000,
+        discountVnd: 55000,
+        totalVnd: 0,
+        couponCode: "FREE100",
+        pointsEarned: 0,
+        hasFinancialException: false,
+        items: [
+          {
+            id: "550e8400-e29b-41d4-a716-446655440011",
+            productId: "550e8400-e29b-41d4-a716-446655440001",
+            productName: "Trà Đào Cam Sả",
+            size: "M",
+            sizeMultiplierPercent: 100,
+            basePriceVnd: 55000,
+            quantity: 1,
+            unitPriceVnd: 55000,
+            lineTotalVnd: 55000,
+            toppings: [],
+          },
+        ],
+        payment: {
+          id: "550e8400-e29b-41d4-a716-446655440092",
+          status: "SUCCESS",
+          provider: "ZERO_AMOUNT",
+          method: null,
+          methodLast4: null,
+          amountVnd: 0,
+          mockReference: null,
+          failureReason: null,
+          resolution: "PAYMENT_ACCEPTED",
+          requiresReview: false,
+          canRetry: false,
+          createdAt: new Date().toISOString(),
+        },
+      };
+
+      global.fetch = async (url) => {
+        const u = String(url);
+        if (u.includes("/orders/me")) {
+          return new Response(
+            JSON.stringify({
+              items: [paidZeroOrder],
+              meta: { page: 1, limit: 10, total: 1, totalPages: 1 },
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        if (u.includes("/auth/me")) {
+          return new Response(
+            JSON.stringify({
+              id: "550e8400-e29b-41d4-a716-446655440001",
+              email: "khachhang@brewlite.vn",
+              fullName: "Nguyễn Văn A",
+              loyaltyPoints: 0,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        return new Response("Not found", { status: 404 });
+      };
+
+      try {
+        await act(async () => {
+          root.render(
+            React.createElement(
+              AuthContext.Provider,
+              { value: createMockAuthContext(mockToken) },
+              React.createElement(
+                CartProvider as React.ComponentType<{ key?: string }>,
+                { key: "paid-zero-redirecting-test" },
+                React.createElement(OrderConfirmationPage)
+              )
+            )
+          );
+        });
+
+        const text = container.textContent || "";
+        assert.ok(
+          text.includes("Đơn hàng hoàn tất (0 ₫)!"),
+          "PAID + ZERO_AMOUNT + view=redirecting BẮT BUỘC phải render ZeroPaymentBypassView"
+        );
+        assert.ok(text.includes("ZERO_AMOUNT"));
+        assert.equal(
+          text.includes("Đang chuyển hướng đến VNPay..."),
+          false,
+          "TUYỆT ĐỐI KHÔNG được render VnPayRedirectingView khi đơn đã PAID + ZERO_AMOUNT"
+        );
+        assert.equal(
+          text.includes("Đang kiểm tra kết quả giao dịch..."),
+          false,
+          "TUYỆT ĐỐI KHÔNG được render VnPayProcessingView khi đơn đã PAID + ZERO_AMOUNT"
+        );
+      } finally {
+        await act(async () => {
+          root.unmount();
+        });
+        cleanupDom();
+      }
+    });
+
+    it("10.5 Server Truth Precedence #2: PAID + MOCK + vnp_ResponseCode=00 (and view=vnpay_success / view=redirecting / view=zero) MUST render OrderSuccessView and NEVER render VNPay or Zero views", async () => {
+      const targetOrderId = "550e8400-e29b-41d4-a716-446655440093";
+      setupDomWithUrl(
+        `http://localhost/order-confirmation?orderId=${targetOrderId}&vnp_ResponseCode=00&view=vnpay_success`
+      );
+
+      const container = dom.window.document.getElementById("root")!;
+      const root = createRoot(container);
+      const mockToken = createValidMockJwt();
+      dom.window.localStorage.setItem("brewlite_auth_token", mockToken);
+
+      const paidMockOrder: OrderConfirmationData = {
+        id: targetOrderId,
+        status: "PAID",
+        createdAt: new Date(Date.now() - 60000).toISOString(),
+        expiresAt: new Date(Date.now() + 600000).toISOString(),
+        subtotalVnd: 85000,
+        discountVnd: 0,
+        totalVnd: 85000,
+        couponCode: null,
+        pointsEarned: 8,
+        hasFinancialException: false,
+        items: [
+          {
+            id: "550e8400-e29b-41d4-a716-446655440011",
+            productId: "550e8400-e29b-41d4-a716-446655440001",
+            productName: "Cold Brew Cam Vàng",
+            size: "L",
+            sizeMultiplierPercent: 120,
+            basePriceVnd: 85000,
+            quantity: 1,
+            unitPriceVnd: 85000,
+            lineTotalVnd: 85000,
+            toppings: [],
+          },
+        ],
+        payment: {
+          id: "550e8400-e29b-41d4-a716-446655440094",
+          status: "SUCCESS",
+          provider: "MOCK",
+          method: "CARD",
+          methodLast4: "1234",
+          amountVnd: 85000,
+          mockReference: "MOCK-CARD-1234-ABCD",
+          failureReason: null,
+          resolution: "PAYMENT_ACCEPTED",
+          requiresReview: false,
+          canRetry: false,
+          createdAt: new Date().toISOString(),
+        },
+      };
+
+      global.fetch = async (url) => {
+        const u = String(url);
+        if (u.includes("/orders/me")) {
+          return new Response(
+            JSON.stringify({
+              items: [paidMockOrder],
+              meta: { page: 1, limit: 10, total: 1, totalPages: 1 },
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        if (u.includes("/auth/me")) {
+          return new Response(
+            JSON.stringify({
+              id: "550e8400-e29b-41d4-a716-446655440001",
+              email: "khachhang@brewlite.vn",
+              fullName: "Nguyễn Văn A",
+              loyaltyPoints: 8,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        return new Response("Not found", { status: 404 });
+      };
+
+      try {
+        await act(async () => {
+          root.render(
+            React.createElement(
+              AuthContext.Provider,
+              { value: createMockAuthContext(mockToken) },
+              React.createElement(
+                CartProvider as React.ComponentType<{ key?: string }>,
+                { key: "paid-mock-vnp-param-test" },
+                React.createElement(OrderConfirmationPage)
+              )
+            )
+          );
+        });
+
+        const text = container.textContent || "";
+        // Phải render OrderSuccessView của Mock CARD
+        assert.ok(
+          text.includes("Đặt hàng & Thanh toán thành công!"),
+          "PAID + MOCK + vnp_ResponseCode=00 BẮT BUỘC phải render OrderSuccessView"
+        );
+        assert.ok(
+          text.includes("Card •••• 1234"),
+          "Phải hiển thị đúng phương thức thanh toán Mock Card •••• 1234 từ server"
+        );
+        assert.equal(
+          text.includes("Thanh toán thành công qua VNPay!"),
+          false,
+          "TUYỆT ĐỐI KHÔNG được render VnPaySuccessView khi đơn trên server là MOCK"
+        );
+        assert.equal(
+          text.includes("Đang chuyển hướng đến VNPay..."),
+          false,
+          "TUYỆT ĐỐI KHÔNG được render VnPayRedirectingView"
+        );
+        assert.equal(
+          text.includes("Đơn hàng hoàn tất (0 ₫)!"),
+          false,
+          "TUYỆT ĐỐI KHÔNG được render ZeroPaymentBypassView"
+        );
+      } finally {
+        await act(async () => {
+          root.unmount();
+        });
+        cleanupDom();
+      }
+    });
+
+    it("10.6 Server Truth Precedence #3: PENDING + MOCK + vnp_ResponseCode=00 MUST render PaymentFailedRetryView and NEVER render VnPayProcessingView / VnPayRedirectingView", async () => {
+      const targetOrderId = "550e8400-e29b-41d4-a716-446655440095";
+      setupDomWithUrl(
+        `http://localhost/order-confirmation?orderId=${targetOrderId}&vnp_ResponseCode=00&view=processing`
+      );
+      // Tắt polling tự động trong test kiểm tra render đồng bộ của PENDING + MOCK
+      setOrderConfirmationPollingConfig({ intervalMs: 3000, maxAttempts: 0 });
+
+      const container = dom.window.document.getElementById("root")!;
+      const root = createRoot(container);
+      const mockToken = createValidMockJwt();
+      dom.window.localStorage.setItem("brewlite_auth_token", mockToken);
+
+      const pendingMockOrder: OrderConfirmationData = {
+        id: targetOrderId,
+        status: "PENDING",
+        createdAt: new Date(Date.now() - 60000).toISOString(),
+        expiresAt: new Date(Date.now() + 600000).toISOString(),
+        subtotalVnd: 75000,
+        discountVnd: 0,
+        totalVnd: 75000,
+        couponCode: null,
+        pointsEarned: 0,
+        hasFinancialException: false,
+        items: [
+          {
+            id: "550e8400-e29b-41d4-a716-446655440011",
+            productId: "550e8400-e29b-41d4-a716-446655440001",
+            productName: "Bạc Xỉu Đá",
+            size: "M",
+            sizeMultiplierPercent: 100,
+            basePriceVnd: 75000,
+            quantity: 1,
+            unitPriceVnd: 75000,
+            lineTotalVnd: 75000,
+            toppings: [],
+          },
+        ],
+        payment: {
+          id: "550e8400-e29b-41d4-a716-446655440096",
+          status: "FAILED",
+          provider: "MOCK",
+          method: "CARD",
+          methodLast4: "0002",
+          amountVnd: 75000,
+          mockReference: "MOCK-CARD-0002-FAIL",
+          failureReason: "PAYMENT_DECLINED",
+          resolution: "FAILED",
+          requiresReview: false,
+          canRetry: true,
+          createdAt: new Date().toISOString(),
+        },
+      };
+
+      global.fetch = async (url) => {
+        const u = String(url);
+        if (u.includes("/orders/me")) {
+          return new Response(
+            JSON.stringify({
+              items: [pendingMockOrder],
+              meta: { page: 1, limit: 10, total: 1, totalPages: 1 },
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        if (u.includes("/auth/me")) {
+          return new Response(
+            JSON.stringify({
+              id: "550e8400-e29b-41d4-a716-446655440001",
+              email: "khachhang@brewlite.vn",
+              fullName: "Nguyễn Văn A",
+              loyaltyPoints: 0,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        return new Response("Not found", { status: 404 });
+      };
+
+      try {
+        await act(async () => {
+          root.render(
+            React.createElement(
+              AuthContext.Provider,
+              { value: createMockAuthContext(mockToken) },
+              React.createElement(
+                CartProvider as React.ComponentType<{ key?: string }>,
+                { key: "pending-mock-vnp-param-test" },
+                React.createElement(OrderConfirmationPage)
+              )
+            )
+          );
+        });
+
+        const text = container.textContent || "";
+        // Phải render PaymentFailedRetryView của Mock Payment (có nút #btnSubmitRetryPayment)
+        assert.ok(
+          container.querySelector("#btnSubmitRetryPayment"),
+          "PENDING + MOCK + vnp_ResponseCode=00 BẮT BUỘC phải render PaymentFailedRetryView (#btnSubmitRetryPayment)"
+        );
+        assert.equal(
+          text.includes("Đang kiểm tra kết quả giao dịch..."),
+          false,
+          "TUYỆT ĐỐI KHÔNG được render VnPayProcessingView khi đơn thuộc provider MOCK"
+        );
+        assert.equal(
+          text.includes("Đang chuyển hướng đến VNPay..."),
+          false,
+          "TUYỆT ĐỐI KHÔNG được render VnPayRedirectingView khi đơn thuộc provider MOCK"
+        );
+        assert.equal(
+          text.includes("Thanh toán thành công qua VNPay!"),
+          false,
+          "TUYỆT ĐỐI KHÔNG được render VnPaySuccessView khi đơn thuộc provider MOCK"
+        );
+      } finally {
+        await act(async () => {
+          root.unmount();
+        });
+        cleanupDom();
+      }
     });
   });
 

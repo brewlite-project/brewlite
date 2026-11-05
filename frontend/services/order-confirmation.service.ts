@@ -111,7 +111,6 @@ export interface PaymentApiResponse {
   createdAt: string;
 }
 
-
 /**
  * Định tuyến endpoint: sử dụng Next.js proxy rewrite `/api/backend/...` trên trình duyệt
  * để tránh lỗi CORS giữa cổng 3000 và 3001.
@@ -216,6 +215,95 @@ export function canOrderRetryPayment(
     return false;
   }
   return true;
+}
+
+export interface OrderConfirmationPollingConfig {
+  intervalMs: number;
+  maxAttempts: number;
+}
+
+const DEFAULT_ORDER_CONFIRMATION_POLLING_CONFIG: OrderConfirmationPollingConfig = {
+  intervalMs: 3000,
+  maxAttempts: 10,
+};
+
+let currentOrderConfirmationPollingConfig: OrderConfirmationPollingConfig = {
+  ...DEFAULT_ORDER_CONFIRMATION_POLLING_CONFIG,
+};
+
+export function getOrderConfirmationPollingConfig(): OrderConfirmationPollingConfig {
+  return { ...currentOrderConfirmationPollingConfig };
+}
+
+export function setOrderConfirmationPollingConfig(
+  overrides: Partial<OrderConfirmationPollingConfig>
+): void {
+  currentOrderConfirmationPollingConfig = {
+    ...currentOrderConfirmationPollingConfig,
+    ...overrides,
+  };
+}
+
+export function resetOrderConfirmationPollingConfig(): void {
+  currentOrderConfirmationPollingConfig = {
+    ...DEFAULT_ORDER_CONFIRMATION_POLLING_CONFIG,
+  };
+}
+
+/**
+ * Xác định xem đơn hàng trên trang Order Confirmation có cần thực hiện bounded polling hay không.
+ * - Chỉ poll khi trạng thái đang PENDING, PROCESSING hoặc RECONCILING.
+ * - Dừng ngay lập tức khi gặp bất kỳ trạng thái kết thúc (terminal state) nào:
+ *   SUCCESS/PAID, FAILED terminal, CANCELLED, hoặc Financial Exception / Requires Review.
+ */
+export function shouldPollOrderConfirmation(
+  order: OrderConfirmationData | null | undefined
+): boolean {
+  if (!order) return false;
+
+  // 1. Dừng khi gặp terminal state: SUCCESS / PAID
+  if (
+    order.status === "PAID" ||
+    order.status === "PREPARING" ||
+    order.status === "READY" ||
+    order.status === "COMPLETED" ||
+    order.payment?.status === "SUCCESS" ||
+    order.payment?.resolution === "PAYMENT_ACCEPTED"
+  ) {
+    return false;
+  }
+
+  // 2. Dừng khi gặp terminal state: CANCELLED
+  if (order.status === "CANCELLED") {
+    return false;
+  }
+
+  // 3. Dừng khi gặp terminal state: Financial Exception / Requires Review
+  if (
+    order.hasFinancialException === true ||
+    order.payment?.requiresReview === true ||
+    order.payment?.resolution === "FINANCIAL_EXCEPTION" ||
+    order.payment?.resolution === "REQUIRES_REVIEW"
+  ) {
+    return false;
+  }
+
+  // 4. Dừng khi gặp terminal state: FAILED terminal
+  if (
+    order.status === "PAYMENT_FAILED" ||
+    order.payment?.status === "FAILED" ||
+    order.payment?.resolution === "FAILED"
+  ) {
+    return false;
+  }
+
+  // 5. Chỉ poll khi đang ở trạng thái chờ kết quả / đối soát: PENDING, PROCESSING, RECONCILING
+  return (
+    order.status === "PENDING" ||
+    order.payment?.status === "PENDING" ||
+    order.payment?.resolution === "PROCESSING" ||
+    order.payment?.resolution === "RECONCILING"
+  );
 }
 
 /**
