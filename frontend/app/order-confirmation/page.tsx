@@ -151,7 +151,7 @@ function OrderConfirmationContent() {
 
   // Bounded Polling: Tự động refetch Server Truth khi trạng thái đang PENDING / PROCESSING / RECONCILING.
   // Dừng ngay khi gặp terminal state (SUCCESS/PAID, FAILED terminal, CANCELLED, financial exception),
-  // giới hạn số lần gọi tối đa (maxAttempts) và cleanup khi unmount.
+  // giới hạn số lần tối đa (maxAttempts) và cleanup khi unmount.
   useEffect(() => {
     if (loading || !token || !orderIdParam || !order) {
       return;
@@ -361,8 +361,6 @@ function OrderConfirmationContent() {
     !isMockOrder &&
     (order.payment?.provider === "VNPAY" || order.payment?.method === "VNPAY");
 
-  const hasNoPaymentRecord = order.payment === null;
-
   // Ưu tiên #1: Đơn hàng đã được máy chủ xác nhận PAID (PAID / PREPARING / READY / COMPLETED)
   if (isSuccessStatus) {
     if (isZeroAmountOrder) {
@@ -399,9 +397,10 @@ function OrderConfirmationContent() {
     );
   }
 
-  // Ưu tiên #2: Đơn hàng chưa PAID thuộc provider MOCK hoặc ZERO_AMOUNT:
-  // Tuyệt đối không cho phép query params biến đơn MOCK / ZERO_AMOUNT thành màn hình VNPay redirect/processing/failed.
-  if (isMockOrder || isZeroAmountOrder) {
+  // Ưu tiên #2: Chỉ cho phép vào luồng giao diện VNPay khi máy chủ xác nhận rõ payment.provider === "VNPAY".
+  // Khi payment === null (hoặc thuộc provider MOCK / ZERO_AMOUNT), TUYỆT ĐỐI KHÔNG cho phép URL query params
+  // (view=redirecting, vnp_ResponseCode=00, vnp_ResponseCode!=00, view=vnpay_failed) tự suy diễn ra provider VNPay.
+  if (!isExplicitVnPayOrder) {
     return (
       <PaymentFailedRetryView
         order={order}
@@ -412,72 +411,58 @@ function OrderConfirmationContent() {
     );
   }
 
-  // Ưu tiên #3: Luồng VNPay (chỉ áp dụng khi đơn không phải MOCK/ZERO_AMOUNT và chưa PAID)
-  const isPaymentPendingReconcile =
-    order.payment?.status === "PENDING" ||
-    order.payment?.resolution === "PROCESSING" ||
-    order.payment?.resolution === "RECONCILING";
+  // Ưu tiên #3: Đơn hàng có payment.provider === "VNPAY" được máy chủ xác nhận
+  const hasFinancialOrReviewLock =
+    order.hasFinancialException === true ||
+    order.payment?.requiresReview === true ||
+    order.payment?.resolution === "FINANCIAL_EXCEPTION" ||
+    order.payment?.resolution === "REQUIRES_REVIEW";
 
-  // Màn hình chuyển hướng sang VNPay: chỉ hợp lệ khi đơn vẫn đang PENDING, chưa có giao dịch đang đối soát
-  // và không có ngoại lệ tài chính.
-  if (
-    viewParam === "redirecting" &&
-    order.status === "PENDING" &&
-    !isPaymentPendingReconcile &&
-    !order.hasFinancialException &&
-    (isExplicitVnPayOrder || hasNoPaymentRecord)
-  ) {
+  if (hasFinancialOrReviewLock) {
     return (
-      <VnPayRedirectingView
+      <PaymentFailedRetryView
         order={order}
-        vnpayPaymentUrl={`/order-confirmation?orderId=${order.id}&vnp_ResponseCode=00&view=processing`}
+        token={token}
+        onRetrySuccess={handleRetrySuccess}
+        onRetryFailure={handleRetryFailure}
       />
     );
   }
 
-  // VNPay Processing / Reconciling:
-  // Khi payment đang ở trạng thái PENDING / PROCESSING / RECONCILING (theo BR-04 & BR-05: không mở Retry khi đang chờ đối soát),
-  // HOẶC khi đơn PENDING (VNPay / chưa gắn provider) nhận callback vnp_ResponseCode=00 / view=processing.
-  const isVnPayCallback =
-    order.status === "PENDING" &&
-    (isPaymentPendingReconcile ||
-      ((isExplicitVnPayOrder || hasNoPaymentRecord) &&
-        (vnpResponseCode === "00" || viewParam === "processing")));
-
-  if (
-    isVnPayCallback ||
-    (order.status === "CANCELLED" &&
-      isExplicitVnPayOrder &&
-      order.payment?.resolution === "RECONCILING" &&
-      viewParam === "processing")
-  ) {
+  if (order.status === "CANCELLED") {
+    if (order.payment?.resolution === "RECONCILING" && viewParam === "processing") {
+      return (
+        <VnPayProcessingView
+          order={order}
+          orderIdParam={orderIdParam}
+          vnpTxnRef={vnpTxnRef}
+          amountVnd={order.totalVnd}
+          onRefreshStatus={() => handleReloadOrder(false)}
+        />
+      );
+    }
     return (
-      <VnPayProcessingView
+      <PaymentFailedRetryView
         order={order}
-        orderIdParam={orderIdParam}
-        vnpTxnRef={vnpTxnRef}
-        amountVnd={order.totalVnd}
-        onRefreshStatus={() => handleReloadOrder(false)}
+        token={token}
+        onRetrySuccess={handleRetrySuccess}
+        onRetryFailure={handleRetryFailure}
       />
     );
   }
 
-  // Case VNPay Payment Failed & Retry (BR-05)
-  // Lưu ý: chỉ mở VnPayFailedRetryView khi đơn hàng không bị CANCELLED, không đang đối soát, không có ngoại lệ tài chính,
-  // và thuộc VNPay (hoặc đơn chưa có bản ghi payment nhưng nhận callback lỗi từ VNPay).
-  const isVnPayFailed =
-    order.status !== "CANCELLED" &&
-    !isPaymentPendingReconcile &&
-    !order.hasFinancialException &&
-    (isExplicitVnPayOrder ||
-      (hasNoPaymentRecord &&
-        ((Boolean(vnpResponseCode) && vnpResponseCode !== "00") ||
-          viewParam === "vnpay_failed")));
+  const isServerVnPayFailed =
+    order.status === "PAYMENT_FAILED" ||
+    order.payment?.status === "FAILED" ||
+    order.payment?.resolution === "FAILED";
 
-  if (isVnPayFailed) {
+  // Case VNPay Payment Failed & Retry (BR-05):
+  // Khi máy chủ đã xác nhận giao dịch VNPay FAILED, luôn giữ trạng thái FAILED/retry theo máy chủ,
+  // TUYỆT ĐỐI KHÔNG cho phép view=redirecting, view=processing hay vnp_ResponseCode=00 ghi đè về màn hình redirect/processing.
+  if (isServerVnPayFailed) {
     const failureReason = order.payment?.failureReason;
     const derivedResponseCode =
-      vnpResponseCode ||
+      (vnpResponseCode && vnpResponseCode !== "00" ? vnpResponseCode : null) ||
       (failureReason?.startsWith("VNPAY_RESPONSE_")
         ? failureReason.replace("VNPAY_RESPONSE_", "")
         : failureReason?.startsWith("VNPAY_STATUS_")
@@ -491,18 +476,49 @@ function OrderConfirmationContent() {
         token={token}
         onRetryVnPay={async () => {
           if (order.payment?.status === "PENDING") {
-            // Không retry khi Payment vẫn PENDING
             await handleReloadOrder(false);
             return;
           }
-          // Retry terminal FAILED: thực sự quay lại Payment để khởi tạo attempt mới hợp lệ
           router.push(`/payment?orderId=${encodeURIComponent(order.id)}&method=VNPAY`);
         }}
       />
     );
   }
 
-  // Mặc định cho các trạng thái còn lại (CANCELLED, ngoại lệ tài chính, hoặc PENDING chưa thanh toán)
+  // Khi giao dịch VNPay trên máy chủ đang ở trạng thái PENDING (PROCESSING / RECONCILING):
+  if (
+    viewParam === "redirecting" &&
+    order.status === "PENDING" &&
+    order.payment?.status === "PENDING" &&
+    order.payment?.resolution !== "RECONCILING" &&
+    !vnpResponseCode
+  ) {
+    return (
+      <VnPayRedirectingView
+        order={order}
+        vnpayPaymentUrl={`/order-confirmation?orderId=${order.id}&vnp_ResponseCode=00&view=processing`}
+      />
+    );
+  }
+
+  if (
+    order.status === "PENDING" &&
+    (order.payment?.status === "PENDING" ||
+      order.payment?.resolution === "PROCESSING" ||
+      order.payment?.resolution === "RECONCILING")
+  ) {
+    return (
+      <VnPayProcessingView
+        order={order}
+        orderIdParam={orderIdParam}
+        vnpTxnRef={vnpTxnRef}
+        amountVnd={order.totalVnd}
+        onRefreshStatus={() => handleReloadOrder(false)}
+      />
+    );
+  }
+
+  // Mặc định cho các trạng thái còn lại
   return (
     <PaymentFailedRetryView
       order={order}
