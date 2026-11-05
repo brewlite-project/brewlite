@@ -140,8 +140,11 @@ bash scripts/compose-preflight-env.sh && \
 bash scripts/compose-preflight-env.sh && \
   docker compose --env-file compose.env run --rm --no-deps -e ALLOW_COMPOSE_DEMO_SEED=true migrate npm run db:seed
 
-# 5. (Tùy chọn) Chạy script kiểm thử tích hợp E2E tự động (FE -> BE -> DB, Auth, Order, Payment, Restart Persistence)
-node scripts/scrum92/verify_compose_e2e.mjs
+# 5. (Tùy chọn) Khi muốn chạy kiểm thử tích hợp E2E tự động trên stack/volume/DB cô lập (-p brewlite_scrum92_e2e):
+# Dừng stack dev brewlite_compose trước để tránh trùng cổng 3000/3001/15432, sau đó chạy:
+docker compose --env-file compose.env stop
+node scripts/scrum92/verify_compose_e2e.mjs --up
+node scripts/scrum92/verify_compose_e2e.mjs --down
 ```
 
 #### Cách B — Chạy trên Windows PowerShell:
@@ -166,8 +169,11 @@ powershell -ExecutionPolicy Bypass -File scripts/compose-preflight-env.ps1
 if ($LASTEXITCODE -ne 0) { throw "Compose preflight failed" }
 docker compose --env-file compose.env run --rm --no-deps -e ALLOW_COMPOSE_DEMO_SEED=true migrate npm run db:seed
 
-# 5. (Tùy chọn) Chạy script kiểm thử tích hợp E2E tự động (FE -> BE -> DB, Auth, Order, Payment, Restart Persistence)
-node scripts/scrum92/verify_compose_e2e.mjs
+# 5. (Tùy chọn) Khi muốn chạy kiểm thử tích hợp E2E tự động trên stack/volume/DB cô lập (-p brewlite_scrum92_e2e):
+# Dừng stack dev brewlite_compose trước để tránh trùng cổng 3000/3001/15432, sau đó chạy:
+docker compose --env-file compose.env stop
+node scripts/scrum92/verify_compose_e2e.mjs --up
+node scripts/scrum92/verify_compose_e2e.mjs --down
 ```
 
 ## 8. API dự kiến

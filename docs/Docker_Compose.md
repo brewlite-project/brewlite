@@ -133,7 +133,7 @@ Stop and investigate if any value differs; do not use `prisma migrate reset`,
 `prisma db push`, or `docker compose down -v` to prepare a database for seed.
 
 The seed guard permits Compose only when all of these are exact: database
-`brewlite_compose`, hostname `postgres`, port `5432`, and
+`brewlite_compose` (or a dedicated `brewlite_seed_*` database), hostname `postgres`, port `5432`, and
 `ALLOW_COMPOSE_DEMO_SEED=true`. Pass the flag directly to the one-shot seed
 container; setting it only in Git Bash or PowerShell would not pass it to the container:
 
@@ -174,10 +174,16 @@ curl --fail --silent http://localhost:3000/api/backend/products | node -e 'let b
 curl --fail http://localhost:3000/images/bac-xiu-kem-beo-phin.jpg
 ```
 
-Or run the cross-platform E2E verification script (works on both Git Bash and Windows PowerShell):
+## Isolated E2E Verification (`SCRUM-92`)
+
+To run the automated end-to-end integration and restart-persistence verification without touching your `brewlite_compose` development stack or volume (`brewlite_compose_brewlite_pgdata`), use `scripts/scrum92/verify_compose_e2e.mjs`. It enforces an isolated Compose project (`-p brewlite_scrum92_e2e`), isolated volume (`brewlite_scrum92_e2e_brewlite_pgdata`), and isolated database (`brewlite_seed_scrum92_e2e`), and cleans up all exact test IDs in `finally` by default:
 
 ```bash
-node scripts/scrum92/verify_compose_e2e.mjs
+# Stop default brewlite_compose first if running on ports 3000/3001/15432, then start isolated E2E stack & run verification:
+node scripts/scrum92/verify_compose_e2e.mjs --up
+
+# Tear down the isolated E2E stack when finished:
+node scripts/scrum92/verify_compose_e2e.mjs --down
 ```
 
 Expected database counts are 4 categories, 9 products, and 5 toppings. Open

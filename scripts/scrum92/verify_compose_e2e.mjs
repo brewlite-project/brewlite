@@ -1,23 +1,22 @@
 /**
  * SCRUM-92 / P2-18 — Reproducible Docker Compose Clean Setup & E2E Integration Verification
  * Works on both Git Bash and Windows PowerShell:
+ *   node scripts/scrum92/verify_compose_e2e.mjs --up
  *   node scripts/scrum92/verify_compose_e2e.mjs
- *   node scripts/scrum92/verify_compose_e2e.mjs --cleanup-only
+ *   node scripts/scrum92/verify_compose_e2e.mjs --keep-artifacts
+ *   node scripts/scrum92/verify_compose_e2e.mjs --down
  *
- * Determinism & Safety Guarantees:
- * - Never runs `docker volume rm` or `docker compose down -v`.
- * - Uses container-internal `$POSTGRES_USER` and `$POSTGRES_DB` via `sh -c 'psql ...'`.
- * - Before running E2E flows, deterministically cleans up any prior SCRUM-92 synthetic test
- *   records (`scrum92.verify.%@brewlite.vn`, coupon `SCRUM92FREE`) and restores their reserved
- *   product stock inside a single SQL transaction, so repeated runs never exhaust product stock.
- * - Verifies Phase 2 payment behavior on current `dev` (`SCRUM-84` & `SCRUM-85`):
- *   1. `POST /api/backend/payments` (Mock) -> `403 MOCK_PAYMENT_DISABLED` in Compose (`NODE_ENV=production`).
- *   2. `POST /api/backend/payments/zero-amount` -> `409 ORDER_NOT_ZERO_AMOUNT` on positive order,
- *      and `201 Created` (`PAID` / `SUCCESS`) + `200 OK` (`idempotency-replayed: true`) on a 0 VND order.
- *   3. `POST /api/backend/payments/vnpay/initiate` -> `201 Created` (`PENDING`) + `200 OK` replay
- *      when VNPay sandbox variables are configured in `compose.env`.
- * - Automatically redacts sensitive values (`<REDACTED_JWT>`, `<REDACTED_TMN_CODE>`,
- *   `<REDACTED_SECURE_HASH>`) and strips trailing whitespace from console output.
+ * Determinism & Isolation Guarantees:
+ * - Requires an isolated Docker Compose project (`-p brewlite_scrum92_e2e`), isolated named volume
+ *   (`brewlite_scrum92_e2e_brewlite_pgdata`), and isolated database (`brewlite_seed_scrum92_e2e`).
+ * - Refuses to run against the default `brewlite_compose` project, `brewlite_compose_brewlite_pgdata`
+ *   volume, `brewlite_compose` database, or `brewlite_db` local dev database.
+ * - Disables background `ORDER_EXPIRATION_ENABLED` and `PAYMENT_RECONCILIATION_ENABLED` schedulers
+ *   in the isolated E2E stack so pre-restart and post-restart snapshots are 100% deterministic.
+ * - Uses fixed test coupon ID `c9200000-0000-4000-8000-000000000092` (`SCRUM92FREE`) without
+ *   `ON CONFLICT DO UPDATE`; refuses to run if the coupon code/ID collides with existing data.
+ * - Tracks exact entity UUIDs created during the run and restores stock + deletes only those exact
+ *   IDs in a `finally` block by default (unless `--keep-artifacts` is explicitly passed).
  */
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -32,7 +31,18 @@ const FE_URL = 'http://localhost:3000';
 const BE_URL = 'http://localhost:3001';
 const PROXY_API = `${FE_URL}/api/backend`;
 
-const COMPOSE_VARIABLES = [
+export const ISOLATED_PROJECT_NAME = 'brewlite_scrum92_e2e';
+export const ISOLATED_VOLUME_NAME = 'brewlite_scrum92_e2e_brewlite_pgdata';
+export const ISOLATED_DATABASE_NAME = 'brewlite_seed_scrum92_e2e';
+
+export const TEST_COUPON_ID = 'c9200000-0000-4000-8000-000000000092';
+export const TEST_COUPON_CODE = 'SCRUM92FREE';
+
+const FORBIDDEN_PROJECTS = new Set(['brewlite_compose', 'cnpm', 'default']);
+const FORBIDDEN_VOLUMES = new Set(['brewlite_compose_brewlite_pgdata', 'brewlite_pgdata']);
+const FORBIDDEN_DATABASES = new Set(['brewlite_compose', 'brewlite_db', 'postgres']);
+
+export const COMPOSE_VARIABLES = [
   'DATABASE_URL',
   'POSTGRES_USER',
   'POSTGRES_PASSWORD',
@@ -40,14 +50,32 @@ const COMPOSE_VARIABLES = [
   'POSTGRES_HOST_PORT',
   'JWT_SECRET',
   'INTERNAL_SECRET',
+  'ORDER_EXPIRATION_ENABLED',
+  'ORDER_EXPIRATION_BATCH_SIZE',
   'VNPAY_TMN_CODE',
   'VNPAY_HASH_SECRET',
   'VNPAY_PAYMENT_URL',
   'VNPAY_RETURN_URL',
+  'VNPAY_ALLOW_HTTP_LOCAL_RETURN_URL',
   'VNPAY_QUERYDR_URL',
   'VNPAY_QUERYDR_TIMEOUT_MS',
+  'PAYMENT_RECONCILIATION_ENABLED',
+  'PAYMENT_RECONCILIATION_INTERVAL_MS',
+  'PAYMENT_RECONCILIATION_BATCH_SIZE',
+  'PAYMENT_RECONCILIATION_LEASE_MS',
+  'PAYMENT_RECONCILIATION_COOLDOWN_MS',
+  'PAYMENT_RECONCILIATION_IP_ADDR',
   'COMPOSE_PROJECT_NAME',
 ];
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function assertUuid(id, label = 'UUID') {
+  if (typeof id !== 'string' || !UUID_REGEX.test(id)) {
+    throw new Error(`Invalid ${label}: "${id}"`);
+  }
+  return id;
+}
 
 function stripTrailingWhitespace(text) {
   return String(text || '')
@@ -56,8 +84,8 @@ function stripTrailingWhitespace(text) {
     .trim();
 }
 
-function checkPreflight() {
-  const conflicts = COMPOSE_VARIABLES.filter((name) => process.env[name] !== undefined);
+export function checkPreflight(env = process.env) {
+  const conflicts = COMPOSE_VARIABLES.filter((name) => env[name] !== undefined);
   if (conflicts.length > 0) {
     throw new Error(
       `Compose preflight failed: exported variable(s) would override compose.env: ${conflicts.join(', ')}`,
@@ -68,7 +96,7 @@ function checkPreflight() {
   }
 }
 
-function parseEnvFile(filePath) {
+export function parseEnvFile(filePath) {
   const result = {};
   const content = fs.readFileSync(filePath, 'utf8');
   for (const rawLine of content.split(/\r?\n/)) {
@@ -83,17 +111,42 @@ function parseEnvFile(filePath) {
   return result;
 }
 
+export function buildIsolatedComposeEnv(baseEnvCfg, hostEnv = process.env) {
+  const dbUrl = new URL(
+    baseEnvCfg.DATABASE_URL || 'postgresql://brewlite:change_me@postgres:5432/brewlite_compose?schema=public',
+  );
+  dbUrl.pathname = `/${ISOLATED_DATABASE_NAME}`;
+
+  return {
+    ...hostEnv,
+    ...baseEnvCfg,
+    COMPOSE_PROJECT_NAME: ISOLATED_PROJECT_NAME,
+    POSTGRES_DB: ISOLATED_DATABASE_NAME,
+    DATABASE_URL: dbUrl.toString(),
+    ORDER_EXPIRATION_ENABLED: 'false',
+    PAYMENT_RECONCILIATION_ENABLED: 'false',
+    VNPAY_ALLOW_HTTP_LOCAL_RETURN_URL: baseEnvCfg.VNPAY_ALLOW_HTTP_LOCAL_RETURN_URL || 'true',
+  };
+}
+
+let isolatedComposeEnv = null;
+
 function runDockerCompose(args, input) {
-  const res = spawnSync('docker', ['compose', '--env-file', 'compose.env', ...args], {
+  if (!isolatedComposeEnv) {
+    throw new Error('Isolated Compose environment has not been initialized.');
+  }
+  const fullArgs = ['compose', '-p', ISOLATED_PROJECT_NAME, '--env-file', 'compose.env', ...args];
+  const res = spawnSync('docker', fullArgs, {
     cwd: ROOT,
     input,
+    env: isolatedComposeEnv,
     encoding: 'utf8',
     windowsHide: true,
     maxBuffer: 8 * 1024 * 1024,
   });
   if (res.error || res.status !== 0) {
     throw new Error(
-      `docker compose ${args.join(' ')} failed (exit ${res.status}):\n${res.stdout || ''}\n${res.stderr || ''}`,
+      `docker ${fullArgs.join(' ')} failed (exit ${res.status}):\n${res.stdout || ''}\n${res.stderr || ''}`,
     );
   }
   return stripTrailingWhitespace(res.stdout);
@@ -111,6 +164,124 @@ function inspectContainer(containerId, format) {
   return stripTrailingWhitespace(res.stdout);
 }
 
+function parseContainerEnvList(rawEnvLines) {
+  const map = {};
+  for (const line of String(rawEnvLines || '').split(/\r?\n/)) {
+    const idx = line.indexOf('=');
+    if (idx === -1) continue;
+    map[line.slice(0, idx)] = line.slice(idx + 1);
+  }
+  return map;
+}
+
+function assertDevStackNotRunning() {
+  const res = spawnSync('docker', ['compose', '-p', 'brewlite_compose', 'ps', '-q'], {
+    cwd: ROOT,
+    encoding: 'utf8',
+    windowsHide: true,
+  });
+  const activeIds = stripTrailingWhitespace(res.stdout);
+  if (activeIds) {
+    throw new Error(
+      'Safety Guard: Default dev stack "brewlite_compose" has running containers. ' +
+        'Stop "brewlite_compose" first so SCRUM-92 E2E never collides with your active dev stack or host ports.',
+    );
+  }
+}
+
+export function validateIsolatedTargetMetadata({
+  pgProject,
+  beProject,
+  feProject,
+  pgVolume,
+  pgDbEnv,
+  beEnvMap,
+  actualDb,
+}) {
+  if (
+    pgProject !== ISOLATED_PROJECT_NAME ||
+    beProject !== ISOLATED_PROJECT_NAME ||
+    feProject !== ISOLATED_PROJECT_NAME ||
+    FORBIDDEN_PROJECTS.has(pgProject)
+  ) {
+    throw new Error(
+      `Safety Guard: Container project mismatch (postgres="${pgProject}", backend="${beProject}", frontend="${feProject}"). ` +
+        `Expected isolated project "${ISOLATED_PROJECT_NAME}".`,
+    );
+  }
+
+  if (pgVolume !== ISOLATED_VOLUME_NAME || FORBIDDEN_VOLUMES.has(pgVolume)) {
+    throw new Error(
+      `Safety Guard: Postgres volume "${pgVolume}" is not isolated test volume "${ISOLATED_VOLUME_NAME}". Refusing to run.`,
+    );
+  }
+
+  if (
+    pgDbEnv !== ISOLATED_DATABASE_NAME ||
+    actualDb !== ISOLATED_DATABASE_NAME ||
+    FORBIDDEN_DATABASES.has(actualDb)
+  ) {
+    throw new Error(
+      `Safety Guard: Database target mismatch (container POSTGRES_DB="${pgDbEnv}", current_database()="${actualDb}"). ` +
+        `Expected isolated test database "${ISOLATED_DATABASE_NAME}".`,
+    );
+  }
+
+  if (
+    beEnvMap.PAYMENT_RECONCILIATION_ENABLED !== 'false' ||
+    beEnvMap.ORDER_EXPIRATION_ENABLED !== 'false'
+  ) {
+    throw new Error(
+      `Safety Guard: Background schedulers must be disabled in the isolated E2E stack to prevent snapshot races ` +
+        `(got PAYMENT_RECONCILIATION_ENABLED="${beEnvMap.PAYMENT_RECONCILIATION_ENABLED}", ` +
+        `ORDER_EXPIRATION_ENABLED="${beEnvMap.ORDER_EXPIRATION_ENABLED}"). ` +
+        `Start the isolated stack using: node scripts/scrum92/verify_compose_e2e.mjs --up`,
+    );
+  }
+}
+
+function assertIsolatedComposeTarget() {
+  assertDevStackNotRunning();
+
+  const pgId = runDockerCompose(['ps', '-q', 'postgres']);
+  const beId = runDockerCompose(['ps', '-q', 'backend']);
+  const feId = runDockerCompose(['ps', '-q', 'frontend']);
+
+  if (!pgId || !beId || !feId) {
+    throw new Error(
+      `Isolated stack "${ISOLATED_PROJECT_NAME}" is not running. Start it with: node scripts/scrum92/verify_compose_e2e.mjs --up`,
+    );
+  }
+
+  const pgProject = inspectContainer(pgId, '{{ index .Config.Labels "com.docker.compose.project" }}');
+  const beProject = inspectContainer(beId, '{{ index .Config.Labels "com.docker.compose.project" }}');
+  const feProject = inspectContainer(feId, '{{ index .Config.Labels "com.docker.compose.project" }}');
+  const pgVolume = inspectContainer(
+    pgId,
+    '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql"}}{{.Name}}{{end}}{{end}}',
+  );
+  const pgEnvMap = parseContainerEnvList(inspectContainer(pgId, '{{range .Config.Env}}{{println .}}{{end}}'));
+  const beEnvMap = parseContainerEnvList(inspectContainer(beId, '{{range .Config.Env}}{{println .}}{{end}}'));
+  const actualDb = runPsqlTuple('SELECT current_database();');
+
+  validateIsolatedTargetMetadata({
+    pgProject,
+    beProject,
+    feProject,
+    pgVolume,
+    pgDbEnv: pgEnvMap.POSTGRES_DB,
+    beEnvMap,
+    actualDb,
+  });
+
+  return {
+    project: pgProject,
+    volume: pgVolume,
+    database: actualDb,
+    schedulersDisabled: true,
+  };
+}
+
 function runPsql(sql) {
   return runDockerCompose(
     ['exec', '-T', 'postgres', 'sh', '-c', 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'],
@@ -125,107 +296,44 @@ function runPsqlTuple(sql) {
   );
 }
 
-function cleanupScrum92TestData() {
-  const cleanupSql = `
-BEGIN;
+function seedIsolatedZeroCoupon(createdArtifacts) {
+  assertUuid(TEST_COUPON_ID, 'TEST_COUPON_ID');
+  const existingRowsRaw = runPsqlTuple(
+    `SELECT id || '|' || code || '|' || active_usage_count
+       FROM coupons
+      WHERE code = '${TEST_COUPON_CODE}'
+         OR id = '${TEST_COUPON_ID}';`,
+  );
 
-WITH target_users AS (
-  SELECT id
-  FROM users
-  WHERE email LIKE 'scrum92.verify.%@brewlite.vn'
-     OR email LIKE 'scrum92.docker.%@brewlite.vn'
-),
-target_orders AS (
-  SELECT id, status
-  FROM orders
-  WHERE user_id IN (SELECT id FROM target_users)
-),
-stock_to_restore AS (
-  SELECT oi.product_id, COALESCE(SUM(oi.quantity), 0)::int AS qty
-  FROM order_items oi
-  JOIN target_orders o ON o.id = oi.order_id
-  WHERE o.status <> 'CANCELLED'
-  GROUP BY oi.product_id
-),
-restored_products AS (
-  UPDATE products p
-  SET stock = p.stock + s.qty
-  FROM stock_to_restore s
-  WHERE p.id = s.product_id
-  RETURNING p.id, s.qty
-)
-SELECT COALESCE(SUM(qty), 0)::int AS restored_stock_units FROM restored_products;
+  if (existingRowsRaw) {
+    const lines = existingRowsRaw.split(/\r?\n/).filter(Boolean);
+    for (const line of lines) {
+      const [id, code, activeUsageCount] = line.split('|');
+      if (id !== TEST_COUPON_ID || code !== TEST_COUPON_CODE) {
+        throw new Error(
+          `Safety Guard: Coupon collision detected in database (found id="${id}", code="${code}"). ` +
+            `Expected unused fixture id="${TEST_COUPON_ID}" and code="${TEST_COUPON_CODE}". Refusing to overwrite or delete.`,
+        );
+      }
+      if (Number(activeUsageCount) > 0) {
+        throw new Error(
+          `Safety Guard: Fixture coupon "${TEST_COUPON_CODE}" (${TEST_COUPON_ID}) already exists with active_usage_count=${activeUsageCount}. Refusing to mutate.`,
+        );
+      }
+    }
+    throw new Error(
+      `Safety Guard: Fixture coupon "${TEST_COUPON_CODE}" (${TEST_COUPON_ID}) already exists before test start. ` +
+        `Clean up isolated test stack or run without --keep-artifacts.`,
+    );
+  }
 
-DELETE FROM payment_gateway_events
-WHERE payment_id IN (
-  SELECT id FROM payments
-  WHERE user_id IN (
-    SELECT id FROM users
-    WHERE email LIKE 'scrum92.verify.%@brewlite.vn'
-       OR email LIKE 'scrum92.docker.%@brewlite.vn'
-  )
-);
-
-DELETE FROM payments
-WHERE user_id IN (
-  SELECT id FROM users
-  WHERE email LIKE 'scrum92.verify.%@brewlite.vn'
-     OR email LIKE 'scrum92.docker.%@brewlite.vn'
-);
-
-DELETE FROM coupon_redemptions
-WHERE user_id IN (
-  SELECT id FROM users
-  WHERE email LIKE 'scrum92.verify.%@brewlite.vn'
-     OR email LIKE 'scrum92.docker.%@brewlite.vn'
-);
-
-DELETE FROM order_item_toppings
-WHERE order_item_id IN (
-  SELECT oi.id
-  FROM order_items oi
-  JOIN orders o ON o.id = oi.order_id
-  JOIN users u ON u.id = o.user_id
-  WHERE u.email LIKE 'scrum92.verify.%@brewlite.vn'
-     OR u.email LIKE 'scrum92.docker.%@brewlite.vn'
-);
-
-DELETE FROM order_items
-WHERE order_id IN (
-  SELECT o.id
-  FROM orders o
-  JOIN users u ON u.id = o.user_id
-  WHERE u.email LIKE 'scrum92.verify.%@brewlite.vn'
-     OR u.email LIKE 'scrum92.docker.%@brewlite.vn'
-);
-
-DELETE FROM orders
-WHERE user_id IN (
-  SELECT id FROM users
-  WHERE email LIKE 'scrum92.verify.%@brewlite.vn'
-     OR email LIKE 'scrum92.docker.%@brewlite.vn'
-);
-
-DELETE FROM coupons
-WHERE code = 'SCRUM92FREE';
-
-DELETE FROM users
-WHERE email LIKE 'scrum92.verify.%@brewlite.vn'
-   OR email LIKE 'scrum92.docker.%@brewlite.vn';
-
-COMMIT;
-`;
-  runPsqlTuple(cleanupSql);
-}
-
-function seedScrum92ZeroCoupon() {
-  const couponSql = `
+  const insertSql = `
 INSERT INTO coupons (
   id, code, type, value, min_subtotal_vnd, max_discount_vnd,
   starts_at, expires_at, usage_limit, per_user_limit, active_usage_count
 ) VALUES (
-  'c9200000-0000-4000-8000-000000000092',
-  'SCRUM92FREE',
+  '${TEST_COUPON_ID}',
+  '${TEST_COUPON_CODE}',
   'PERCENT',
   100,
   0,
@@ -235,13 +343,130 @@ INSERT INTO coupons (
   100,
   10,
   0
-)
-ON CONFLICT (code) DO UPDATE
-SET active_usage_count = 0,
-    starts_at = NOW() - INTERVAL '1 day',
-    expires_at = NOW() + INTERVAL '7 days';
+);
 `;
-  runPsqlTuple(couponSql);
+  runPsqlTuple(insertSql);
+  createdArtifacts.couponId = TEST_COUPON_ID;
+}
+
+export function buildExactIdCleanupSql(createdArtifacts) {
+  const orderIds = Array.from(createdArtifacts.orderIds || []).map((id) => `'${assertUuid(id, 'orderId')}'`);
+  const paymentIds = Array.from(createdArtifacts.paymentIds || []).map((id) => `'${assertUuid(id, 'paymentId')}'`);
+  const userIds = Array.from(createdArtifacts.userIds || []).map((id) => `'${assertUuid(id, 'userId')}'`);
+  const couponId = createdArtifacts.couponId ? assertUuid(createdArtifacts.couponId, 'couponId') : null;
+
+  const statements = ['BEGIN;'];
+
+  if (orderIds.length > 0) {
+    const orderInList = orderIds.join(', ');
+    statements.push(`
+WITH target_orders AS (
+  SELECT id, status
+  FROM orders
+  WHERE id IN (${orderInList})
+),
+stock_to_restore AS (
+  SELECT oi.product_id, COALESCE(SUM(oi.quantity), 0)::int AS qty
+  FROM order_items oi
+  JOIN target_orders o ON o.id = oi.order_id
+  WHERE o.status <> 'CANCELLED'
+  GROUP BY oi.product_id
+)
+UPDATE products p
+SET stock = p.stock + s.qty
+FROM stock_to_restore s
+WHERE p.id = s.product_id;
+`);
+
+    if (couponId) {
+      statements.push(`
+DELETE FROM coupon_redemptions
+WHERE order_id IN (${orderInList})
+  AND coupon_id = '${couponId}';
+`);
+    }
+
+    statements.push(`
+DELETE FROM payment_gateway_events
+WHERE payment_id IN (
+  SELECT id FROM payments WHERE order_id IN (${orderInList})
+);
+`);
+
+    statements.push(`
+DELETE FROM payments
+WHERE order_id IN (${orderInList});
+`);
+
+    statements.push(`
+DELETE FROM order_item_toppings
+WHERE order_item_id IN (
+  SELECT id FROM order_items WHERE order_id IN (${orderInList})
+);
+`);
+
+    statements.push(`
+DELETE FROM order_items
+WHERE order_id IN (${orderInList});
+`);
+
+    statements.push(`
+DELETE FROM orders
+WHERE id IN (${orderInList});
+`);
+  }
+
+  if (paymentIds.length > 0) {
+    const paymentInList = paymentIds.join(', ');
+    statements.push(`
+DELETE FROM payment_gateway_events
+WHERE payment_id IN (${paymentInList});
+`);
+    statements.push(`
+DELETE FROM payments
+WHERE id IN (${paymentInList});
+`);
+  }
+
+  if (couponId) {
+    statements.push(`
+DELETE FROM coupons
+WHERE id = '${couponId}'
+  AND code = '${TEST_COUPON_CODE}'
+  AND NOT EXISTS (
+    SELECT 1 FROM coupon_redemptions WHERE coupon_id = '${couponId}'
+  );
+`);
+  }
+
+  if (userIds.length > 0) {
+    const userInList = userIds.join(', ');
+    statements.push(`
+DELETE FROM users
+WHERE id IN (${userInList})
+  AND NOT EXISTS (
+    SELECT 1 FROM orders WHERE user_id = users.id
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM coupon_redemptions WHERE user_id = users.id
+  );
+`);
+  }
+
+  statements.push('COMMIT;');
+  return statements.join('\n');
+}
+
+function cleanupExactTestArtifacts(createdArtifacts) {
+  const hasWork =
+    createdArtifacts.orderIds.size > 0 ||
+    createdArtifacts.paymentIds.size > 0 ||
+    createdArtifacts.userIds.size > 0 ||
+    Boolean(createdArtifacts.couponId);
+  if (!hasWork) return;
+
+  const sql = buildExactIdCleanupSql(createdArtifacts);
+  runPsqlTuple(sql);
 }
 
 async function jsonFetch(url, options = {}) {
@@ -268,11 +493,7 @@ function sanitizeVnpayUrl(rawUrl) {
 }
 
 async function waitForStackReady() {
-  const pgIdInitial = runDockerCompose(['ps', '-a', '-q', 'postgres']);
-  if (pgIdInitial && inspectContainer(pgIdInitial, '{{.State.Status}}') !== 'running') {
-    runDockerCompose(['start']);
-  }
-  const deadline = Date.now() + 90_000;
+  const deadline = Date.now() + 120_000;
   while (Date.now() < deadline) {
     const migrateId = runDockerCompose(['ps', '-a', '-q', 'migrate']);
     const pgId = runDockerCompose(['ps', '-q', 'postgres']);
@@ -303,35 +524,64 @@ async function waitForStackReady() {
     }
     await new Promise((r) => setTimeout(r, 1500));
   }
-  throw new Error('Timed out waiting for Compose services (postgres, migrate, backend, frontend) to become ready.');
+  throw new Error(
+    `Timed out waiting for isolated Compose stack "${ISOLATED_PROJECT_NAME}" (postgres, migrate, backend, frontend) to become ready.`,
+  );
+}
+
+function ensureCatalogSeededIfEmpty() {
+  const productCount = Number(runPsqlTuple('SELECT count(*) FROM products;'));
+  if (productCount === 0) {
+    console.log(
+      `Isolated database "${ISOLATED_DATABASE_NAME}" has 0 products; running Prisma demo seed inside migrate service...`,
+    );
+    runDockerCompose(['run', '--rm', 'migrate', 'npx', 'prisma', 'db', 'seed']);
+  }
 }
 
 async function main() {
   const cliArgs = process.argv.slice(2);
-  if (cliArgs.some((arg) => arg !== '--cleanup-only')) {
-    console.error('Usage: node scripts/scrum92/verify_compose_e2e.mjs [--cleanup-only]');
+  const allowedFlags = new Set(['--up', '--down', '--keep-artifacts']);
+  if (cliArgs.some((arg) => !allowedFlags.has(arg))) {
+    console.error(
+      'Usage: node scripts/scrum92/verify_compose_e2e.mjs [--up] [--keep-artifacts] [--down]',
+    );
     process.exit(2);
   }
-  const cleanupOnly = cliArgs.includes('--cleanup-only');
 
-  console.log('=== [0] Preflight & Deterministic Container/Migration Check ===');
+  const shouldUp = cliArgs.includes('--up');
+  const shouldDown = cliArgs.includes('--down');
+  const keepArtifacts = cliArgs.includes('--keep-artifacts');
+
+  console.log('=== [0] Preflight & Isolated Test Stack Verification ===');
   checkPreflight();
   const envCfg = parseEnvFile(ENV_FILE);
-  const expectedDb = envCfg.POSTGRES_DB || 'brewlite_compose';
+  isolatedComposeEnv = buildIsolatedComposeEnv(envCfg, process.env);
+
+  if (shouldDown) {
+    console.log(`Stopping isolated test stack "${ISOLATED_PROJECT_NAME}"...`);
+    runDockerCompose(['down', '--remove-orphans']);
+    console.log(`[SCRUM-92] Isolated stack "${ISOLATED_PROJECT_NAME}" stopped (volume "${ISOLATED_VOLUME_NAME}" preserved).`);
+    return;
+  }
+
+  assertDevStackNotRunning();
+
+  if (shouldUp) {
+    console.log(
+      `Starting isolated Compose stack "-p ${ISOLATED_PROJECT_NAME}" (DB="${ISOLATED_DATABASE_NAME}", volume="${ISOLATED_VOLUME_NAME}")...`,
+    );
+    runDockerCompose(['up', '-d', '--build']);
+  }
 
   const states = await waitForStackReady();
+  const targetMeta = assertIsolatedComposeTarget();
+  console.log('Isolated Target Verified:', JSON.stringify(targetMeta));
   console.log('Container health states:', JSON.stringify(states));
   console.log(runDockerCompose(['ps', '-a']));
 
-  const actualDb = runPsqlTuple('SELECT current_database();');
-  if (actualDb !== expectedDb || actualDb === 'brewlite_db') {
-    throw new Error(
-      `Refusing to run E2E verification on unexpected database "${actualDb}" (expected isolated Compose database "${expectedDb}").`,
-    );
-  }
-
-  console.log('\n=== [1] Database Migration, Seed & Scoped Test-Data Cleanup (psql) ===');
-  cleanupScrum92TestData();
+  console.log('\n=== [1] Database Migration & Seed Verification (psql) ===');
+  ensureCatalogSeededIfEmpty();
   const dbCheckOut = runPsql(
     `SELECT current_database() AS database_name,
             (SELECT count(*) FROM "_prisma_migrations" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL) AS completed_migrations,
@@ -341,366 +591,419 @@ async function main() {
             (SELECT stock FROM products WHERE id = 'a3000000-0000-4000-8000-000000000001') AS sample_product_stock;`,
   );
   console.log(dbCheckOut);
-  assert.match(dbCheckOut, new RegExp(`${expectedDb}\\s+\\|\\s+9\\s+\\|\\s+4\\s+\\|\\s+9\\s+\\|\\s+5\\s+\\|\\s+25`));
-
-  if (cleanupOnly) {
-    console.log('\n[SCRUM-92] Scoped test-data cleanup and stock restoration completed.');
-    return;
-  }
-
-  console.log('\n=== [2] Smoke Check: Frontend, Backend Liveness & Swagger ===');
-  const feHome = await fetch(`${FE_URL}/`);
-  const beHome = await fetch(`${BE_URL}/`);
-  const swaggerRes = await fetch(`${BE_URL}/api-docs`);
-  const imgRes = await fetch(`${FE_URL}/images/bac-xiu-kem-beo-phin.jpg`);
-  assert.equal(feHome.status, 200);
-  assert.equal(beHome.status, 200);
-  assert.equal(swaggerRes.status, 200);
-  assert.equal(imgRes.status, 200);
-  console.log(
-    JSON.stringify({
-      frontendHomeStatus: feHome.status,
-      backendLivenessStatus: beHome.status,
-      swaggerDocsStatus: swaggerRes.status,
-      staticProductImageStatus: imgRes.status,
-    }),
+  assert.match(
+    dbCheckOut,
+    new RegExp(`${ISOLATED_DATABASE_NAME}\\s+\\|\\s+9\\s+\\|\\s+4\\s+\\|\\s+9\\s+\\|\\s+5\\s+\\|\\s+25`),
   );
 
-  console.log('\n=== [3] FE -> BE -> DB Catalog via Reverse Proxy (/api/backend/products) ===');
-  const productsRes = await jsonFetch(`${PROXY_API}/products`);
-  assert.equal(productsRes.status, 200);
-  assert.equal(productsRes.body.items.length, 9);
-  const firstProduct = productsRes.body.items[0];
-  const detailRes = await jsonFetch(`${PROXY_API}/products/${firstProduct.id}`);
-  assert.equal(detailRes.status, 200);
-  const sizeS = detailRes.body.sizes.find((s) => s.size === 'S');
-  const firstTopping = detailRes.body.toppings[0];
-  assert.ok(sizeS && firstTopping);
-  assert.equal(detailRes.body.isAvailable, true, 'Sample product must be available');
-  console.log(
-    JSON.stringify({
-      endpoint: 'GET /api/backend/products',
-      status: productsRes.status,
-      productCount: productsRes.body.items.length,
-      sampleProduct: {
-        id: detailRes.body.id,
-        name: detailRes.body.name,
-        isAvailable: detailRes.body.isAvailable,
-        selectedSize: sizeS.size,
-        firstTopping: { id: firstTopping.id, name: firstTopping.name },
-      },
-    }),
-  );
+  const createdArtifacts = {
+    userIds: new Set(),
+    orderIds: new Set(),
+    paymentIds: new Set(),
+    couponId: null,
+  };
 
-  console.log('\n=== [4] Auth Flow via Reverse Proxy (Register -> Login -> GET /auth/me) ===');
-  const email = `scrum92.verify.${Date.now()}@brewlite.vn`;
-  const password = `BrewLite#${randomUUID().slice(0, 8)}!`;
-
-  const regRes = await jsonFetch(`${PROXY_API}/auth/register`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password, fullName: 'SCRUM-92 Clean Verifier' }),
-  });
-  assert.equal(regRes.status, 201, `Register failed: ${JSON.stringify(regRes.body)}`);
-
-  const loginRes = await jsonFetch(`${PROXY_API}/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
-  });
-  assert.equal(loginRes.status, 200, `Login failed: ${JSON.stringify(loginRes.body)}`);
-  const token = loginRes.body.accessToken;
-  assert.ok(typeof token === 'string' && token.length > 20);
-
-  const meRes = await jsonFetch(`${PROXY_API}/auth/me`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  assert.equal(meRes.status, 200);
-  assert.equal(meRes.body.email, email);
-  assert.equal(meRes.body.loyaltyPoints, 0);
-  console.log(
-    JSON.stringify({
-      registerStatus: regRes.status,
-      loginStatus: loginRes.status,
-      accessToken: '<REDACTED_JWT>',
-      meProfile: meRes.body,
-    }),
-  );
-
-  console.log('\n=== [5] Create Order via Reverse Proxy (POST /api/backend/orders) ===');
-  const createOrderRes = await jsonFetch(`${PROXY_API}/orders`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({
-      items: [
-        {
-          productId: detailRes.body.id,
-          size: sizeS.size,
-          quantity: 2,
-          toppingIds: [firstTopping.id],
-        },
-      ],
-    }),
-  });
-  assert.equal(createOrderRes.status, 201, `Create order failed: ${JSON.stringify(createOrderRes.body)}`);
-  assert.equal(createOrderRes.body.status, 'PENDING');
-  const orderId = createOrderRes.body.id;
-  console.log(
-    JSON.stringify({
-      status: createOrderRes.status,
-      orderId,
-      orderStatus: createOrderRes.body.status,
-      subtotalVnd: createOrderRes.body.subtotalVnd,
-      totalVnd: createOrderRes.body.totalVnd,
-    }),
-  );
-
-  console.log('\n=== [6] Payment APIs via Reverse Proxy (SCRUM-85 Mock Guard & SCRUM-84 ZERO_AMOUNT Settlement) ===');
-  const mockAttemptRes = await jsonFetch(`${PROXY_API}/payments`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-      'Idempotency-Key': `scrum92-mock-${randomUUID()}`,
-    },
-    body: JSON.stringify({
-      orderId,
-      method: 'CARD',
-      paymentDetails: { cardNumber: '4111111111111234' },
-    }),
-  });
-  assert.equal(mockAttemptRes.status, 403, `Expected 403 MOCK_PAYMENT_DISABLED: ${JSON.stringify(mockAttemptRes.body)}`);
-  assert.equal(mockAttemptRes.body.code, 'MOCK_PAYMENT_DISABLED');
-
-  const nonZeroRejectRes = await jsonFetch(`${PROXY_API}/payments/zero-amount`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-      'Idempotency-Key': `scrum92-nonzero-${randomUUID()}`,
-    },
-    body: JSON.stringify({ orderId }),
-  });
-  assert.equal(nonZeroRejectRes.status, 409);
-  assert.equal(nonZeroRejectRes.body.code, 'ORDER_NOT_ZERO_AMOUNT');
-
-  seedScrum92ZeroCoupon();
-  const zeroEmail = `scrum92.verify.zero.${Date.now()}@brewlite.vn`;
-  const zeroRegRes = await jsonFetch(`${PROXY_API}/auth/register`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: zeroEmail, password, fullName: 'SCRUM-92 Zero Amount Verifier' }),
-  });
-  assert.equal(zeroRegRes.status, 201);
-  const zeroLoginRes = await jsonFetch(`${PROXY_API}/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: zeroEmail, password }),
-  });
-  assert.equal(zeroLoginRes.status, 200);
-  const zeroToken = zeroLoginRes.body.accessToken;
-
-  const zeroOrderRes = await jsonFetch(`${PROXY_API}/orders`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${zeroToken}`,
-    },
-    body: JSON.stringify({
-      couponCode: 'SCRUM92FREE',
-      items: [{ productId: detailRes.body.id, size: sizeS.size, quantity: 1, toppingIds: [] }],
-    }),
-  });
-  assert.equal(zeroOrderRes.status, 201, `Create zero order failed: ${JSON.stringify(zeroOrderRes.body)}`);
-  assert.equal(zeroOrderRes.body.totalVnd, 0);
-  const zeroOrderId = zeroOrderRes.body.id;
-
-  const zeroKey = `scrum92-zero-${randomUUID()}`;
-  const zeroPayRes = await jsonFetch(`${PROXY_API}/payments/zero-amount`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${zeroToken}`,
-      'Idempotency-Key': zeroKey,
-    },
-    body: JSON.stringify({ orderId: zeroOrderId }),
-  });
-  assert.equal(zeroPayRes.status, 201, `ZERO_AMOUNT payment failed: ${JSON.stringify(zeroPayRes.body)}`);
-  assert.equal(zeroPayRes.body.provider, 'ZERO_AMOUNT');
-  assert.equal(zeroPayRes.body.paymentStatus, 'SUCCESS');
-  assert.equal(zeroPayRes.body.orderStatus, 'PAID');
-  assert.equal(zeroPayRes.body.amountVnd, 0);
-  assert.equal(zeroPayRes.headers.get('idempotency-replayed'), 'false');
-
-  const zeroReplayRes = await jsonFetch(`${PROXY_API}/payments/zero-amount`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${zeroToken}`,
-      'Idempotency-Key': zeroKey,
-    },
-    body: JSON.stringify({ orderId: zeroOrderId }),
-  });
-  assert.equal(zeroReplayRes.status, 200);
-  assert.equal(zeroReplayRes.headers.get('idempotency-replayed'), 'true');
-  assert.equal(zeroReplayRes.body.paymentId, zeroPayRes.body.paymentId);
-
-  console.log(
-    JSON.stringify({
-      mockProductionPolicy: {
-        status: mockAttemptRes.status,
-        code: mockAttemptRes.body.code,
-      },
-      zeroAmountPositiveOrderRejection: {
-        status: nonZeroRejectRes.status,
-        code: nonZeroRejectRes.body.code,
-      },
-      zeroAmountSettlement: {
-        status: zeroPayRes.status,
-        orderId: zeroOrderId,
-        paymentId: zeroPayRes.body.paymentId,
-        provider: zeroPayRes.body.provider,
-        paymentStatus: zeroPayRes.body.paymentStatus,
-        orderStatus: zeroPayRes.body.orderStatus,
-        amountVnd: zeroPayRes.body.amountVnd,
-      },
-      zeroAmountReplay: {
-        status: zeroReplayRes.status,
-        idempotencyReplayedHeader: zeroReplayRes.headers.get('idempotency-replayed'),
-        samePaymentId: zeroReplayRes.body.paymentId === zeroPayRes.body.paymentId,
-      },
-    }),
-  );
-
-  if (envCfg.VNPAY_TMN_CODE && envCfg.VNPAY_HASH_SECRET && envCfg.VNPAY_RETURN_URL) {
-    console.log('\n=== [6b] VNPay Sandbox Initiation & Replay (/api/backend/payments/vnpay/initiate) ===');
-    const vnpKey = `scrum92-vnp-${randomUUID()}`;
-    const vnpInitRes = await jsonFetch(`${PROXY_API}/payments/vnpay/initiate`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-        'Idempotency-Key': vnpKey,
-      },
-      body: JSON.stringify({ orderId }),
-    });
-    assert.equal(vnpInitRes.status, 201, `VNPay initiate failed: ${JSON.stringify(vnpInitRes.body)}`);
-    assert.equal(vnpInitRes.body.provider, 'VNPAY');
-    assert.equal(vnpInitRes.body.paymentStatus, 'PENDING');
-
-    const vnpReplayRes = await jsonFetch(`${PROXY_API}/payments/vnpay/initiate`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-        'Idempotency-Key': vnpKey,
-      },
-      body: JSON.stringify({ orderId }),
-    });
-    assert.equal(vnpReplayRes.status, 200);
-    assert.equal(vnpReplayRes.headers.get('idempotency-replayed'), 'true');
+  try {
+    console.log('\n=== [2] Smoke Check: Frontend, Backend Liveness & Swagger ===');
+    const feHome = await fetch(`${FE_URL}/`);
+    const beHome = await fetch(`${BE_URL}/`);
+    const swaggerRes = await fetch(`${BE_URL}/api-docs`);
+    const imgRes = await fetch(`${FE_URL}/images/bac-xiu-kem-beo-phin.jpg`);
+    assert.equal(feHome.status, 200);
+    assert.equal(beHome.status, 200);
+    assert.equal(swaggerRes.status, 200);
+    assert.equal(imgRes.status, 200);
     console.log(
       JSON.stringify({
-        initiateStatus: vnpInitRes.status,
-        replayStatus: vnpReplayRes.status,
-        idempotencyReplayedHeader: vnpReplayRes.headers.get('idempotency-replayed'),
-        provider: vnpInitRes.body.provider,
-        paymentStatus: vnpInitRes.body.paymentStatus,
-        orderStatus: vnpInitRes.body.orderStatus,
-        sanitizedPaymentUrl: sanitizeVnpayUrl(vnpInitRes.body.paymentUrl),
+        frontendHomeStatus: feHome.status,
+        backendLivenessStatus: beHome.status,
+        swaggerDocsStatus: swaggerRes.status,
+        staticProductImageStatus: imgRes.status,
       }),
     );
-  }
 
-  console.log('\n=== [7] Pre-Restart Snapshot (API & PostgreSQL) ===');
-  const ordersBefore = await jsonFetch(`${PROXY_API}/orders/me`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  assert.equal(ordersBefore.status, 200);
-  const pendingOrderBefore = ordersBefore.body.items.find((o) => o.id === orderId);
-  assert.ok(pendingOrderBefore);
-  assert.equal(pendingOrderBefore.status, 'PENDING');
+    console.log('\n=== [3] FE -> BE -> DB Catalog via Reverse Proxy (/api/backend/products) ===');
+    const productsRes = await jsonFetch(`${PROXY_API}/products`);
+    assert.equal(productsRes.status, 200);
+    assert.equal(productsRes.body.items.length, 9);
+    const firstProduct = productsRes.body.items[0];
+    const detailRes = await jsonFetch(`${PROXY_API}/products/${firstProduct.id}`);
+    assert.equal(detailRes.status, 200);
+    const sizeS = detailRes.body.sizes.find((s) => s.size === 'S');
+    const firstTopping = detailRes.body.toppings[0];
+    assert.ok(sizeS && firstTopping);
+    assert.equal(detailRes.body.isAvailable, true, 'Sample product must be available');
+    console.log(
+      JSON.stringify({
+        endpoint: 'GET /api/backend/products',
+        status: productsRes.status,
+        productCount: productsRes.body.items.length,
+        sampleProduct: {
+          id: detailRes.body.id,
+          name: detailRes.body.name,
+          isAvailable: detailRes.body.isAvailable,
+          selectedSize: sizeS.size,
+          firstTopping: { id: firstTopping.id, name: firstTopping.name },
+        },
+      }),
+    );
 
-  const sqlSnapshotQuery = `SELECT o.id AS order_id, o.status AS order_status, o.total_vnd,
+    console.log('\n=== [4] Auth Flow via Reverse Proxy (Register -> Login -> GET /auth/me) ===');
+    const email = `scrum92.verify.${Date.now()}.${randomUUID().slice(0, 6)}@brewlite.vn`;
+    const password = `BrewLite#${randomUUID().slice(0, 8)}!`;
+
+    const regRes = await jsonFetch(`${PROXY_API}/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password, fullName: 'SCRUM-92 Clean Verifier' }),
+    });
+    assert.equal(regRes.status, 201, `Register failed: ${JSON.stringify(regRes.body)}`);
+    const primaryUserId =
+      regRes.body?.user?.id ||
+      regRes.body?.id ||
+      runPsqlTuple(`SELECT id FROM users WHERE email = '${email}';`);
+    createdArtifacts.userIds.add(assertUuid(primaryUserId, 'primaryUserId'));
+
+    const loginRes = await jsonFetch(`${PROXY_API}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    assert.equal(loginRes.status, 200, `Login failed: ${JSON.stringify(loginRes.body)}`);
+    const token = loginRes.body.accessToken;
+    assert.ok(typeof token === 'string' && token.length > 20);
+
+    const meRes = await jsonFetch(`${PROXY_API}/auth/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    assert.equal(meRes.status, 200);
+    assert.equal(meRes.body.email, email);
+    assert.equal(meRes.body.loyaltyPoints, 0);
+    createdArtifacts.userIds.add(assertUuid(meRes.body.id, 'meRes.body.id'));
+    console.log(
+      JSON.stringify({
+        registerStatus: regRes.status,
+        loginStatus: loginRes.status,
+        accessToken: '<REDACTED_JWT>',
+        meProfile: meRes.body,
+      }),
+    );
+
+    console.log('\n=== [5] Create Order via Reverse Proxy (POST /api/backend/orders) ===');
+    const createOrderRes = await jsonFetch(`${PROXY_API}/orders`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        items: [
+          {
+            productId: detailRes.body.id,
+            size: sizeS.size,
+            quantity: 2,
+            toppingIds: [firstTopping.id],
+          },
+        ],
+      }),
+    });
+    assert.equal(createOrderRes.status, 201, `Create order failed: ${JSON.stringify(createOrderRes.body)}`);
+    assert.equal(createOrderRes.body.status, 'PENDING');
+    const orderId = assertUuid(createOrderRes.body.id, 'orderId');
+    createdArtifacts.orderIds.add(orderId);
+    console.log(
+      JSON.stringify({
+        status: createOrderRes.status,
+        orderId,
+        orderStatus: createOrderRes.body.status,
+        subtotalVnd: createOrderRes.body.subtotalVnd,
+        totalVnd: createOrderRes.body.totalVnd,
+      }),
+    );
+
+    console.log('\n=== [6] Payment APIs via Reverse Proxy (SCRUM-85 Mock Guard & SCRUM-84 ZERO_AMOUNT Settlement) ===');
+    const mockAttemptRes = await jsonFetch(`${PROXY_API}/payments`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+        'Idempotency-Key': `scrum92-mock-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        orderId,
+        method: 'CARD',
+        paymentDetails: { cardNumber: '4111111111111234' },
+      }),
+    });
+    assert.equal(mockAttemptRes.status, 403, `Expected 403 MOCK_PAYMENT_DISABLED: ${JSON.stringify(mockAttemptRes.body)}`);
+    assert.equal(mockAttemptRes.body.code, 'MOCK_PAYMENT_DISABLED');
+
+    const nonZeroRejectRes = await jsonFetch(`${PROXY_API}/payments/zero-amount`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+        'Idempotency-Key': `scrum92-nonzero-${randomUUID()}`,
+      },
+      body: JSON.stringify({ orderId }),
+    });
+    assert.equal(nonZeroRejectRes.status, 409);
+    assert.equal(nonZeroRejectRes.body.code, 'ORDER_NOT_ZERO_AMOUNT');
+
+    seedIsolatedZeroCoupon(createdArtifacts);
+    const zeroEmail = `scrum92.verify.zero.${Date.now()}.${randomUUID().slice(0, 6)}@brewlite.vn`;
+    const zeroRegRes = await jsonFetch(`${PROXY_API}/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: zeroEmail, password, fullName: 'SCRUM-92 Zero Amount Verifier' }),
+    });
+    assert.equal(zeroRegRes.status, 201);
+    const zeroUserId =
+      zeroRegRes.body?.user?.id ||
+      zeroRegRes.body?.id ||
+      runPsqlTuple(`SELECT id FROM users WHERE email = '${zeroEmail}';`);
+    createdArtifacts.userIds.add(assertUuid(zeroUserId, 'zeroUserId'));
+
+    const zeroLoginRes = await jsonFetch(`${PROXY_API}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: zeroEmail, password }),
+    });
+    assert.equal(zeroLoginRes.status, 200);
+    const zeroToken = zeroLoginRes.body.accessToken;
+
+    const zeroOrderRes = await jsonFetch(`${PROXY_API}/orders`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${zeroToken}`,
+      },
+      body: JSON.stringify({
+        couponCode: TEST_COUPON_CODE,
+        items: [{ productId: detailRes.body.id, size: sizeS.size, quantity: 1, toppingIds: [] }],
+      }),
+    });
+    assert.equal(zeroOrderRes.status, 201, `Create zero order failed: ${JSON.stringify(zeroOrderRes.body)}`);
+    assert.equal(zeroOrderRes.body.totalVnd, 0);
+    const zeroOrderId = assertUuid(zeroOrderRes.body.id, 'zeroOrderId');
+    createdArtifacts.orderIds.add(zeroOrderId);
+
+    const zeroKey = `scrum92-zero-${randomUUID()}`;
+    const zeroPayRes = await jsonFetch(`${PROXY_API}/payments/zero-amount`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${zeroToken}`,
+        'Idempotency-Key': zeroKey,
+      },
+      body: JSON.stringify({ orderId: zeroOrderId }),
+    });
+    assert.equal(zeroPayRes.status, 201, `ZERO_AMOUNT payment failed: ${JSON.stringify(zeroPayRes.body)}`);
+    assert.equal(zeroPayRes.body.provider, 'ZERO_AMOUNT');
+    assert.equal(zeroPayRes.body.paymentStatus, 'SUCCESS');
+    assert.equal(zeroPayRes.body.orderStatus, 'PAID');
+    assert.equal(zeroPayRes.body.amountVnd, 0);
+    assert.equal(zeroPayRes.headers.get('idempotency-replayed'), 'false');
+    createdArtifacts.paymentIds.add(assertUuid(zeroPayRes.body.paymentId, 'zeroPaymentId'));
+
+    const zeroReplayRes = await jsonFetch(`${PROXY_API}/payments/zero-amount`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${zeroToken}`,
+        'Idempotency-Key': zeroKey,
+      },
+      body: JSON.stringify({ orderId: zeroOrderId }),
+    });
+    assert.equal(zeroReplayRes.status, 200);
+    assert.equal(zeroReplayRes.headers.get('idempotency-replayed'), 'true');
+    assert.equal(zeroReplayRes.body.paymentId, zeroPayRes.body.paymentId);
+
+    console.log(
+      JSON.stringify({
+        mockProductionPolicy: {
+          status: mockAttemptRes.status,
+          code: mockAttemptRes.body.code,
+        },
+        zeroAmountPositiveOrderRejection: {
+          status: nonZeroRejectRes.status,
+          code: nonZeroRejectRes.body.code,
+        },
+        zeroAmountSettlement: {
+          status: zeroPayRes.status,
+          orderId: zeroOrderId,
+          paymentId: zeroPayRes.body.paymentId,
+          provider: zeroPayRes.body.provider,
+          paymentStatus: zeroPayRes.body.paymentStatus,
+          orderStatus: zeroPayRes.body.orderStatus,
+          amountVnd: zeroPayRes.body.amountVnd,
+        },
+        zeroAmountReplay: {
+          status: zeroReplayRes.status,
+          idempotencyReplayedHeader: zeroReplayRes.headers.get('idempotency-replayed'),
+          samePaymentId: zeroReplayRes.body.paymentId === zeroPayRes.body.paymentId,
+        },
+      }),
+    );
+
+    if (envCfg.VNPAY_TMN_CODE && envCfg.VNPAY_HASH_SECRET && envCfg.VNPAY_RETURN_URL) {
+      console.log('\n=== [6b] VNPay Sandbox Initiation & Replay (/api/backend/payments/vnpay/initiate) ===');
+      const vnpKey = `scrum92-vnp-${randomUUID()}`;
+      const vnpInitRes = await jsonFetch(`${PROXY_API}/payments/vnpay/initiate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+          'Idempotency-Key': vnpKey,
+        },
+        body: JSON.stringify({ orderId }),
+      });
+      assert.equal(vnpInitRes.status, 201, `VNPay initiate failed: ${JSON.stringify(vnpInitRes.body)}`);
+      assert.equal(vnpInitRes.body.provider, 'VNPAY');
+      assert.equal(vnpInitRes.body.paymentStatus, 'PENDING');
+      createdArtifacts.paymentIds.add(assertUuid(vnpInitRes.body.paymentId, 'vnpPaymentId'));
+
+      const vnpReplayRes = await jsonFetch(`${PROXY_API}/payments/vnpay/initiate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+          'Idempotency-Key': vnpKey,
+        },
+        body: JSON.stringify({ orderId }),
+      });
+      assert.equal(vnpReplayRes.status, 200);
+      assert.equal(vnpReplayRes.headers.get('idempotency-replayed'), 'true');
+      console.log(
+        JSON.stringify({
+          initiateStatus: vnpInitRes.status,
+          replayStatus: vnpReplayRes.status,
+          idempotencyReplayedHeader: vnpReplayRes.headers.get('idempotency-replayed'),
+          provider: vnpInitRes.body.provider,
+          paymentStatus: vnpInitRes.body.paymentStatus,
+          orderStatus: vnpInitRes.body.orderStatus,
+          sanitizedPaymentUrl: sanitizeVnpayUrl(vnpInitRes.body.paymentUrl),
+        }),
+      );
+    }
+
+    console.log('\n=== [7] Pre-Restart Snapshot (API & PostgreSQL) ===');
+    const ordersBefore = await jsonFetch(`${PROXY_API}/orders/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    assert.equal(ordersBefore.status, 200);
+    const pendingOrderBefore = ordersBefore.body.items.find((o) => o.id === orderId);
+    assert.ok(pendingOrderBefore);
+    assert.equal(pendingOrderBefore.status, 'PENDING');
+
+    const sqlSnapshotQuery = `SELECT o.id AS order_id, o.status AS order_status, o.total_vnd,
             p.id AS payment_id, p.provider, p.status AS payment_status
        FROM orders o
        LEFT JOIN payments p ON p.order_id = o.id
       WHERE o.id IN ('${orderId}', '${zeroOrderId}')
       ORDER BY o.total_vnd DESC;`;
-  const sqlBefore = runPsql(sqlSnapshotQuery);
-  console.log(
-    'Pre-Restart API Snapshot:',
-    JSON.stringify({
-      primaryOrder: {
-        orderId: pendingOrderBefore.id,
-        orderStatus: pendingOrderBefore.status,
-        totalVnd: pendingOrderBefore.totalVnd,
+    const sqlBefore = runPsql(sqlSnapshotQuery);
+    console.log(
+      'Pre-Restart API Snapshot:',
+      JSON.stringify({
+        primaryOrder: {
+          orderId: pendingOrderBefore.id,
+          orderStatus: pendingOrderBefore.status,
+          totalVnd: pendingOrderBefore.totalVnd,
+        },
+        zeroAmountPaidOrder: {
+          orderId: zeroOrderId,
+          paymentId: zeroPayRes.body.paymentId,
+          orderStatus: zeroPayRes.body.orderStatus,
+          paymentStatus: zeroPayRes.body.paymentStatus,
+        },
+      }),
+    );
+    console.log('Pre-Restart SQL Snapshot:\n' + sqlBefore);
+
+    console.log('\n=== [8] Restart Isolated Stack (docker compose -p brewlite_scrum92_e2e stop -> start) ===');
+    runDockerCompose(['stop']);
+    runDockerCompose(['start']);
+    const postStates = await waitForStackReady();
+    assertIsolatedComposeTarget();
+    console.log('Post-Restart Container States:', JSON.stringify(postStates));
+
+    const ordersAfter = await jsonFetch(`${PROXY_API}/orders/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    assert.equal(ordersAfter.status, 200);
+    const pendingOrderAfter = ordersAfter.body.items.find((o) => o.id === orderId);
+    assert.ok(pendingOrderAfter);
+    assert.equal(pendingOrderAfter.status, 'PENDING');
+
+    const zeroReplayAfterRestart = await jsonFetch(`${PROXY_API}/payments/zero-amount`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${zeroToken}`,
+        'Idempotency-Key': zeroKey,
       },
-      zeroAmountPaidOrder: {
-        orderId: zeroOrderId,
-        paymentId: zeroPayRes.body.paymentId,
-        orderStatus: zeroPayRes.body.orderStatus,
-        paymentStatus: zeroPayRes.body.paymentStatus,
-      },
-    }),
-  );
-  console.log('Pre-Restart SQL Snapshot:\n' + sqlBefore);
+      body: JSON.stringify({ orderId: zeroOrderId }),
+    });
+    assert.equal(zeroReplayAfterRestart.status, 200);
+    assert.equal(zeroReplayAfterRestart.headers.get('idempotency-replayed'), 'true');
+    assert.equal(zeroReplayAfterRestart.body.paymentId, zeroPayRes.body.paymentId);
+    assert.equal(zeroReplayAfterRestart.body.orderStatus, 'PAID');
 
-  console.log('\n=== [8] Restart Stack (docker compose stop -> start) & Post-Restart Persistence Check ===');
-  runDockerCompose(['stop']);
-  runDockerCompose(['start']);
-  const postStates = await waitForStackReady();
-  console.log('Post-Restart Container States:', JSON.stringify(postStates));
+    const sqlAfter = runPsql(sqlSnapshotQuery);
+    console.log(
+      'Post-Restart API Snapshot:',
+      JSON.stringify({
+        primaryOrder: {
+          orderId: pendingOrderAfter.id,
+          orderStatus: pendingOrderAfter.status,
+          totalVnd: pendingOrderAfter.totalVnd,
+        },
+        zeroAmountPaidOrder: {
+          orderId: zeroOrderId,
+          paymentId: zeroReplayAfterRestart.body.paymentId,
+          orderStatus: zeroReplayAfterRestart.body.orderStatus,
+          paymentStatus: zeroReplayAfterRestart.body.paymentStatus,
+        },
+      }),
+    );
+    console.log('Post-Restart SQL Snapshot:\n' + sqlAfter);
+    assert.equal(sqlAfter, sqlBefore, 'PostgreSQL snapshot before and after restart must match identically');
 
-  const ordersAfter = await jsonFetch(`${PROXY_API}/orders/me`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  assert.equal(ordersAfter.status, 200);
-  const pendingOrderAfter = ordersAfter.body.items.find((o) => o.id === orderId);
-  assert.ok(pendingOrderAfter);
-  assert.equal(pendingOrderAfter.status, 'PENDING');
-
-  const zeroReplayAfterRestart = await jsonFetch(`${PROXY_API}/payments/zero-amount`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${zeroToken}`,
-      'Idempotency-Key': zeroKey,
-    },
-    body: JSON.stringify({ orderId: zeroOrderId }),
-  });
-  assert.equal(zeroReplayAfterRestart.status, 200);
-  assert.equal(zeroReplayAfterRestart.headers.get('idempotency-replayed'), 'true');
-  assert.equal(zeroReplayAfterRestart.body.paymentId, zeroPayRes.body.paymentId);
-  assert.equal(zeroReplayAfterRestart.body.orderStatus, 'PAID');
-
-  const sqlAfter = runPsql(sqlSnapshotQuery);
-  console.log(
-    'Post-Restart API Snapshot:',
-    JSON.stringify({
-      primaryOrder: {
-        orderId: pendingOrderAfter.id,
-        orderStatus: pendingOrderAfter.status,
-        totalVnd: pendingOrderAfter.totalVnd,
-      },
-      zeroAmountPaidOrder: {
-        orderId: zeroOrderId,
-        paymentId: zeroReplayAfterRestart.body.paymentId,
-        orderStatus: zeroReplayAfterRestart.body.orderStatus,
-        paymentStatus: zeroReplayAfterRestart.body.paymentStatus,
-      },
-    }),
-  );
-  console.log('Post-Restart SQL Snapshot:\n' + sqlAfter);
-  assert.equal(sqlAfter, sqlBefore, 'PostgreSQL snapshot before and after restart must match identically');
-
-  console.log('\n[SCRUM-92] ALL VERIFICATION CHECKS PASSED.');
+    console.log('\n[SCRUM-92] ALL VERIFICATION CHECKS PASSED.');
+  } finally {
+    if (keepArtifacts) {
+      console.log(
+        '\n[SCRUM-92] --keep-artifacts enabled: preserving created test records in isolated database:',
+        JSON.stringify({
+          userIds: Array.from(createdArtifacts.userIds),
+          orderIds: Array.from(createdArtifacts.orderIds),
+          paymentIds: Array.from(createdArtifacts.paymentIds),
+          couponId: createdArtifacts.couponId,
+        }),
+      );
+    } else {
+      console.log('\n=== [9] Scoped Exact-ID Cleanup & Stock Restoration (finally) ===');
+      cleanupExactTestArtifacts(createdArtifacts);
+      console.log(
+        'Cleaned up exact test records and restored stock:',
+        JSON.stringify({
+          cleanedUserCount: createdArtifacts.userIds.size,
+          cleanedOrderCount: createdArtifacts.orderIds.size,
+          cleanedPaymentCount: createdArtifacts.paymentIds.size,
+          cleanedCouponId: createdArtifacts.couponId,
+        }),
+      );
+    }
+  }
 }
 
-main().catch((err) => {
-  console.error('[SCRUM-92] VERIFICATION FAILED:', err.message || err);
-  process.exit(1);
-});
+const isDirectExecution =
+  process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (isDirectExecution) {
+  main().catch((err) => {
+    console.error('[SCRUM-92] VERIFICATION FAILED:', err.message || err);
+    process.exit(1);
+  });
+}

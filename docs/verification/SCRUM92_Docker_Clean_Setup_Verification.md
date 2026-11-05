@@ -1,13 +1,14 @@
 # SCRUM-92 / P2-18 — Verify Docker Clean Setup & Integration
 
 - **Task**: `SCRUM-92` (`P2-18 – Verify Docker Clean Setup & Integration`)
-- **Branch**: `SCRUM-92-p-2-18-verify-docker-clean-setup-integration` (synced with `origin/dev` @ `f3a0285`)
-- **Date**: 2026-11-04
+- **Branch**: `SCRUM-92-p-2-18-verify-docker-clean-setup-integration` (synced with `origin/dev` @ `ee3284d`; initial discovery run recorded at `f3a0285`)
+- **Date**: 2026-11-04 (Updated 2026-11-05)
 - **Environment**: Windows 11, Docker Engine `29.9.2`, Docker Compose `v5.6.1`, Node.js `v22+`
 - **Dependencies verified on `dev`**:
   - `P2-06` (`SCRUM-80` — Prisma migrations & guarded demo seed)
   - `P2-10` (`SCRUM-84` — `POST /payments/zero-amount` settlement & idempotency)
   - `P2-11` (`SCRUM-85` — `MockPaymentGuard` environment access policy in `NODE_ENV=production`)
+  - `P2-13` (`SCRUM-96` — VNPay local HTTP return URL config `VNPAY_ALLOW_HTTP_LOCAL_RETURN_URL` & reconciliation scheduler config)
   - `P2-15` (`SCRUM-89` — `backend/Dockerfile` multi-stage `build`, `migrate`, `production`)
   - `P2-16` (`SCRUM-90` — `frontend/Dockerfile` standalone + `/api/backend/*` reverse proxy)
   - `P2-17` (`SCRUM-91` — `docker-compose.yml`, `compose.env.example`, `scripts/compose-preflight-env.sh`, `docs/Docker_Compose.md`)
@@ -19,6 +20,8 @@
 ### 1.1. Prepare `compose.env` (No Machine-Specific Dependencies)
 
 Copy `compose.env.example` to `compose.env` (ignored by Git) and populate local random values for `POSTGRES_PASSWORD`, `DATABASE_URL` (`@postgres:5432/brewlite_compose`), `JWT_SECRET` ($\ge 32$ bytes), and `INTERNAL_SECRET`.
+
+Both `scripts/compose-preflight-env.sh` and `scripts/compose-preflight-env.ps1` verify all **22** Compose-interpolated environment variables (`DATABASE_URL`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `POSTGRES_HOST_PORT`, `JWT_SECRET`, `INTERNAL_SECRET`, `ORDER_EXPIRATION_ENABLED`, `ORDER_EXPIRATION_BATCH_SIZE`, `VNPAY_TMN_CODE`, `VNPAY_HASH_SECRET`, `VNPAY_PAYMENT_URL`, `VNPAY_RETURN_URL`, `VNPAY_ALLOW_HTTP_LOCAL_RETURN_URL`, `VNPAY_QUERYDR_URL`, `VNPAY_QUERYDR_TIMEOUT_MS`, `PAYMENT_RECONCILIATION_ENABLED`, `PAYMENT_RECONCILIATION_INTERVAL_MS`, `PAYMENT_RECONCILIATION_BATCH_SIZE`, `PAYMENT_RECONCILIATION_LEASE_MS`, `PAYMENT_RECONCILIATION_COOLDOWN_MS`, `PAYMENT_RECONCILIATION_IP_ADDR`, plus `COMPOSE_PROJECT_NAME`).
 
 - **Git Bash / Linux / macOS**:
   ```bash
@@ -62,23 +65,40 @@ Compose preflight passed: no conflicting environment variables detected.
 
 ---
 
-## 2. Reproducible Verification Evidence (Exact Commands & Sanitized Outputs)
+## 2. Isolated E2E Verification Architecture & Historical Runtime Evidence
 
-All steps below can be re-executed repeatedly on either **Git Bash** or **Windows PowerShell** via the repository verification script:
+### 2.0. Isolation & Safety Guarantees of `scripts/scrum92/verify_compose_e2e.mjs`
 
+To guarantee that running automated E2E verification (which creates test records and restarts containers to verify persistence) **never** disrupts an active `brewlite_compose` dev stack or touches shared dev data:
+
+1. **Mandatory Isolated Project, Volume & Database**:
+   - Always passes `-p brewlite_scrum92_e2e` to `docker compose`.
+   - Uses isolated named volume `brewlite_scrum92_e2e_brewlite_pgdata` and isolated database `brewlite_seed_scrum92_e2e` (accepted by `isSeedDatabaseAllowed()` in `backend/prisma/seed.ts`).
+   - `assertIsolatedComposeTarget()` inspects `com.docker.compose.project`, mounted volume name at `/var/lib/postgresql`, `POSTGRES_DB`, and `SELECT current_database()`, and **refuses to run** if `brewlite_compose` is active or if any target matches `brewlite_compose`, `brewlite_compose_brewlite_pgdata`, or `brewlite_db`.
+2. **Deterministic Persistence Snapshot (Scheduler Guard)**:
+   - Sets `ORDER_EXPIRATION_ENABLED=false` and `PAYMENT_RECONCILIATION_ENABLED=false` in the isolated stack and verifies both container env vars via `docker inspect` before running, preventing background schedulers from mutating `PENDING` orders/payments between pre-restart (`[7]`) and post-restart (`[8]`) snapshots.
+3. **Collision-Safe Coupon Fixture & Exact-ID Cleanup in `finally`**:
+   - Uses fixed coupon ID `c9200000-0000-4000-8000-000000000092` (`SCRUM92FREE`) without `ON CONFLICT DO UPDATE`. Refuses to run if `SCRUM92FREE` or `c9200000-0000-4000-8000-000000000092` already exists in the DB.
+   - Tracks exact entity UUIDs (`userIds`, `orderIds`, `paymentIds`, `couponId`) created during the run and restores reserved product stock + deletes **only** those exact IDs inside a `finally` SQL transaction by default (unless `--keep-artifacts` is explicitly passed). No `LIKE` email wildcards or broad `WHERE code = ...` deletes are used.
+
+**Commands**:
 ```bash
+# 1. Start isolated stack (-p brewlite_scrum92_e2e) and run full E2E + restart verification + finally cleanup:
+node scripts/scrum92/verify_compose_e2e.mjs --up
+
+# 2. Re-run against already-running isolated stack:
 node scripts/scrum92/verify_compose_e2e.mjs
+
+# 3. Stop isolated stack when finished:
+node scripts/scrum92/verify_compose_e2e.mjs --down
 ```
 
-**Deterministic Rerun & Scoped Cleanup Design**:
-- Before running E2E flows, `scripts/scrum92/verify_compose_e2e.mjs` verifies that the target database is the isolated Compose database (`brewlite_compose`) and executes a single SQL transaction scoped strictly to `scrum92.verify.%@brewlite.vn` synthetic users (and the synthetic coupon `SCRUM92FREE`): it restores the exact `stock` quantities reserved by any prior `SCRUM-92` test orders back to `products` (returning `sample_product_stock` to `25`) and deletes only those synthetic test records.
-- It never executes `docker volume rm` or `docker compose down -v`, and never modifies non-test data.
-- To clean up `SCRUM-92` test records and restore `stock = 25` without starting a new test run:
-  ```bash
-  node scripts/scrum92/verify_compose_e2e.mjs --cleanup-only
-  ```
+---
 
-### 2.1. Container / Service Status
+> [!NOTE]
+> **Historical Evidence Note**: Sections `2.1`–`2.7` below record the sanitized runtime outputs captured during the initial clean-setup verification run on `2026-11-04` (at `dev` commit `f3a0285`, before the isolated `-p brewlite_scrum92_e2e` project name override was enforced). When running `node scripts/scrum92/verify_compose_e2e.mjs --up`, container names use prefix `brewlite_scrum92_e2e-*` and `database_name` reports `brewlite_seed_scrum92_e2e`.
+
+### 2.1. Container / Service Status (Historical Evidence @ `f3a0285`)
 
 **Command**:
 ```bash
@@ -97,7 +117,7 @@ brewlite_compose-postgres-1   postgres:18-alpine          "docker-entrypoint.s�
 
 ---
 
-### 2.2. Migration Logs, Guarded Demo Seed & Database Counts
+### 2.2. Migration Logs, Guarded Demo Seed & Database Counts (Historical Evidence @ `f3a0285`)
 
 **Command (Migration Logs)**:
 ```bash
@@ -216,9 +236,9 @@ curl -s http://localhost:3000/api/backend/products/a3000000-0000-4000-8000-00000
 
 **Command (executed by `node scripts/scrum92/verify_compose_e2e.mjs` steps `[7]` and `[8]`)**:
 ```bash
-# Snapshot before restart via API (/api/backend/orders/me, /api/backend/payments/zero-amount replay) and SQL (sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"')
-docker compose --env-file compose.env stop
-docker compose --env-file compose.env start
+# Snapshot before restart via API (/api/backend/orders/me, /api/backend/payments/zero-amount replay) and SQL
+docker compose -p brewlite_scrum92_e2e --env-file compose.env stop
+docker compose -p brewlite_scrum92_e2e --env-file compose.env start
 # Wait for migrate=exited:0 and postgres/backend/frontend=running:healthy, then re-query API and SQL
 ```
 
@@ -233,10 +253,10 @@ Pre-Restart SQL Snapshot:
  bb1ee46d-74b9-473f-815b-a0b91d71ef92 | PAID         |         0 | 361fad08-20d4-44c4-b9ce-9d083d635dd3 | ZERO_AMOUNT | SUCCESS
 (2 rows)
 
-=== [8] Restart Stack (docker compose stop -> start) & Post-Restart Persistence Check ===
+=== [8] Restart Isolated Stack (docker compose -p brewlite_scrum92_e2e stop -> start) ===
 Post-Restart Container States: {"migrateState":"exited:0","pgHealth":"running:healthy","beHealth":"running:healthy","feHealth":"running:healthy"}
 Post-Restart API Snapshot: {"primaryOrder":{"orderId":"abddf914-e053-4a2f-984a-23a70072622d","orderStatus":"PENDING","totalVnd":104000},"zeroAmountPaidOrder":{"orderId":"bb1ee46d-74b9-473f-815b-a0b91d71ef92","paymentId":"361fad08-20d4-44c4-b9ce-9d083d635dd3","orderStatus":"PAID","paymentStatus":"SUCCESS"}}
-Pre-Restart and Post-Restart SQL Snapshot:
+Post-Restart SQL Snapshot:
                order_id               | order_status | total_vnd |              payment_id              |  provider   | payment_status
 --------------------------------------+--------------+-----------+--------------------------------------+-------------+----------------
  abddf914-e053-4a2f-984a-23a70072622d | PENDING      |    104000 | 8c77ee61-707d-4fc6-8d7c-56e57434baf4 | VNPAY       | PENDING
@@ -248,7 +268,7 @@ Pre-Restart and Post-Restart SQL Snapshot:
 
 ---
 
-## 3. Issues Discovered, Reproduction Steps & Module Owner Reports
+## 3. Issues Discovered During Initial Clean-Run (`f3a0285`) & Current Status (`ee3284d`)
 
 ### Issue #1 [Blocker P0 — Fixed in `SCRUM-92`]: Cổng host `127.0.0.1:55432` của `postgres` bị Windows Hyper-V/WinNAT chặn cứng
 
@@ -266,33 +286,29 @@ Pre-Restart and Post-Restart SQL Snapshot:
 
 ---
 
-### Issue #2 [Major — Cross-Module Config Conflict]: `VNPAY_RETURN_URL=http://localhost:3000/order-confirmation` gây lỗi 500 trong Docker Compose
+### Issue #2 [Major — Discovered @ `f3a0285`, Resolved on `dev` @ `ee3284d`]: `VNPAY_RETURN_URL=http://localhost:3000/order-confirmation` gây lỗi 500 trong Docker Compose
 
-- **Module / Owner**: `P2-03` (`SCRUM-77` — `backend/src/payments/vnpay.config.ts`) & `P2-15` (`SCRUM-89` — `backend/Dockerfile`).
+- **Module / Owner**: `P2-03` (`SCRUM-77` — `backend/src/payments/vnpay.config.ts`) & `P2-13` (`SCRUM-96`).
 - **Mức độ**: **Major** (ảnh hưởng luồng VNPay Sandbox trong môi trường Docker Compose local).
-- **Bước tái hiện**:
-  1. Cấu hình `VNPAY_RETURN_URL=http://localhost:3000/order-confirmation` trong `compose.env` theo đúng tài liệu `docs/integration/VNPay_Sandbox_Setup.md` (dòng 214).
+- **Bước tái hiện (tại commit `f3a0285`)**:
+  1. Cấu hình `VNPAY_RETURN_URL=http://localhost:3000/order-confirmation` trong `compose.env` theo đúng tài liệu `docs/integration/VNPay_Sandbox_Setup.md`.
   2. Khởi chạy Docker Compose và gọi `POST /api/backend/payments/vnpay/initiate`.
-  3. Backend trả về `HTTP 500 INTERNAL_ERROR` (`Invalid VNPAY_RETURN_URL configuration`).
-- **Nguyên nhân gốc rễ**:
-  - `backend/Dockerfile` thiết lập `ENV NODE_ENV=production` trong stage runtime.
-  - Hàm `requireReturnUrl()` trong `backend/src/payments/vnpay.config.ts` (dòng 68–73) kiểm tra `const isDevelopment = process.env.NODE_ENV !== 'production'` và từ chối giao thức `http:` ngay cả khi hostname là `localhost` hoặc `127.0.0.1` nếu `NODE_ENV === 'production'`.
-  - Nếu người dùng đổi `VNPAY_RETURN_URL` thành `https://localhost:3000/order-confirmation` để vượt qua bước validate của backend thì khi trình duyệt redirect từ VNPay Sandbox về `https://localhost:3000/...` sẽ bị lỗi SSL (`ERR_SSL_PROTOCOL_ERROR`) do container `frontend` phục vụ HTTP trên cổng `3000`.
-- **Kiến nghị gửi Owner Module (`P2-03` / `Payments`)**:
-  - Trong `backend/src/payments/vnpay.config.ts`, cho phép `http://localhost` và `http://127.0.0.1` khi chạy local/sandbox (ví dụ kiểm tra hostname loopback kết hợp với việc `VNPAY_PAYMENT_URL` đang trỏ tới `sandbox.vnpayment.vn` hoặc bổ sung biến cấu hình rõ ràng), thay vì chỉ dựa vào `NODE_ENV !== 'production'`.
+  3. Backend trả về `HTTP 500 INTERNAL_ERROR` (`Invalid VNPAY_RETURN_URL configuration`) vì `backend/Dockerfile` đặt `NODE_ENV=production`.
+- **Trạng thái xử lý trên `dev` hiện tại (`ee3284d`)**:
+  - Đã được giải quyết khi merge `SCRUM-96` (`P2-13`): `docker-compose.yml` và `compose.env.example` đã bổ sung cờ `VNPAY_ALLOW_HTTP_LOCAL_RETURN_URL=true` cho phép `http://localhost` / `http://127.0.0.1` trong môi trường Docker Compose local khi trỏ tới VNPay Sandbox.
 
 ---
 
-### Issue #3 [Major — Cross-Module Integration]: `GET /orders/me` trên `dev` (`f3a0285`) gặp lỗi 500 khi đơn hàng có giao dịch `VNPAY` hoặc `ZERO_AMOUNT`
+### Issue #3 [Major — Discovered @ `f3a0285`, Resolved in `SCRUM-88`]: `GET /orders/me` trên `dev` (`f3a0285`) gặp lỗi 500 khi đơn hàng có giao dịch `VNPAY` hoặc `ZERO_AMOUNT`
 
 - **Module / Owner**: `P2-14` (`SCRUM-88` — `backend/src/orders/orders.service.ts`).
 - **Mức độ**: **Major**.
-- **Bước tái hiện**:
+- **Bước tái hiện (tại commit `f3a0285`)**:
   1. Trên nhánh `dev` (`f3a0285`), tạo đơn hàng `0 VND` và hoàn tất qua `POST /payments/zero-amount` (hoặc hoàn tất thanh toán VNPay `status = SUCCESS`, `responseSnapshot = null`).
   2. Gọi `GET /orders/me`.
-  3. `OrdersService.getMine()` trên `dev` gọi `readPaymentSnapshot(payment.responseSnapshot)` (vốn chỉ chấp nhận cấu trúc snapshot của Mock Card/Wallet) và throw `InternalServerErrorException('Invalid payment response snapshot')`. Ngoài ra `getMine()` trên `dev` chỉ lọc `status IN ('SUCCESS', 'FAILED')` nên bỏ sót giao dịch `PENDING`.
+  3. `OrdersService.getMine()` trên `dev` gọi `readPaymentSnapshot(payment.responseSnapshot)` (vốn chỉ chấp nhận cấu trúc snapshot của Mock Card/Wallet) và throw `InternalServerErrorException('Invalid payment response snapshot')`.
 - **Trạng thái xử lý**:
-  - Đã được sửa trong nhánh `SCRUM-88-p-2-14-complete-payment-confirmation-order-history-integration` (`P2-14`). Sau khi `SCRUM-88` được merge vào `dev`, `GET /orders/me` sẽ hỗ trợ đầy đủ `VNPAY`, `MOCK`, `ZERO_AMOUNT` và trạng thái `PENDING`.
+  - Đã được sửa trong nhánh `SCRUM-88-p-2-14-complete-payment-confirmation-order-history-integration` (`P2-14`).
 
 ---
 
@@ -300,6 +316,6 @@ Pre-Restart and Post-Restart SQL Snapshot:
 
 - **Module / Owner**: `P2-17` (`SCRUM-91` — `README.md`, `docs/Docker_Compose.md`).
 - **Chi tiết & Giải pháp đã áp dụng**:
-  1. Bổ sung script [`scripts/compose-preflight-env.ps1`](../../scripts/compose-preflight-env.ps1) tương đương với `scripts/compose-preflight-env.sh` để người dùng Windows PowerShell không gặp lỗi `WSL_E_DEFAULT_DISTRO_NOT_FOUND` khi máy chưa cài WSL distro.
+  1. Bổ sung script [`scripts/compose-preflight-env.ps1`](../../scripts/compose-preflight-env.ps1) tương đương với `scripts/compose-preflight-env.sh` (kiểm tra đủ 22 biến nội suy của `docker-compose.yml`) để người dùng Windows PowerShell không gặp lỗi `WSL_E_DEFAULT_DISTRO_NOT_FOUND`.
   2. Cập nhật [`README.md`](../../README.md) và [`docs/Docker_Compose.md`](../Docker_Compose.md) với hướng dẫn đầy đủ cho cả **Git Bash** và **Windows PowerShell**, kèm bước kiểm tra deterministic trạng thái container `migrate` (`exited:0`) trước khi chạy `db:seed`.
-  3. Bổ sung script kiểm thử E2E tự động [`scripts/scrum92/verify_compose_e2e.mjs`](../../scripts/scrum92/verify_compose_e2e.mjs) chạy được trên cả Git Bash và PowerShell, kèm cơ chế tự động khôi phục `stock` và dọn dữ liệu test scoped cho `SCRUM-92`.
+  3. Bổ sung script kiểm thử E2E tự động [`scripts/scrum92/verify_compose_e2e.mjs`](../../scripts/scrum92/verify_compose_e2e.mjs) chạy trên project/volume/database cô lập (`-p brewlite_scrum92_e2e`, `brewlite_scrum92_e2e_brewlite_pgdata`, `brewlite_seed_scrum92_e2e`), tắt scheduler nền để tránh race condition khi test persistence, và tự động khôi phục `stock` + xóa theo exact UUIDs trong `finally`.
