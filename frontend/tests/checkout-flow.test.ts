@@ -2587,5 +2587,555 @@ describe("SCRUM-43 & SCRUM-44 Checkout Flow, Cart Integration & POST /orders Aut
         g.IS_REACT_ACT_ENVIRONMENT = savedActEnv;
       }
     });
+
+    it("mounted JSDOM: reload app with AuthProvider initially loading (isLoading=true) -> restores User A -> cart of User A remains intact without premature wipe", async () => {
+      const userAId = "550e8400-e29b-41d4-a716-446655440000";
+      const tokenA = createValidMockJwt(userAId);
+      const sampleItems = createSampleCartItems();
+
+      // Giả lập trạng thái trước khi reload: User A đã có cart trong localStorage
+      localStorageMock.setItem("brewlite_cart_v1", JSON.stringify(sampleItems));
+      localStorageMock.setItem(CART_OWNER_STORAGE_KEY, userAId);
+      localStorageMock.setItem(
+        `brewlite_cart_user_${userAId.toLowerCase()}`,
+        JSON.stringify(sampleItems)
+      );
+
+      const dom = new JSDOM(
+        "<!doctype html><html><body><div id='root'></div></body></html>",
+        { url: "http://localhost:3000" }
+      );
+      const g = globalThis as Record<string, unknown>;
+      const savedWindow = g.window;
+      const savedDocument = g.document;
+      const savedSelf = g.self;
+      const savedActEnv = g.IS_REACT_ACT_ENVIRONMENT;
+
+      g.window = dom.window;
+      g.document = dom.window.document;
+      g.self = dom.window;
+      g.HTMLElement = dom.window.HTMLElement;
+      g.HTMLInputElement = dom.window.HTMLInputElement;
+      g.HTMLButtonElement = dom.window.HTMLButtonElement;
+      g.Element = dom.window.Element;
+      g.Node = dom.window.Node;
+      g.Event = dom.window.Event;
+      g.InputEvent = dom.window.InputEvent;
+      g.MouseEvent = dom.window.MouseEvent;
+      g.IS_REACT_ACT_ENVIRONMENT = true;
+      Object.defineProperty(dom.window, "localStorage", { value: localStorageMock, configurable: true });
+      Object.defineProperty(dom.window, "sessionStorage", { value: sessionStorageMock, configurable: true });
+
+      const container = dom.window.document.getElementById("root") as HTMLDivElement;
+      let root: Root | null = null;
+      const cartCtxRef: { current: CartContextValue | null } = { current: null };
+
+      function CartInspector() {
+        cartCtxRef.current = useCart();
+        return null;
+      }
+
+      const makeAuthValue = (
+        userId: string | null,
+        token: string | null,
+        isLoading: boolean
+      ): AuthContextType => ({
+        user: userId
+          ? {
+              id: userId,
+              email: `${userId}@brewlite.vn`,
+              fullName: "Nguyễn Văn A",
+            }
+          : null,
+        accessToken: token,
+        isAuthenticated: Boolean(userId && token),
+        isLoading,
+        login: async () => {},
+        register: async () => ({
+          id: userId ?? "",
+          email: "test@brewlite.vn",
+          fullName: "Test",
+          createdAt: "2026-10-26T15:00:00.000Z",
+        }),
+        logout: () => {},
+        verifySession: () => Boolean(userId && token),
+        handleUnauthorizedCheckout: () => {},
+        pendingCheckout: false,
+        setPendingCheckout: () => {},
+        isAuthModalOpen: false,
+        authModalMode: "login",
+        authModalMessage: null,
+        openAuthModal: () => {},
+        closeAuthModal: () => {},
+      });
+
+      const renderWithAuth = async (authVal: AuthContextType) => {
+        await act(async () => {
+          if (!root) {
+            root = createRoot(container);
+          }
+          root.render(
+            React.createElement(
+              AuthContext.Provider,
+              { value: authVal },
+              React.createElement(
+                CartProvider,
+                null,
+                React.createElement(CartInspector),
+                React.createElement(CartDrawer, {
+                  initialCheckoutStep: "review",
+                })
+              )
+            )
+          );
+        });
+      };
+
+      try {
+        // 1. App vừa reload: AuthProvider bắt đầu với isLoading = true, user = null, accessToken = null
+        await renderWithAuth(makeAuthValue(null, null, true));
+
+        // Trong lúc auth đang loading, CartContext KHÔNG được vội vàng coi là guest và xóa sạch cart của User A trong localStorage!
+        assert.ok(
+          localStorageMock.getItem("brewlite_cart_v1") !== "[]",
+          "localStorage must NOT be wiped with [] while AuthProvider is isLoading=true"
+        );
+        assert.equal(
+          localStorageMock.getItem(CART_OWNER_STORAGE_KEY),
+          userAId,
+          "CART_OWNER_STORAGE_KEY must remain userAId while AuthProvider is loading"
+        );
+
+        // 2. AuthProvider hoàn tất khôi phục session (isLoading = false, user = User A)
+        await renderWithAuth(makeAuthValue(userAId, tokenA, false));
+
+        // Cart của User A phải được khôi phục nguyên vẹn 100%!
+        assert.ok(cartCtxRef.current, "CartContext must be mounted");
+        assert.equal(
+          cartCtxRef.current?.items.length,
+          sampleItems.length,
+          "Cart of User A must remain intact after session restore"
+        );
+        assert.equal(
+          cartCtxRef.current?.items[0].productName,
+          sampleItems[0].productName,
+          "First item of User A cart must match sample item"
+        );
+        assert.equal(
+          cartCtxRef.current?.totalQuantity,
+          2,
+          "Total quantity of User A cart must be preserved"
+        );
+      } finally {
+        if (root) {
+          await act(async () => {
+            root?.unmount();
+          });
+        }
+        g.window = savedWindow;
+        g.document = savedDocument;
+        g.self = savedSelf;
+        g.IS_REACT_ACT_ENVIRONMENT = savedActEnv;
+      }
+    });
+
+    it("mounted JSDOM: real race window test: mutate cart and resolve preview in the same act/microtask before passive effect -> stale preview & stale error responses are completely ignored", async () => {
+      const userAId = "550e8400-e29b-41d4-a716-446655440000";
+      const tokenA = createValidMockJwt(userAId);
+
+      setStoredSession(tokenA, {
+        id: userAId,
+        email: "usera@brewlite.vn",
+        fullName: "Nguyễn Văn A",
+      });
+      localStorageMock.setItem(
+        "brewlite_cart_v1",
+        JSON.stringify(createSampleCartItems())
+      );
+      localStorageMock.setItem(CART_OWNER_STORAGE_KEY, userAId);
+
+      const dom = new JSDOM(
+        "<!doctype html><html><body><div id='root'></div></body></html>",
+        { url: "http://localhost:3000" }
+      );
+      const g = globalThis as Record<string, unknown>;
+      const savedWindow = g.window;
+      const savedDocument = g.document;
+      const savedSelf = g.self;
+      const savedActEnv = g.IS_REACT_ACT_ENVIRONMENT;
+
+      g.window = dom.window;
+      g.document = dom.window.document;
+      g.self = dom.window;
+      g.HTMLElement = dom.window.HTMLElement;
+      g.HTMLInputElement = dom.window.HTMLInputElement;
+      g.HTMLButtonElement = dom.window.HTMLButtonElement;
+      g.Element = dom.window.Element;
+      g.Node = dom.window.Node;
+      g.Event = dom.window.Event;
+      g.InputEvent = dom.window.InputEvent;
+      g.MouseEvent = dom.window.MouseEvent;
+      g.IS_REACT_ACT_ENVIRONMENT = true;
+      Object.defineProperty(dom.window, "localStorage", { value: localStorageMock, configurable: true });
+      Object.defineProperty(dom.window, "sessionStorage", { value: sessionStorageMock, configurable: true });
+
+      const container = dom.window.document.getElementById("root") as HTMLDivElement;
+      let root: Root | null = null;
+      const cartCtxRef: { current: CartContextValue | null } = { current: null };
+
+      function CartInspector() {
+        cartCtxRef.current = useCart();
+        return null;
+      }
+
+      const authValue: AuthContextType = {
+        user: {
+          id: userAId,
+          email: "usera@brewlite.vn",
+          fullName: "Nguyễn Văn A",
+        },
+        accessToken: tokenA,
+        isAuthenticated: true,
+        isLoading: false,
+        login: async () => {},
+        register: async () => ({
+          id: userAId,
+          email: "usera@brewlite.vn",
+          fullName: "Nguyễn Văn A",
+          createdAt: "2026-10-26T15:00:00.000Z",
+        }),
+        logout: () => {},
+        verifySession: () => true,
+        handleUnauthorizedCheckout: () => {},
+        pendingCheckout: false,
+        setPendingCheckout: () => {},
+        isAuthModalOpen: false,
+        authModalMode: "login",
+        authModalMessage: null,
+        openAuthModal: () => {},
+        closeAuthModal: () => {},
+      };
+
+      const pendingList: Array<{
+        resolve: (val: CouponPreviewResponseDto) => void;
+        reject: (err: unknown) => void;
+        signal?: AbortSignal;
+      }> = [];
+
+      const mockPreviewFn = (
+        _payload: unknown,
+        _token?: string | null,
+        options?: { signal?: AbortSignal }
+      ) =>
+        new Promise<CouponPreviewResponseDto>((resolve, reject) => {
+          pendingList.push({ resolve, reject, signal: options?.signal });
+        });
+
+      const setInputValue = (input: HTMLInputElement, val: string) => {
+        const prev = input.value;
+        const setter = Object.getOwnPropertyDescriptor(
+          dom.window.HTMLInputElement.prototype,
+          "value"
+        )?.set;
+        setter?.call(input, val);
+        const tracker = (
+          input as unknown as { _valueTracker?: { setValue: (v: string) => void } }
+        )._valueTracker;
+        tracker?.setValue(prev);
+        input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+        input.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+      };
+
+      try {
+        await act(async () => {
+          root = createRoot(container);
+          root.render(
+            React.createElement(
+              AuthContext.Provider,
+              { value: authValue },
+              React.createElement(
+                CartProvider,
+                null,
+                React.createElement(CartInspector),
+                React.createElement(CartDrawer, {
+                  initialCheckoutStep: "review",
+                  previewCouponFn: mockPreviewFn,
+                })
+              )
+            )
+          );
+        });
+
+        await act(async () => {
+          cartCtxRef.current?.openCart();
+        });
+
+        const couponInput = container.querySelector(
+          "#checkoutCouponInput"
+        ) as HTMLInputElement;
+        const applyBtn = container.querySelector(
+          "#btnApplyCheckoutCoupon"
+        ) as HTMLButtonElement;
+        assert.ok(couponInput && applyBtn);
+
+        // 1. Bắt đầu preview WELCOME20
+        await act(async () => {
+          setInputValue(couponInput, "WELCOME20");
+        });
+        await act(async () => {
+          applyBtn.click();
+        });
+        assert.equal(pendingList.length, 1);
+        const req1 = pendingList[0];
+
+        // 2. Real race window: Trong cùng một act, gọi mutate giỏ hàng và resolve preview ngay lập tức
+        // trước khi bất kỳ passive effect nào của CartDrawer có cơ hội chạy
+        await act(async () => {
+          // Invalidate xảy ra đồng bộ ngay tại đây!
+          cartCtxRef.current?.incrementQuantity("cart-line-1");
+          // Response cũ trả về ngay sau mutation
+          req1.resolve({
+            valid: true,
+            couponCode: "WELCOME20",
+            subtotalVnd: 118000,
+            discountVnd: 23600,
+            totalVnd: 94400,
+          });
+        });
+
+        // Kết quả: response cũ bị drop hoàn toàn! Không có applied coupon nào được commit
+        assert.equal(
+          cartCtxRef.current?.appliedCoupon,
+          null,
+          "Stale response resolved in same act/tick as mutation must NOT commit discount"
+        );
+        assert.equal(
+          container.querySelector("#checkoutCouponStatusBanner")?.getAttribute("data-coupon-status"),
+          "idle",
+          "Status must remain idle, never transition to applied from stale response"
+        );
+
+        // 3. Stale error response protection:
+        // Bắt đầu preview thứ hai
+        await act(async () => {
+          applyBtn.click();
+        });
+        assert.equal(pendingList.length, 2);
+        const req2 = pendingList[1];
+
+        // Mutate cart và reject với 400 INVALID_COUPON trong cùng act
+        await act(async () => {
+          cartCtxRef.current?.decrementQuantity("cart-line-1");
+          const errorObj = new Error("Mã ưu đãi không hợp lệ.");
+          (errorObj as unknown as { response: { status: number; data: unknown } }).response = {
+            status: 400,
+            data: {
+              code: "INVALID_COUPON",
+              message: "Mã ưu đãi đã hết hạn hoặc không tồn tại.",
+            },
+          };
+          req2.reject(errorObj);
+        });
+
+        // Stale error response cũng phải bị drop hoàn toàn, không được ghi đè state mới!
+        assert.equal(
+          cartCtxRef.current?.couponStatus,
+          "idle",
+          "Stale error response must NOT overwrite new idle coupon state"
+        );
+        assert.equal(
+          cartCtxRef.current?.couponErrorMessage,
+          null,
+          "Stale error response must NOT overwrite couponErrorMessage"
+        );
+      } finally {
+        if (root) {
+          await act(async () => {
+            root?.unmount();
+          });
+        }
+        g.window = savedWindow;
+        g.document = savedDocument;
+        g.self = savedSelf;
+        g.IS_REACT_ACT_ENVIRONMENT = savedActEnv;
+      }
+    });
+
+    it("mounted JSDOM: scoped cart persistence across logout & login: User A cart is preserved scoped, User B gets isolated empty cart, User A logs back in and restores original cart", async () => {
+      const userAId = "550e8400-e29b-41d4-a716-446655440000";
+      const userBId = "660e8400-e29b-41d4-a716-446655440999";
+      const tokenA = createValidMockJwt(userAId);
+      const tokenB = createValidMockJwt(userBId);
+
+      const sampleItems = createSampleCartItems();
+      localStorageMock.setItem(
+        `brewlite_cart_user_${userAId.toLowerCase()}`,
+        JSON.stringify(sampleItems)
+      );
+      localStorageMock.setItem("brewlite_cart_v1", JSON.stringify(sampleItems));
+      localStorageMock.setItem(CART_OWNER_STORAGE_KEY, userAId);
+
+      const dom = new JSDOM(
+        "<!doctype html><html><body><div id='root'></div></body></html>",
+        { url: "http://localhost:3000" }
+      );
+      const g = globalThis as Record<string, unknown>;
+      const savedWindow = g.window;
+      const savedDocument = g.document;
+      const savedSelf = g.self;
+      const savedActEnv = g.IS_REACT_ACT_ENVIRONMENT;
+
+      g.window = dom.window;
+      g.document = dom.window.document;
+      g.self = dom.window;
+      g.HTMLElement = dom.window.HTMLElement;
+      g.HTMLInputElement = dom.window.HTMLInputElement;
+      g.HTMLButtonElement = dom.window.HTMLButtonElement;
+      g.Element = dom.window.Element;
+      g.Node = dom.window.Node;
+      g.Event = dom.window.Event;
+      g.InputEvent = dom.window.InputEvent;
+      g.MouseEvent = dom.window.MouseEvent;
+      g.IS_REACT_ACT_ENVIRONMENT = true;
+      Object.defineProperty(dom.window, "localStorage", { value: localStorageMock, configurable: true });
+      Object.defineProperty(dom.window, "sessionStorage", { value: sessionStorageMock, configurable: true });
+
+      const container = dom.window.document.getElementById("root") as HTMLDivElement;
+      let root: Root | null = null;
+      const cartCtxRef: { current: CartContextValue | null } = { current: null };
+
+      function CartInspector() {
+        cartCtxRef.current = useCart();
+        return null;
+      }
+
+      const makeAuthValue = (
+        userId: string | null,
+        token: string | null
+      ): AuthContextType => ({
+        user: userId
+          ? {
+              id: userId,
+              email: `${userId}@brewlite.vn`,
+              fullName: userId === userAId ? "Nguyễn Văn A" : "Trần Thị B",
+            }
+          : null,
+        accessToken: token,
+        isAuthenticated: Boolean(userId && token),
+        isLoading: false,
+        login: async () => {},
+        register: async () => ({
+          id: userId ?? "",
+          email: "test@brewlite.vn",
+          fullName: "Test",
+          createdAt: "2026-10-26T15:00:00.000Z",
+        }),
+        logout: () => {},
+        verifySession: () => Boolean(userId && token),
+        handleUnauthorizedCheckout: () => {},
+        pendingCheckout: false,
+        setPendingCheckout: () => {},
+        isAuthModalOpen: false,
+        authModalMode: "login",
+        authModalMessage: null,
+        openAuthModal: () => {},
+        closeAuthModal: () => {},
+      });
+
+      const renderWithAuth = async (authVal: AuthContextType) => {
+        await act(async () => {
+          if (!root) {
+            root = createRoot(container);
+          }
+          root.render(
+            React.createElement(
+              AuthContext.Provider,
+              { value: authVal },
+              React.createElement(
+                CartProvider,
+                null,
+                React.createElement(CartInspector),
+                React.createElement(CartDrawer, {
+                  initialCheckoutStep: "review",
+                })
+              )
+            )
+          );
+        });
+      };
+
+      try {
+        // 1. Mount ban đầu với User A: Cart của User A được nạp đúng
+        await renderWithAuth(makeAuthValue(userAId, tokenA));
+        assert.equal(cartCtxRef.current?.items.length, sampleItems.length);
+
+        // 2. User A logout -> auth chuyển sang null
+        await renderWithAuth(makeAuthValue(null, null));
+
+        // Khi logout, coupon bị xóa và cart active hiện tại chuyển sang cart guest (rỗng),
+        // NHƯNG cart của User A trong scoped storage key của A KHÔNG bị xóa bừa!
+        assert.equal(
+          cartCtxRef.current?.couponCode,
+          "",
+          "Logout must clear couponCode"
+        );
+        assert.equal(
+          cartCtxRef.current?.appliedCoupon,
+          null,
+          "Logout must clear appliedCoupon"
+        );
+        assert.ok(
+          localStorageMock.getItem(`brewlite_cart_user_${userAId.toLowerCase()}`) !== "[]",
+          "User A's scoped cart in localStorage must NOT be destroyed on logout"
+        );
+
+        // 3. User B đăng nhập -> User B chỉ thấy giỏ hàng của B (chưa có gì = rỗng), không thừa hưởng của User A!
+        await renderWithAuth(makeAuthValue(userBId, tokenB));
+        assert.equal(
+          cartCtxRef.current?.items.length,
+          0,
+          "User B must have an isolated empty cart, never inheriting User A's cart"
+        );
+
+        // 4. User B thêm 1 món riêng vào giỏ hàng
+        await act(async () => {
+          cartCtxRef.current?.addToCart({
+            productId: "770e8400-e29b-41d4-a716-446655440111",
+            productName: "Trà Đào Cam Sả (User B)",
+            size: "M",
+            sizeMultiplierPercent: 120,
+            basePriceVnd: 45000,
+            quantity: 1,
+          });
+        });
+        assert.equal(cartCtxRef.current?.items.length, 1);
+        assert.equal(cartCtxRef.current?.items[0].productName, "Trà Đào Cam Sả (User B)");
+
+        // 5. User B logout và User A đăng nhập lại -> User A khôi phục lại nguyên vẹn giỏ hàng cũ của mình!
+        await renderWithAuth(makeAuthValue(null, null));
+        await renderWithAuth(makeAuthValue(userAId, tokenA));
+
+        assert.equal(
+          cartCtxRef.current?.items.length,
+          sampleItems.length,
+          "User A logs back in and restores original cart items intact"
+        );
+        assert.equal(
+          cartCtxRef.current?.items[0].productName,
+          sampleItems[0].productName,
+          "User A first product name must be Cà Phê Sữa Đá Sài Gòn"
+        );
+      } finally {
+        if (root) {
+          await act(async () => {
+            root?.unmount();
+          });
+        }
+        g.window = savedWindow;
+        g.document = savedDocument;
+        g.self = savedSelf;
+        g.IS_REACT_ACT_ENVIRONMENT = savedActEnv;
+      }
+    });
   });
 });

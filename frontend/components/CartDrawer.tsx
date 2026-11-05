@@ -664,6 +664,7 @@ export default function CartDrawer({
     appliedCoupon: contextAppliedCoupon,
     couponStatus: contextCouponStatus,
     couponErrorMessage: contextCouponErrorMessage,
+    applyCoupon: contextApplyCoupon,
     removeCoupon: contextRemoveCoupon,
     setCouponApplicationState: setContextCouponApplicationState,
     openCart,
@@ -760,13 +761,16 @@ export default function CartDrawer({
     applyingCouponRef.current = false;
   };
 
-  const setOrderCallOutcome = (outcome: OrderCallOutcome | null) => {
-    if (!outcome) {
-      setOutcomeRecord(null);
-      return;
-    }
-    setOutcomeRecord({ ownerUserId: currentAuthUserId, outcome });
-  };
+  const setOrderCallOutcome = React.useCallback(
+    (outcome: OrderCallOutcome | null) => {
+      if (!outcome) {
+        setOutcomeRecord(null);
+        return;
+      }
+      setOutcomeRecord({ ownerUserId: currentAuthUserId, outcome });
+    },
+    [currentAuthUserId]
+  );
 
   // Chỉ hiển thị modal kết quả nếu vẫn cùng phiên tài khoản đã tạo kết quả đó
   const orderCallOutcome: OrderCallOutcome | null =
@@ -853,7 +857,7 @@ export default function CartDrawer({
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isCartOpen, isSubmittingOrder, closeCart]);
+  }, [isCartOpen, isSubmittingOrder, closeCart, setOrderCallOutcome]);
 
   // Tự động tắt feedback sau 3s
   useEffect(() => {
@@ -895,6 +899,7 @@ export default function CartDrawer({
     pendingCheckout,
     items.length,
     setPendingCheckout,
+    setOrderCallOutcome,
     openCart,
   ]);
 
@@ -1078,6 +1083,17 @@ export default function CartDrawer({
     if (isSubmittingOrder) return;
     setVoucherNoticeVisible(false);
     const codeToApply = effectiveCouponCodeInput;
+
+    // Ưu tiên gọi trực tiếp qua CartContext để CartContext giữ duy nhất quyền sở hữu request version & abort controller
+    if (contextApplyCoupon) {
+      await contextApplyCoupon({
+        couponCodeOverride: codeToApply,
+        accessToken,
+        previewCouponFn,
+      });
+      return;
+    }
+
     latestSnapshotRef.current = {
       userId: currentAuthUserId,
       accessToken,
