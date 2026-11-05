@@ -4,6 +4,8 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { type OpenAuthModalOptions, useAuth } from "@/context/AuthContext";
 import {
   ACTIVE_ORDER_STORAGE_KEY,
+  buildCouponPreviewPayloadFromCart,
+  buildCreateOrderPayloadFromCart,
   type CartItem,
   clearStoredActiveOrder,
   persistActiveOrderForUser,
@@ -12,18 +14,30 @@ import {
   useCart,
 } from "@/context/CartContext";
 import type {
+  CouponPreviewResponseDto,
+  CouponValidationStatus,
   CreateOrderRequestDto,
   CreateOrderResponseDto,
   OrderSubmissionErrorState,
+
 } from "@/mock-data";
 import { FALLBACK_DRINK_IMAGE, formatVnd } from "@/services/api.service";
 import { getDisplayCustomerName } from "@/services/auth.service";
 import {
+  classifyCouponPreviewError,
   createOrderApi,
   getFriendlyOrderErrorTitle,
+  previewCouponApi,
   toOrderSubmissionErrorState,
+  validateCouponPreviewResponseData,
   type OrderServiceError,
 } from "@/services/order.service";
+import {
+  generateIdempotencyKey,
+  submitZeroAmountPaymentApi,
+  validateZeroAmountPaymentResponse,
+  type ZeroAmountPaymentResponseDto,
+} from "@/services/payment.service";
 
 export type CheckoutDrawerStep = "cart" | "review";
 
@@ -81,6 +95,271 @@ export function proceedToCheckoutStep(deps: ProceedToCheckoutFlowDeps): boolean 
   return true;
 }
 
+export interface ExecuteCouponPreviewDeps {
+  items: CartItem[];
+  couponCode: string;
+  accessToken: string | null;
+  isAuthenticated: boolean;
+  applyingRef: { current: boolean };
+  isSubmittingOrder: boolean;
+  verifySession: () => boolean;
+  openAuthModal: (
+    mode?: "login" | "register",
+    options?: OpenAuthModalOptions
+  ) => void;
+  setCouponStatus: (status: CouponValidationStatus) => void;
+  setAppliedCoupon: (preview: CouponPreviewResponseDto | null) => void;
+  setCouponErrorMessage: (msg: string | null) => void;
+  setCouponCode?: (code: string) => void;
+  previewCouponFn?: typeof previewCouponApi;
+}
+
+export interface ExecuteCouponPreviewResult {
+  skipped: boolean;
+  status: CouponValidationStatus;
+  preview: CouponPreviewResponseDto | null;
+  errorMessage: string | null;
+  errorCode?: string | null;
+}
+
+/**
+ * Điều phối gọi `POST /coupons/preview` (P2-21 & P2-22):
+ * - KHÔNG tạo Order (`POST /orders`), KHÔNG xóa giỏ hàng khi lỗi.
+ * - Frontend chỉ hiển thị kết quả do backend trả về, không tự quyết định coupon hợp lệ hay tự tính authoritative discount.
+ */
+export async function executeCouponPreview(
+  deps: ExecuteCouponPreviewDeps
+): Promise<ExecuteCouponPreviewResult> {
+  if (deps.applyingRef.current || deps.isSubmittingOrder) {
+    return {
+      skipped: true,
+      status: "validating",
+      preview: null,
+      errorMessage: null,
+    };
+  }
+
+  if (deps.items.length === 0) {
+    const msg =
+      "Giỏ hàng đang trống. Vui lòng chọn món trước khi áp dụng mã ưu đãi.";
+    deps.setAppliedCoupon(null);
+    deps.setCouponStatus("invalid");
+    deps.setCouponErrorMessage(msg);
+    return {
+      skipped: false,
+      status: "invalid",
+      preview: null,
+      errorMessage: msg,
+      errorCode: "INVALID_CART",
+    };
+  }
+
+  const trimmedCode =
+    typeof deps.couponCode === "string" ? deps.couponCode.trim() : "";
+  if (!trimmedCode) {
+    const msg = "Vui lòng nhập mã ưu đãi trước khi bấm Áp dụng.";
+    deps.setAppliedCoupon(null);
+    deps.setCouponStatus("invalid");
+    deps.setCouponErrorMessage(msg);
+    return {
+      skipped: false,
+      status: "invalid",
+      preview: null,
+      errorMessage: msg,
+      errorCode: "VALIDATION_ERROR",
+    };
+  }
+
+  const hasSession = deps.verifySession();
+  if (!hasSession || !deps.isAuthenticated || !deps.accessToken) {
+    const msg =
+      "Vui lòng đăng nhập để kiểm tra và áp dụng mã ưu đãi. Giỏ hàng của bạn vẫn được giữ nguyên.";
+    deps.setAppliedCoupon(null);
+    deps.setCouponStatus("error");
+    deps.setCouponErrorMessage(msg);
+    deps.openAuthModal("login", {
+      resumeCheckout: false,
+      reasonMessage: msg,
+    });
+    return {
+      skipped: true,
+      status: "error",
+      preview: null,
+      errorMessage: msg,
+      errorCode: "UNAUTHORIZED",
+    };
+  }
+
+  let payload;
+  try {
+    payload = buildCouponPreviewPayloadFromCart(deps.items, trimmedCode);
+  } catch (err: unknown) {
+    const classified = classifyCouponPreviewError(err);
+    deps.setAppliedCoupon(null);
+    deps.setCouponStatus(classified.status);
+    deps.setCouponErrorMessage(classified.message);
+    return {
+      skipped: false,
+      status: classified.status,
+      preview: null,
+      errorMessage: classified.message,
+      errorCode: classified.code,
+    };
+  }
+
+  const callPreview = deps.previewCouponFn || previewCouponApi;
+  deps.applyingRef.current = true;
+  deps.setCouponStatus("validating");
+  deps.setCouponErrorMessage(null);
+
+  try {
+    const rawPreview = await callPreview(payload, deps.accessToken);
+    const verifiedPreview = validateCouponPreviewResponseData(rawPreview);
+    deps.setCouponCode?.(verifiedPreview.couponCode);
+    deps.setAppliedCoupon(verifiedPreview);
+    deps.setCouponStatus("applied");
+    deps.setCouponErrorMessage(null);
+    return {
+      skipped: false,
+      status: "applied",
+      preview: verifiedPreview,
+      errorMessage: null,
+      errorCode: null,
+    };
+  } catch (err: unknown) {
+    const classified = classifyCouponPreviewError(err);
+    deps.setAppliedCoupon(null);
+    deps.setCouponStatus(classified.status);
+    deps.setCouponErrorMessage(classified.message);
+    if (classified.statusCode === 401) {
+      deps.openAuthModal("login", {
+        resumeCheckout: false,
+        reasonMessage: classified.message,
+      });
+    }
+    return {
+      skipped: false,
+      status: classified.status,
+      preview: null,
+      errorMessage: classified.message,
+      errorCode: classified.code,
+    };
+  } finally {
+    deps.applyingRef.current = false;
+  }
+}
+
+export interface ExecuteZeroAmountCompletionDeps {
+  order: CreateOrderResponseDto;
+  accessToken: string | null;
+  idempotencyKey?: string;
+  submittingRef: { current: boolean };
+  setIsSubmitting?: (submitting: boolean) => void;
+  clearCart?: () => void;
+  setActiveOrder?: (order: CreateOrderResponseDto | null) => void;
+  setZeroAmountPaidResult?: (res: ZeroAmountPaymentResponseDto | null) => void;
+  setZeroAmountError?: (msg: string | null) => void;
+  onNavigateSuccess?: (url: string) => void;
+  submitZeroAmountFn?: typeof submitZeroAmountPaymentApi;
+}
+
+/**
+ * Điều phối quyết toán đơn hàng `totalVnd === 0` qua `POST /payments/zero-amount` (P2-10 & P2-22):
+ * - TUYỆT ĐỐI KHÔNG redirect VNPay.
+ * - TUYỆT ĐỐI KHÔNG gọi Mock Payment (`POST /payments`).
+ * - Chỉ hiển thị success và xóa Cart khi backend xác nhận `paymentStatus === "SUCCESS"` và `orderStatus === "PAID"`.
+ * - Không tự giả lập success trên frontend.
+ */
+export async function executeZeroAmountOrderCompletion(
+  deps: ExecuteZeroAmountCompletionDeps
+): Promise<{
+  skipped: boolean;
+  success: boolean;
+  response: ZeroAmountPaymentResponseDto | null;
+  errorMessage: string | null;
+}> {
+  if (deps.submittingRef.current) {
+    return {
+      skipped: true,
+      success: false,
+      response: null,
+      errorMessage: null,
+    };
+  }
+
+  if (!deps.order || deps.order.totalVnd !== 0) {
+    const msg = "Chỉ áp dụng luồng ZERO_AMOUNT cho đơn hàng có tổng thanh toán 0đ.";
+    deps.setZeroAmountError?.(msg);
+    return {
+      skipped: false,
+      success: false,
+      response: null,
+      errorMessage: msg,
+    };
+  }
+
+  deps.submittingRef.current = true;
+  deps.setIsSubmitting?.(true);
+  deps.setZeroAmountError?.(null);
+
+  const keyToUse = deps.idempotencyKey || generateIdempotencyKey("zero");
+  const callZeroApi = deps.submitZeroAmountFn || submitZeroAmountPaymentApi;
+
+  try {
+    const result = await callZeroApi(
+      { orderId: deps.order.id },
+      keyToUse,
+      { accessToken: deps.accessToken }
+    );
+    const verifiedZero = validateZeroAmountPaymentResponse(
+      result?.response,
+      deps.order.id,
+      keyToUse
+    );
+
+    if (
+      verifiedZero.paymentStatus === "SUCCESS" &&
+      verifiedZero.orderStatus === "PAID" &&
+      verifiedZero.provider === "ZERO_AMOUNT" &&
+      verifiedZero.amountVnd === 0
+    ) {
+      deps.setZeroAmountPaidResult?.(verifiedZero);
+      deps.clearCart?.();
+      clearStoredActiveOrder();
+      deps.setActiveOrder?.(null);
+      const confirmUrl = `/order-confirmation?orderId=${encodeURIComponent(
+        deps.order.id
+      )}&view=zero`;
+      deps.onNavigateSuccess?.(confirmUrl);
+      return {
+        skipped: false,
+        success: true,
+        response: verifiedZero,
+        errorMessage: null,
+      };
+    }
+
+    throw new Error(
+      "Máy chủ chưa xác nhận trạng thái Payment SUCCESS / Order PAID cho đơn hàng 0đ."
+    );
+  } catch (err: unknown) {
+    const msg =
+      err instanceof Error && err.message
+        ? err.message
+        : "Không thể hoàn tất xác nhận đơn hàng 0đ từ máy chủ. Giỏ hàng được giữ nguyên.";
+    deps.setZeroAmountError?.(msg);
+    return {
+      skipped: false,
+      success: false,
+      response: null,
+      errorMessage: msg,
+    };
+  } finally {
+    deps.submittingRef.current = false;
+    deps.setIsSubmitting?.(false);
+  }
+}
+
 export interface ExecuteCheckoutSubmissionDeps {
   items: CartItem[];
   accessToken: string | null;
@@ -95,6 +374,11 @@ export interface ExecuteCheckoutSubmissionDeps {
     ownerUserIdOverride?: string | null
   ) => void;
   setOrderError?: (error: OrderSubmissionErrorState | null) => void;
+  onCouponRejected?: (rejected: {
+    status: CouponValidationStatus;
+    message: string;
+    code: string;
+  }) => void;
   verifySession: () => boolean;
   handleUnauthorizedCheckout: (reasonMessage?: string) => void;
   mapToCreateOrderPayload: () => CreateOrderRequestDto;
@@ -106,12 +390,13 @@ export interface ExecuteCheckoutSubmissionDeps {
 }
 
 /**
- * Điều phối gọi API `POST /orders` tại Bước 2 (Checkout) (SCRUM-43 & SCRUM-44):
+ * Điều phối gọi API `POST /orders` tại Bước 2 (Checkout) (SCRUM-43, SCRUM-44 & P2-22):
  * - Chặn double-click / double-submit đồng thời bằng cả `submittingRef` và `isSubmittingOrder`.
  * - Bật trạng thái loading (`setIsSubmittingOrder(true)`) ngay khi bắt đầu gửi request và tắt trong `finally`.
  * - Xử lý 401 UNAUTHORIZED: xóa snapshot đơn hàng PENDING (`clearStoredActiveOrder`), quay về bước `"cart"`, xóa phiên hết hạn, giữ nguyên giỏ hàng và mở Login Modal.
  * - Xử lý 201 Created (`status: "PENDING"`): lưu `orderCallOutcome = { type: "success", order }`, đồng bộ `activeOrder` gắn với `ownerUserId` vào `CartContext`/`sessionStorage` và giữ nguyên giỏ hàng.
  * - Xử lý lỗi mạng / lỗi đọc response (`isOutcomeUncertain = true`) và lỗi 400/409 (`isOutcomeUncertain = false` kèm `detailLines`).
+ * - Nếu coupon hết hiệu lực trước Create Order và backend từ chối (`400 INVALID_COUPON` hoặc `409 COUPON_UNAVAILABLE`), xóa discount cũ và yêu cầu user apply lại hoặc bỏ coupon.
  */
 export async function executeCheckoutOrderSubmission(
   deps: ExecuteCheckoutSubmissionDeps
@@ -216,6 +501,18 @@ export async function executeCheckoutOrderSubmission(
     }
 
     const normalizedErr = toOrderSubmissionErrorState(err, productNamesById);
+    if (
+      normalizedErr.code === "INVALID_COUPON" ||
+      normalizedErr.code === "COUPON_UNAVAILABLE"
+    ) {
+      const classified = classifyCouponPreviewError(err);
+      deps.onCouponRejected?.({
+        status: classified.status,
+        message: `${classified.message} Vui lòng áp dụng lại hoặc bỏ mã ưu đãi trước khi tạo đơn hàng.`,
+        code: classified.code,
+      });
+    }
+
     const errorOutcome: OrderCallOutcome = {
       type: "error",
       statusCode: normalizedErr.statusCode,
@@ -238,12 +535,26 @@ export interface CartDrawerProps {
   initialCheckoutStep?: CheckoutDrawerStep;
   initialIsSubmittingOrder?: boolean;
   initialOrderOutcome?: OrderCallOutcome | null;
+  initialCouponCode?: string;
+  initialAppliedCoupon?: CouponPreviewResponseDto | null;
+  initialCouponStatus?: CouponValidationStatus;
+  initialCouponErrorMessage?: string | null;
+  previewCouponFn?: typeof previewCouponApi;
+  submitZeroAmountFn?: typeof submitZeroAmountPaymentApi;
+  onNavigateSuccess?: (url: string) => void;
 }
 
 export default function CartDrawer({
   initialCheckoutStep = "cart",
   initialIsSubmittingOrder = false,
   initialOrderOutcome = null,
+  initialCouponCode,
+  initialAppliedCoupon,
+  initialCouponStatus,
+  initialCouponErrorMessage,
+  previewCouponFn,
+  submitZeroAmountFn,
+  onNavigateSuccess,
 }: CartDrawerProps) {
   const {
     items,
@@ -251,6 +562,13 @@ export default function CartDrawer({
     subtotalVnd,
     formattedSubtotal,
     isCartOpen,
+    couponCode: contextCouponCode,
+    setCouponCode: setContextCouponCode,
+    appliedCoupon: contextAppliedCoupon,
+    couponStatus: contextCouponStatus,
+    couponErrorMessage: contextCouponErrorMessage,
+    removeCoupon: contextRemoveCoupon,
+    setCouponApplicationState: setContextCouponApplicationState,
     openCart,
     closeCart,
     clearCart,
@@ -260,7 +578,7 @@ export default function CartDrawer({
     feedbackMessage,
     feedbackType,
     dismissFeedback,
-    mapToCreateOrderPayload,
+
     activeOrder: contextActiveOrder,
     isSubmittingOrder: contextIsSubmittingOrder,
     setActiveOrder: setContextActiveOrder,
@@ -298,6 +616,37 @@ export default function CartDrawer({
   );
   const [voucherNoticeVisible, setVoucherNoticeVisible] = useState(false);
   const submittingRef = useRef(initialIsSubmittingOrder);
+  const applyingCouponRef = useRef(false);
+  const zeroAmountSubmittingRef = useRef(false);
+
+  // State cục bộ kết hợp với CartContext để hỗ trợ cả tương tác trực tiếp trên UI và kiểm thử độc lập
+  const [localCouponCode, setLocalCouponCode] = useState<string>(
+    initialCouponCode ?? contextCouponCode ?? ""
+  );
+  const [localAppliedCoupon, setLocalAppliedCoupon] =
+    useState<CouponPreviewResponseDto | null>(
+      initialAppliedCoupon !== undefined
+        ? initialAppliedCoupon
+        : contextAppliedCoupon ?? null
+    );
+  const [localCouponStatus, setLocalCouponStatus] =
+    useState<CouponValidationStatus>(
+      initialCouponStatus ??
+        contextCouponStatus ??
+        (initialAppliedCoupon ? "applied" : "idle")
+    );
+  const [localCouponErrorMessage, setLocalCouponErrorMessage] = useState<
+    string | null
+  >(
+    initialCouponErrorMessage !== undefined
+      ? initialCouponErrorMessage
+      : contextCouponErrorMessage ?? null
+  );
+
+  const [isCompletingZeroAmount, setIsCompletingZeroAmount] = useState(false);
+  const [zeroAmountPaidResult, setZeroAmountPaidResult] =
+    useState<ZeroAmountPaymentResponseDto | null>(null);
+  const [zeroAmountError, setZeroAmountError] = useState<string | null>(null);
 
   const setOrderCallOutcome = (outcome: OrderCallOutcome | null) => {
     if (!outcome) {
@@ -437,13 +786,134 @@ export default function CartDrawer({
     openCart,
   ]);
 
-  /**
-   * Khi người dùng bấm vào ô nhập Voucher hoặc nút Áp dụng:
-   * Không cho nhận ký tự và hiển thị thông báo chức năng sẽ phát triển sau
-   */
-  const handleVoucherAttempt = () => {
-    if (isSubmittingOrder) return;
-    setVoucherNoticeVisible(true);
+  // Đồng bộ state coupon giữa CartContext và state cục bộ của CartDrawer
+  const effectiveCouponCodeInput =
+    contextCouponCode !== undefined && contextCouponCode !== ""
+      ? contextCouponCode
+      : localCouponCode;
+
+  const effectiveAppliedCoupon: CouponPreviewResponseDto | null =
+    contextAppliedCoupon !== undefined
+      ? contextAppliedCoupon
+      : localAppliedCoupon;
+
+  const effectiveCouponStatus: CouponValidationStatus =
+    contextCouponStatus && contextCouponStatus !== "idle"
+      ? contextCouponStatus
+      : localCouponStatus;
+
+  const effectiveCouponErrorMessage: string | null =
+    contextCouponErrorMessage ?? localCouponErrorMessage;
+
+  // Sau khi Create Order (POST /orders) thành công, UI bắt buộc dùng snapshot từ backend trả về làm source of truth
+  const authoritativeOrderSnapshot: CreateOrderResponseDto | null =
+    orderCallOutcome?.type === "success"
+      ? orderCallOutcome.order
+      : displayedActiveOrder;
+
+  const displaySubtotalVnd: number = authoritativeOrderSnapshot
+    ? authoritativeOrderSnapshot.subtotalVnd
+    : effectiveCouponStatus === "applied" && effectiveAppliedCoupon
+    ? effectiveAppliedCoupon.subtotalVnd
+    : subtotalVnd;
+
+  const displayDiscountVnd: number = authoritativeOrderSnapshot
+    ? authoritativeOrderSnapshot.discountVnd
+    : effectiveCouponStatus === "applied" && effectiveAppliedCoupon
+    ? effectiveAppliedCoupon.discountVnd
+    : 0;
+
+  const displayTotalVnd: number = authoritativeOrderSnapshot
+    ? authoritativeOrderSnapshot.totalVnd
+    : effectiveCouponStatus === "applied" && effectiveAppliedCoupon
+    ? effectiveAppliedCoupon.totalVnd
+    : subtotalVnd;
+
+  const displayCouponCode: string | null = authoritativeOrderSnapshot
+    ? authoritativeOrderSnapshot.couponCode
+    : effectiveCouponStatus === "applied" && effectiveAppliedCoupon
+    ? effectiveAppliedCoupon.couponCode
+    : null;
+
+  const handleCouponCodeChange = (nextRawCode: string) => {
+    if (isSubmittingOrder || effectiveCouponStatus === "validating") return;
+    setVoucherNoticeVisible(false);
+    setLocalCouponCode(nextRawCode);
+    setContextCouponCode(nextRawCode);
+
+    const normalizedNext = nextRawCode.trim().toUpperCase();
+    if (
+      effectiveAppliedCoupon &&
+      effectiveAppliedCoupon.couponCode !== normalizedNext
+    ) {
+      // Không giữ discount cũ nếu coupon bị thay đổi
+      setLocalAppliedCoupon(null);
+      setLocalCouponStatus("idle");
+      setLocalCouponErrorMessage(null);
+      setContextCouponApplicationState?.({
+        appliedCoupon: null,
+        status: "idle",
+        errorMessage: null,
+        errorCode: null,
+      });
+    } else if (!effectiveAppliedCoupon && effectiveCouponStatus !== "idle") {
+      setLocalCouponStatus("idle");
+      setLocalCouponErrorMessage(null);
+      setContextCouponApplicationState?.({
+        status: "idle",
+        errorMessage: null,
+        errorCode: null,
+      });
+    }
+  };
+
+  const handleRemoveCoupon = () => {
+    if (isSubmittingOrder || effectiveCouponStatus === "validating") return;
+    setVoucherNoticeVisible(false);
+    setLocalCouponCode("");
+    setLocalAppliedCoupon(null);
+    setLocalCouponStatus("idle");
+    setLocalCouponErrorMessage(null);
+    setContextCouponCode("");
+    contextRemoveCoupon?.();
+    setContextCouponApplicationState?.({
+      appliedCoupon: null,
+      status: "idle",
+      errorMessage: null,
+      errorCode: null,
+    });
+  };
+
+  const handleApplyCoupon = async () => {
+    if (isSubmittingOrder || applyingCouponRef.current) return;
+    setVoucherNoticeVisible(false);
+    await executeCouponPreview({
+      items,
+      couponCode: effectiveCouponCodeInput,
+      accessToken,
+      isAuthenticated,
+      applyingRef: applyingCouponRef,
+      isSubmittingOrder,
+      verifySession,
+      openAuthModal,
+      setCouponStatus: (status) => {
+        setLocalCouponStatus(status);
+        setContextCouponApplicationState?.({ status });
+      },
+      setAppliedCoupon: (preview) => {
+        setLocalAppliedCoupon(preview);
+        setContextCouponApplicationState?.({ appliedCoupon: preview });
+      },
+      setCouponErrorMessage: (msg) => {
+        setLocalCouponErrorMessage(msg);
+        setContextCouponApplicationState?.({ errorMessage: msg });
+      },
+      setCouponCode: (normalizedCode) => {
+        setLocalCouponCode(normalizedCode);
+        setContextCouponCode(normalizedCode);
+      },
+      previewCouponFn,
+    });
   };
 
   /**
@@ -464,10 +934,13 @@ export default function CartDrawer({
   };
 
   /**
-   * Bước 2 (Checkout) -> Gọi Create Order API (POST /orders) (SCRUM-43 & SCRUM-44)
-   * Quản lý đầy đủ trạng thái Loading / Success (201 Created) / Error (phân biệt rõ lỗi từ chối xác định và lỗi trạng thái không chắc chắn).
+   * Bước 2 (Checkout) -> Gọi Create Order API (POST /orders) (SCRUM-43, SCRUM-44 & P2-22)
+   * Quản lý đầy đủ trạng thái Loading / Success (201 Created) / Error.
+   * Chỉ gửi couponCode khi đã được apply hợp lệ (không gửi discountVnd).
    */
   const handleConfirmCreateOrder = async () => {
+    setZeroAmountPaidResult(null);
+    setZeroAmountError(null);
     await executeCheckoutOrderSubmission({
       items,
       accessToken,
@@ -479,11 +952,260 @@ export default function CartDrawer({
       setOrderCallOutcome,
       setActiveOrder: setContextActiveOrder,
       setOrderError: setContextOrderError,
+      onCouponRejected: (rejected) => {
+        setLocalAppliedCoupon(null);
+        setLocalCouponStatus(rejected.status);
+        setLocalCouponErrorMessage(rejected.message);
+        setContextCouponApplicationState?.({
+          appliedCoupon: null,
+          status: rejected.status,
+          errorMessage: rejected.message,
+          errorCode: rejected.code,
+        });
+      },
       verifySession,
       handleUnauthorizedCheckout,
-      mapToCreateOrderPayload,
+      mapToCreateOrderPayload: () => {
+        const couponToSend =
+          effectiveCouponStatus === "applied" && effectiveAppliedCoupon
+            ? effectiveAppliedCoupon.couponCode
+            : undefined;
+        return buildCreateOrderPayloadFromCart(items, couponToSend);
+      },
       clearCart,
     });
+  };
+
+  /**
+   * Quyết toán đơn hàng 0đ (ZERO_AMOUNT) qua POST /payments/zero-amount (P2-10 & P2-22)
+   */
+  const handleZeroAmountComplete = async (order: CreateOrderResponseDto) => {
+    await executeZeroAmountOrderCompletion({
+      order,
+      accessToken,
+      submittingRef: zeroAmountSubmittingRef,
+      setIsSubmitting: setIsCompletingZeroAmount,
+      clearCart: () => {
+        clearCart();
+        setLocalCouponCode("");
+        setLocalAppliedCoupon(null);
+        setLocalCouponStatus("idle");
+        setLocalCouponErrorMessage(null);
+      },
+      setActiveOrder: setContextActiveOrder,
+      setZeroAmountPaidResult,
+      setZeroAmountError,
+      onNavigateSuccess,
+      submitZeroAmountFn,
+    });
+  };
+
+  const getCouponStatusTitle = (status: CouponValidationStatus): string => {
+    switch (status) {
+      case "validating":
+        return "Đang kiểm tra mã ưu đãi...";
+      case "applied":
+        return "Đã áp dụng mã ưu đãi";
+      case "invalid":
+        return "Mã ưu đãi không hợp lệ";
+      case "expired":
+        return "Mã ưu đãi đã hết hạn";
+      case "not_eligible":
+        return "Chưa đủ điều kiện áp dụng";
+      case "usage_limit_exceeded":
+        return "Đã hết lượt sử dụng";
+      case "error":
+        return "Không thể kiểm tra mã ưu đãi";
+      default:
+        return "";
+    }
+  };
+
+  const renderCouponInputSection = (options: {
+    inputId: string;
+    applyButtonId: string;
+    removeButtonId: string;
+    statusBannerId: string;
+    showTitleLabel?: boolean;
+  }) => {
+    const isValidating = effectiveCouponStatus === "validating";
+    const isApplied =
+      effectiveCouponStatus === "applied" && Boolean(effectiveAppliedCoupon);
+    const isErrorState =
+      effectiveCouponStatus === "invalid" ||
+      effectiveCouponStatus === "expired" ||
+      effectiveCouponStatus === "not_eligible" ||
+      effectiveCouponStatus === "usage_limit_exceeded" ||
+      effectiveCouponStatus === "error";
+
+    return (
+      <div className="space-y-2" data-coupon-status={effectiveCouponStatus}>
+        {options.showTitleLabel && (
+          <div className="flex items-center justify-between gap-2">
+            <label
+              htmlFor={options.inputId}
+              className="block font-label-md text-[12px] text-on-surface font-semibold"
+            >
+              Mã ưu đãi / Voucher
+            </label>
+            {isApplied && effectiveAppliedCoupon && (
+              <span
+                id="appliedCouponCodeBadge"
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-secondary-container text-on-secondary-container font-mono text-[11px] font-bold"
+              >
+                Voucher {effectiveAppliedCoupon.couponCode}
+              </span>
+            )}
+          </div>
+        )}
+
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <span className="material-symbols-outlined text-[18px] text-outline absolute left-3 top-1/2 -translate-y-1/2">
+              confirmation_number
+            </span>
+            <input
+              id={options.inputId}
+              type="text"
+              maxLength={30}
+              disabled={isSubmittingOrder || isValidating}
+              value={effectiveCouponCodeInput}
+              onChange={(e) => handleCouponCodeChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void handleApplyCoupon();
+                }
+              }}
+              placeholder="Nhập mã ưu đãi (VD: WELCOME20)"
+              className="w-full pl-9 pr-3 py-2 bg-surface-container-low border border-outline-variant/40 rounded-lg font-mono text-[13px] text-on-surface placeholder:font-sans placeholder:text-outline focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60 disabled:cursor-not-allowed transition-all uppercase"
+            />
+          </div>
+
+          <button
+            id={options.applyButtonId}
+            type="button"
+            disabled={isSubmittingOrder || isValidating}
+            aria-busy={isValidating}
+            onClick={() => void handleApplyCoupon()}
+            className="px-3.5 py-2 bg-primary hover:bg-primary-container text-on-primary font-label-md text-[12px] font-semibold rounded-lg transition-colors whitespace-nowrap cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+          >
+            {isValidating ? (
+              <>
+                <span className="material-symbols-outlined text-[15px] animate-spin">
+                  progress_activity
+                </span>
+                <span>Đang kiểm tra...</span>
+              </>
+            ) : (
+              <span>Áp dụng</span>
+            )}
+          </button>
+
+          {(isApplied ||
+            isErrorState ||
+            effectiveCouponCodeInput.trim().length > 0) && (
+            <button
+              id={options.removeButtonId}
+              type="button"
+              disabled={isSubmittingOrder || isValidating}
+              onClick={handleRemoveCoupon}
+              className="px-2.5 py-2 border border-outline-variant hover:bg-surface-container text-on-surface-variant font-label-md text-[12px] font-semibold rounded-lg transition-colors whitespace-nowrap cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Bỏ mã ưu đãi"
+            >
+              Bỏ mã
+            </button>
+          )}
+        </div>
+
+        {/* Trạng thái kiểm tra / áp dụng Coupon (idle | validating | applied | invalid | expired | not_eligible | usage_limit_exceeded | error) */}
+        {effectiveCouponStatus === "idle" && (
+          <div
+            id={options.statusBannerId}
+            data-coupon-status="idle"
+            className="text-[11px] text-outline flex items-center gap-1"
+          >
+            <span>Nhập mã ưu đãi và bấm Áp dụng để tính giảm giá trực tiếp từ máy chủ.</span>
+          </div>
+        )}
+
+        {isValidating && (
+          <div
+            id={options.statusBannerId}
+            data-coupon-status="validating"
+            role="status"
+            aria-live="polite"
+            className="p-2 rounded-lg bg-primary/10 border border-primary/30 text-primary text-[11px] font-medium flex items-center gap-1.5"
+          >
+            <span className="material-symbols-outlined text-[15px] animate-spin flex-shrink-0">
+              progress_activity
+            </span>
+            <span>Đang kiểm tra mã ưu đãi với máy chủ...</span>
+          </div>
+        )}
+
+        {isApplied && effectiveAppliedCoupon && (
+          <div
+            id={options.statusBannerId}
+            data-coupon-status="applied"
+            role="status"
+            aria-live="polite"
+            className="p-2.5 rounded-lg bg-secondary-container/60 border border-secondary/40 text-on-secondary-container text-[11px] flex items-center justify-between gap-2"
+          >
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="material-symbols-outlined text-[16px] text-primary flex-shrink-0">
+                verified
+              </span>
+              <span className="truncate">
+                Đã áp dụng{" "}
+                <strong className="font-mono">
+                  Voucher {effectiveAppliedCoupon.couponCode}
+                </strong>
+                :{" "}
+                <strong className="text-primary">
+                  -{formatVnd(displayDiscountVnd)}
+                </strong>
+              </span>
+            </div>
+            <button
+              type="button"
+              disabled={isSubmittingOrder}
+              onClick={handleRemoveCoupon}
+              className="text-[11px] font-bold text-error hover:underline whitespace-nowrap cursor-pointer"
+            >
+              Bỏ coupon
+            </button>
+          </div>
+        )}
+
+        {isErrorState && (
+          <div
+            id={options.statusBannerId}
+            data-coupon-status={effectiveCouponStatus}
+            role="alert"
+            aria-live="assertive"
+            className="p-2.5 rounded-lg bg-error/10 border border-error/30 text-error text-[11px] space-y-0.5"
+          >
+            <div className="font-bold flex items-center justify-between gap-2">
+              <span className="flex items-center gap-1">
+                <span className="material-symbols-outlined text-[15px]">
+                  error
+                </span>
+                <span>{getCouponStatusTitle(effectiveCouponStatus)}</span>
+              </span>
+              <span className="font-mono text-[10px] uppercase px-1.5 py-0.5 rounded bg-error/15">
+                {effectiveCouponStatus}
+              </span>
+            </div>
+            {effectiveCouponErrorMessage && (
+              <div className="text-on-surface leading-relaxed">
+                {effectiveCouponErrorMessage}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -1022,57 +1744,61 @@ export default function CartDrawer({
                 </div>
               </div>
 
-              {/* Ô Mã ưu đãi / Voucher ở bước Checkout — Không cho nhận và thông báo phát triển sau */}
-              <div className="p-3.5 rounded-xl bg-surface border border-outline-variant/40 shadow-sm space-y-2">
-                <label
-                  htmlFor="checkoutCouponInput"
-                  className="block font-label-md text-[12px] text-on-surface font-semibold"
-                >
-                  Mã ưu đãi / Voucher
-                </label>
-                <div className="flex gap-2">
-                  <div className="relative flex-1">
-                    <span className="material-symbols-outlined text-[18px] text-outline absolute left-3 top-1/2 -translate-y-1/2">
-                      confirmation_number
-                    </span>
-                    <input
-                      id="checkoutCouponInput"
-                      type="text"
-                      readOnly
-                      value=""
-                      onClick={handleVoucherAttempt}
-                      onFocus={handleVoucherAttempt}
-                      onKeyDown={(e) => {
-                        e.preventDefault();
-                        handleVoucherAttempt();
-                      }}
-                      placeholder="Nhập mã ưu đãi (Sắp ra mắt)"
-                      className="w-full pl-9 pr-3 py-2 bg-surface-container-low rounded-lg font-body-md text-on-surface-variant placeholder:text-outline focus:outline-none cursor-not-allowed text-[13px]"
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    disabled={isSubmittingOrder}
-                    onClick={handleVoucherAttempt}
-                    className="px-3.5 py-2 bg-surface-container-high hover:bg-surface-container text-on-surface-variant font-label-md text-[12px] font-semibold rounded-lg transition-colors whitespace-nowrap cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              {/* Ô Mã ưu đãi / Voucher ở bước Checkout (P2-22) */}
+              <div className="p-3.5 rounded-xl bg-surface border border-outline-variant/40 shadow-sm space-y-2.5">
+                {renderCouponInputSection({
+                  inputId: "checkoutCouponInput",
+                  applyButtonId: "btnApplyCheckoutCoupon",
+                  removeButtonId: "btnRemoveCheckoutCoupon",
+                  statusBannerId: "checkoutCouponStatusBanner",
+                  showTitleLabel: true,
+                })}
+              </div>
+
+              {/* Tóm tắt tính tiền tại bước Checkout (Tạm tính, Giảm giá Voucher, Tổng thanh toán) */}
+              <div
+                id="checkoutReviewPricingBox"
+                className="p-3.5 rounded-xl bg-surface border border-outline-variant/40 shadow-sm space-y-1.5 text-[12px]"
+              >
+                <div className="flex items-center justify-between text-on-surface-variant">
+                  <span>Tạm tính ({totalQuantity} ly):</span>
+                  <span
+                    id="reviewSubtotalAmount"
+                    className="font-mono font-medium text-on-surface"
                   >
-                    Áp dụng
-                  </button>
+                    {formatVnd(displaySubtotalVnd)}
+                  </span>
                 </div>
-                {voucherNoticeVisible && (
-                  <div
-                    id="checkoutVoucherDevNotice"
-                    className="p-2 rounded-lg bg-tertiary/10 border border-tertiary/30 text-tertiary text-[11px] font-medium flex items-center gap-1.5"
+
+                <div
+                  id="reviewDiscountRow"
+                  className="flex items-center justify-between text-tertiary font-medium"
+                >
+                  <span>
+                    {displayCouponCode
+                      ? `Voucher ${displayCouponCode}`
+                      : "Giảm giá"}
+                    {displayCouponCode && (
+                      <span className="sr-only"> (Giảm giá)</span>
+                    )}
+                    :
+                  </span>
+                  <span id="reviewDiscountAmount" className="font-mono font-bold">
+                    {displayDiscountVnd > 0 || displayCouponCode
+                      ? `-${formatVnd(displayDiscountVnd)}`
+                      : "0 ₫"}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between pt-2 border-t border-surface-container-high font-bold text-[14px] text-on-surface">
+                  <span>Tổng thanh toán:</span>
+                  <span
+                    id="reviewTotalAmount"
+                    className="font-mono text-primary text-[15px]"
                   >
-                    <span className="material-symbols-outlined text-[15px] flex-shrink-0">
-                      info
-                    </span>
-                    <span>
-                      Chức năng nhập mã ưu đãi / Voucher hiện chưa hỗ trợ và sẽ
-                      được phát triển ở giai đoạn sau.
-                    </span>
-                  </div>
-                )}
+                    {formatVnd(displayTotalVnd)}
+                  </span>
+                </div>
               </div>
 
               {/* Lưu ý quy tắc nghiệp vụ giữ chỗ tồn kho & bảo toàn giỏ hàng */}
@@ -1099,53 +1825,14 @@ export default function CartDrawer({
         {/* ================================================================== */}
         {activeStep === "cart" && items.length > 0 && (
           <div className="p-space-lg bg-surface-container-lowest flex-shrink-0 border-t border-surface-container-high shadow-[0_-4px_16px_rgba(44,32,24,0.04)] z-10 space-y-3">
-            {/* Ô Mã ưu đãi / Voucher — Không cho nhận ký tự và thông báo phát triển sau */}
-            <div>
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <span className="material-symbols-outlined text-[18px] text-outline absolute left-3 top-1/2 -translate-y-1/2">
-                    confirmation_number
-                  </span>
-                  <input
-                    id="couponCodeInput"
-                    type="text"
-                    readOnly
-                    value=""
-                    onClick={handleVoucherAttempt}
-                    onFocus={handleVoucherAttempt}
-                    onKeyDown={(e) => {
-                      e.preventDefault();
-                      handleVoucherAttempt();
-                    }}
-                    placeholder="Nhập mã ưu đãi (Sắp ra mắt)"
-                    className="w-full pl-9 pr-3 py-2 bg-surface-container-low rounded-lg font-body-md text-[13px] text-on-surface-variant placeholder:text-outline focus:outline-none cursor-not-allowed transition-all"
-                  />
-                </div>
-                <button
-                  id="btnApplyVoucher"
-                  type="button"
-                  disabled={isSubmittingOrder}
-                  onClick={handleVoucherAttempt}
-                  className="px-3.5 py-2 bg-surface-container-high hover:bg-surface-container text-on-surface-variant font-label-md text-[12px] font-semibold rounded-lg transition-colors whitespace-nowrap cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Áp dụng
-                </button>
-              </div>
-              {voucherNoticeVisible && (
-                <div
-                  id="cartVoucherDevNotice"
-                  className="mt-1.5 p-2 rounded-lg bg-tertiary/10 border border-tertiary/30 text-tertiary text-[11px] font-medium flex items-center gap-1.5"
-                >
-                  <span className="material-symbols-outlined text-[15px] flex-shrink-0">
-                    info
-                  </span>
-                  <span>
-                    Chức năng nhập mã ưu đãi / Voucher hiện chưa hỗ trợ và sẽ
-                    được phát triển ở giai đoạn sau.
-                  </span>
-                </div>
-              )}
-            </div>
+            {/* Ô Mã ưu đãi / Voucher tại bước Giỏ hàng (P2-22) */}
+            {renderCouponInputSection({
+              inputId: "couponCodeInput",
+              applyButtonId: "btnApplyVoucher",
+              removeButtonId: "btnRemoveCoupon",
+              statusBannerId: "cartCouponStatusBanner",
+              showTitleLabel: false,
+            })}
 
             {/* Trạng thái đăng nhập hiện tại (Auth Guard Indicator) */}
             <div
@@ -1189,12 +1876,34 @@ export default function CartDrawer({
               )}
             </div>
 
-            {/* Tổng tiền tạm tính */}
-            <div className="pt-0.5 space-y-1">
-              <div className="flex justify-between items-baseline gap-3">
+            {/* Tổng tiền tạm tính / Giảm giá / Tổng thanh toán */}
+            <div id="cartPricingBreakdown" className="pt-0.5 space-y-1 text-[12px]">
+              <div className="flex justify-between items-center text-on-surface-variant">
+                <span>Tạm tính ({totalQuantity} món):</span>
+                <span id="cartSubtotalValue" className="font-mono font-medium text-on-surface">
+                  {formatVnd(displaySubtotalVnd)}
+                </span>
+              </div>
+
+              {(displayDiscountVnd > 0 || Boolean(displayCouponCode)) && (
+                <div
+                  id="cartDiscountRow"
+                  className="flex justify-between items-center text-tertiary font-medium"
+                >
+                  <span>
+                    Voucher {displayCouponCode}
+                    <span className="sr-only"> (Giảm giá)</span>:
+                  </span>
+                  <span id="cartDiscountValue" className="font-mono font-bold">
+                    -{formatVnd(displayDiscountVnd)}
+                  </span>
+                </div>
+              )}
+
+              <div className="flex justify-between items-baseline gap-3 pt-1 border-t border-surface-container-high">
                 <div>
                   <span className="font-title-sm text-title-sm text-on-surface font-bold">
-                    Tạm tính ({totalQuantity} món)
+                    Tổng thanh toán:
                   </span>
                   <span className="block font-body-sm text-[11px] text-outline leading-tight">
                     Giá cuối cùng và khuyến mãi sẽ được máy chủ xác nhận khi đặt
@@ -1206,7 +1915,7 @@ export default function CartDrawer({
                     id="subtotalAmount"
                     className="font-headline-md text-headline-md text-primary font-bold whitespace-nowrap inline-block"
                   >
-                    {formattedSubtotal}
+                    {formatVnd(displayTotalVnd)}
                   </span>
                 </div>
               </div>
@@ -1228,7 +1937,7 @@ export default function CartDrawer({
               </div>
               <div className="flex items-center gap-1 whitespace-nowrap">
                 <span className="font-bold text-price-lg whitespace-nowrap">
-                  {formattedSubtotal}
+                  {formatVnd(displayTotalVnd)}
                 </span>
                 <span className="material-symbols-outlined text-[20px] transition-transform group-hover:translate-x-1">
                   arrow_forward
@@ -1243,10 +1952,13 @@ export default function CartDrawer({
           <div className="p-space-lg bg-surface-container-lowest flex-shrink-0 border-t border-surface-container-high shadow-[0_-4px_16px_rgba(44,32,24,0.04)] z-10 space-y-3">
             <div className="flex justify-between items-baseline gap-3">
               <span className="font-title-sm text-title-sm text-on-surface font-bold whitespace-nowrap">
-                Tổng tạm tính ({totalQuantity} ly)
+                Tổng thanh toán ({totalQuantity} ly)
               </span>
-              <span className="font-headline-md text-headline-md text-primary font-bold whitespace-nowrap">
-                {formattedSubtotal}
+              <span
+                id="reviewFooterTotalAmount"
+                className="font-headline-md text-headline-md text-primary font-bold whitespace-nowrap"
+              >
+                {formatVnd(displayTotalVnd)}
               </span>
             </div>
 
@@ -1451,10 +2163,15 @@ export default function CartDrawer({
                   </div>
                   <div className="flex justify-between text-[11px] text-tertiary font-medium">
                     <span>
-                      Giảm giá
                       {orderCallOutcome.order.couponCode
-                        ? ` (${orderCallOutcome.order.couponCode})`
-                        : ""}
+                        ? `Voucher ${orderCallOutcome.order.couponCode}`
+                        : "Giảm giá"}
+                      {orderCallOutcome.order.couponCode && (
+                        <span className="sr-only">
+                          {" "}
+                          (Giảm giá {orderCallOutcome.order.couponCode})
+                        </span>
+                      )}
                       :
                     </span>
                     <span id="createdOrderDiscountText">
@@ -1485,6 +2202,71 @@ export default function CartDrawer({
                 )}
               </div>
 
+              {/* ZERO_AMOUNT Flow cho đơn hàng totalVnd === 0 (P2-10 & P2-22): Không redirect VNPay, không gọi Mock Payment */}
+              {orderCallOutcome.order.totalVnd === 0 && (
+                <div
+                  id="zeroAmountOrderNotice"
+                  className="p-3 rounded-xl bg-[#F0FDF4] border border-[#16A34A] text-[#166534] text-[11px] space-y-2"
+                >
+                  <div className="font-bold flex items-center gap-1.5 text-[#15803D]">
+                    <span className="material-symbols-outlined text-[16px]">
+                      verified
+                    </span>
+                    <span>Đơn hàng 0 ₫ (ZERO_AMOUNT) — Không qua cổng VNPay</span>
+                  </div>
+                  <p className="leading-relaxed">
+                    Đơn hàng được miễn phí 100%. Bạn có thể xác nhận hoàn tất đơn hàng 0 ₫ trực tiếp bên dưới mà không cần chuyển hướng VNPay.
+                  </p>
+
+                  {zeroAmountPaidResult &&
+                    zeroAmountPaidResult.paymentStatus === "SUCCESS" &&
+                    zeroAmountPaidResult.orderStatus === "PAID" && (
+                      <div
+                        id="zeroAmountPaidSuccessBanner"
+                        role="status"
+                        className="p-2 rounded-lg bg-[#DCFCE7] border border-[#16A34A] text-[#14532D] font-semibold"
+                      >
+                        Xác nhận thanh toán 0 ₫ thành công (Payment SUCCESS • Order PAID • Mã GD:{" "}
+                        <span className="font-mono">
+                          {zeroAmountPaidResult.paymentId}
+                        </span>
+                        ).
+                      </div>
+                    )}
+
+                  {zeroAmountError && (
+                    <div
+                      id="zeroAmountErrorBanner"
+                      role="alert"
+                      className="p-2 rounded-lg bg-error/10 border border-error/30 text-error font-medium"
+                    >
+                      {zeroAmountError}
+                    </div>
+                  )}
+
+                  {!zeroAmountPaidResult && (
+                    <button
+                      id="btnCompleteZeroAmountOrder"
+                      type="button"
+                      disabled={isCompletingZeroAmount}
+                      onClick={() =>
+                        void handleZeroAmountComplete(orderCallOutcome.order)
+                      }
+                      className="w-full py-2 px-3 rounded-lg bg-[#16A34A] hover:bg-[#15803D] text-white font-label-md text-[12px] font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">
+                        check_circle
+                      </span>
+                      <span>
+                        {isCompletingZeroAmount
+                          ? "Đang xác nhận ZERO_AMOUNT..."
+                          : "Xác nhận hoàn tất đơn hàng 0 ₫ ngay"}
+                      </span>
+                    </button>
+                  )}
+                </div>
+              )}
+
               <p className="text-[11px] text-on-surface-variant text-center leading-relaxed">
                 Giỏ hàng vẫn được bảo toàn nguyên vẹn trong suốt thời gian chờ thanh toán.
                 <span className="sr-only">PENDING</span>
@@ -1500,7 +2282,11 @@ export default function CartDrawer({
                 <span className="material-symbols-outlined text-[18px]">
                   payment
                 </span>
-                <span>Tiến hành thanh toán đơn hàng →</span>
+                <span>
+                  {orderCallOutcome.order.totalVnd === 0
+                    ? "Mở trang xác nhận đơn hàng 0 ₫ →"
+                    : "Tiến hành thanh toán đơn hàng →"}
+                </span>
               </a>
 
               <div className="flex gap-2">
@@ -1636,6 +2422,41 @@ export default function CartDrawer({
                       </ul>
                     )}
                   </div>
+
+                  {(orderCallOutcome.code === "INVALID_COUPON" ||
+                    orderCallOutcome.code === "COUPON_UNAVAILABLE") && (
+                    <div
+                      id="couponOrderRejectedPrompt"
+                      className="p-3 rounded-lg bg-surface-container-high border border-outline-variant/40 text-[11px] text-on-surface space-y-2"
+                    >
+                      <p className="leading-relaxed">
+                        Mã ưu đãi đã hết hiệu lực hoặc hết lượt sử dụng trước khi tạo đơn. Vui lòng <strong>áp dụng lại</strong> mã khác hoặc <strong>bỏ mã ưu đãi</strong> để tiếp tục đặt hàng.
+                      </p>
+                      <div className="flex gap-2">
+                        <button
+                          id="btnErrorModalReapplyCoupon"
+                          type="button"
+                          onClick={() => {
+                            setOrderCallOutcome(null);
+                          }}
+                          className="flex-1 py-2 px-2.5 rounded-lg border border-primary text-primary font-label-md font-semibold hover:bg-primary/10 transition-colors cursor-pointer whitespace-nowrap"
+                        >
+                          Áp dụng lại mã
+                        </button>
+                        <button
+                          id="btnErrorModalRemoveCoupon"
+                          type="button"
+                          onClick={() => {
+                            handleRemoveCoupon();
+                            setOrderCallOutcome(null);
+                          }}
+                          className="flex-1 py-2 px-2.5 rounded-lg bg-primary text-on-primary font-label-md font-semibold hover:bg-primary-container transition-colors cursor-pointer whitespace-nowrap"
+                        >
+                          Bỏ coupon
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   {orderCallOutcome.code === "PENDING_ORDER_EXISTS" && (
                     <a

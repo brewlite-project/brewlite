@@ -959,6 +959,11 @@ export default function PaymentPageView({
   const handleSubmitPayment = async (options?: {
     reuseExistingKey?: boolean;
   }) => {
+    // BR-06 / P2-22: Đơn hàng 0đ quyết toán qua ZERO_AMOUNT, tuyệt đối không gọi VNPay hay Mock Payment (POST /payments)
+    if (activeOrder && activeOrder.totalVnd === 0) {
+      await handleZeroAmountSubmit();
+      return;
+    }
     // Tuyệt đối không fallback VNPay sang Mock Payment (POST /payments)
     if (method === "VNPAY") {
       await handleVnPayInitiate(options);
@@ -2047,7 +2052,7 @@ export default function PaymentPageView({
                         </div>
                       )}
 
-                      {/* Checkout CTA Button: Xác nhận thanh toán (POST /payments hoặc chuyển hướng VNPay Sandbox) */}
+                      {/* Checkout CTA Button: Xác nhận thanh toán (POST /payments, ZERO_AMOUNT hoặc chuyển hướng VNPay Sandbox) */}
                       <button
                         id="btnSubmitPayment"
                         type="button"
@@ -2058,14 +2063,20 @@ export default function PaymentPageView({
                           vnPayFlowState === "redirecting"
                         }
                         onClick={async () => {
+                          if (activeOrder.totalVnd === 0) {
+                            await handleZeroAmountSubmit();
+                            return;
+                          }
                           if (method === "VNPAY") {
                             await handleVnPayInitiate({ reuseExistingKey: false });
                             return;
                           }
-                          handleSubmitPayment({ reuseExistingKey: false });
+                          await handleSubmitPayment({ reuseExistingKey: false });
                         }}
                         className={`w-full py-3.5 px-space-lg rounded-xl active:scale-[0.99] text-white font-title-sm text-title-sm font-bold flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed ${
-                          method === "VNPAY"
+                          activeOrder.totalVnd === 0
+                            ? "bg-[#16A34A] hover:bg-[#15803D]"
+                            : method === "VNPAY"
                             ? "bg-[#005baa] hover:bg-[#004785]"
                             : "bg-[#C67C4E] hover:bg-[#b56e40]"
                         }`}
@@ -2081,6 +2092,8 @@ export default function PaymentPageView({
                             ? "check_circle"
                             : !isPayableOrder
                             ? "block"
+                            : activeOrder.totalVnd === 0
+                            ? "check_circle"
                             : method === "VNPAY"
                             ? "open_in_new"
                             : "lock"}
@@ -2105,6 +2118,8 @@ export default function PaymentPageView({
                                   </>
                                 )
                               : "Không thể thanh toán"
+                            : activeOrder.totalVnd === 0
+                            ? `Xác nhận đơn hàng 0 ₫ (ZERO_AMOUNT)`
                             : method === "VNPAY"
                             ? `Xác nhận thanh toán qua VNPay • ${formatVnd(
                                 activeOrder.totalVnd

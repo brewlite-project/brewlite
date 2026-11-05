@@ -4,12 +4,15 @@ import React from "react";
 import ReactDOMServer from "react-dom/server";
 import CartDrawer, {
   executeCheckoutOrderSubmission,
+  executeCouponPreview,
+  executeZeroAmountOrderCompletion,
   type OrderCallOutcome,
   proceedToCheckoutStep,
 } from "@/components/CartDrawer";
 import { AuthContext, type AuthContextType } from "@/context/AuthContext";
 import {
   ACTIVE_ORDER_STORAGE_KEY,
+  buildCouponPreviewPayloadFromCart,
   buildCreateOrderPayloadFromCart,
   CartContext,
   type CartContextValue,
@@ -21,6 +24,8 @@ import {
   validateAndSanitizeCartItem,
 } from "@/context/CartContext";
 import type {
+  CouponPreviewResponseDto,
+  CouponValidationStatus,
   CreateOrderRequestDto,
   CreateOrderResponseDto,
   OrderSubmissionErrorState,
@@ -151,11 +156,17 @@ function renderCartDrawerMarkup(options: {
   initialOrderOutcome?: OrderCallOutcome | null;
   activeOrder?: CreateOrderResponseDto | null;
   onClearCart?: () => void;
+  couponCode?: string;
+  appliedCoupon?: CouponPreviewResponseDto | null;
+  couponStatus?: CouponValidationStatus;
+  couponErrorMessage?: string | null;
+  couponErrorCode?: string | null;
 }): string {
   const items = options.items ?? createSampleCartItems();
   const isAuthenticated = options.isAuthenticated ?? true;
   const userId = options.userId ?? "550e8400-e29b-41d4-a716-446655440000";
   const mockToken = isAuthenticated ? createValidMockJwt(userId) : null;
+  const appliedCoupon = options.appliedCoupon ?? null;
 
   const cartValue: CartContextValue = {
     items,
@@ -164,8 +175,15 @@ function renderCartDrawerMarkup(options: {
     subtotalVnd: items.reduce((sum, i) => sum + i.lineTotalVnd, 0),
     formattedSubtotal: "118.000 ₫",
     isCartOpen: true,
-    couponCode: "",
+    couponCode: options.couponCode ?? appliedCoupon?.couponCode ?? "",
     setCouponCode: () => {},
+    appliedCoupon,
+    couponStatus: options.couponStatus ?? (appliedCoupon ? "applied" : "idle"),
+    couponErrorMessage: options.couponErrorMessage ?? null,
+    couponErrorCode: options.couponErrorCode ?? null,
+    applyCoupon: async () => appliedCoupon,
+    removeCoupon: () => {},
+    setCouponApplicationState: () => {},
     feedbackMessage: null,
     feedbackType: null,
     addToCart: () => ({ success: true, message: "OK" }),
@@ -178,7 +196,11 @@ function renderCartDrawerMarkup(options: {
     closeCart: () => {},
     toggleCart: () => {},
     dismissFeedback: () => {},
-    mapToCreateOrderPayload: () => buildCreateOrderPayloadFromCart(items),
+    mapToCreateOrderPayload: (couponOverride) =>
+      buildCreateOrderPayloadFromCart(
+        items,
+        couponOverride !== undefined ? couponOverride : appliedCoupon?.couponCode
+      ),
     activeOrder: options.activeOrder ?? null,
     isSubmittingOrder: options.initialIsSubmittingOrder ?? false,
     orderError: null,
@@ -680,7 +702,7 @@ describe("SCRUM-43 & SCRUM-44 Checkout Flow, Cart Integration & POST /orders Aut
         });
       };
 
-      let capturedOutcome: OrderCallOutcome | null = null;
+      let capturedOutcome = null as OrderCallOutcome | null;
       let syncedActiveOrder: CreateOrderResponseDto | null = null;
       let clearCartCalled = false;
       localStorageMock.setItem("brewlite_cart_v1", JSON.stringify(cartItems));
@@ -1060,7 +1082,7 @@ describe("SCRUM-43 & SCRUM-44 Checkout Flow, Cart Integration & POST /orders Aut
           { status: 409, headers: { "Content-Type": "application/json" } }
         );
 
-      let capturedOutcome: OrderCallOutcome | null = null;
+      let capturedOutcome = null as OrderCallOutcome | null;
 
       try {
         const res = await executeCheckoutOrderSubmission({
@@ -1098,6 +1120,672 @@ describe("SCRUM-43 & SCRUM-44 Checkout Flow, Cart Integration & POST /orders Aut
         assert.ok(stockErrorHtml.includes("Không thể tạo đơn hàng"));
         assert.ok(stockErrorHtml.includes('id="orderErrorDetailList"'));
         assert.ok(stockErrorHtml.includes("yêu cầu: 6, khả dụng: 5"));
+      } finally {
+        globalThis.fetch = savedFetch;
+      }
+    });
+  });
+
+  describe("7. P2-22 Coupon Application Frontend Flow & ZERO_AMOUNT Integration", () => {
+    it("enables coupon input & Apply button (no longer 'Sắp ra mắt') and builds POST /coupons/preview payload without client discount fields", () => {
+      const cartItems = createSampleCartItems();
+      const cartStepHtml = renderCartDrawerMarkup({
+        items: cartItems,
+        initialCheckoutStep: "cart",
+        couponCode: "WELCOME20",
+        couponStatus: "idle",
+      });
+
+      assert.equal(
+        cartStepHtml.includes("Nhập mã ưu đãi (Sắp ra mắt)"),
+        false,
+        "Disabled 'Nhập mã ưu đãi (Sắp ra mắt)' placeholder must be replaced with live coupon input"
+      );
+      assert.ok(
+        cartStepHtml.includes('id="couponCodeInput"'),
+        "Cart step must render #couponCodeInput"
+      );
+      assert.ok(
+        cartStepHtml.includes('id="btnApplyVoucher"'),
+        "Cart step must render #btnApplyVoucher"
+      );
+
+      const reviewStepHtml = renderCartDrawerMarkup({
+        items: cartItems,
+        initialCheckoutStep: "review",
+        couponCode: "WELCOME20",
+        couponStatus: "idle",
+      });
+      assert.ok(
+        reviewStepHtml.includes('id="checkoutCouponInput"'),
+        "Review step must render #checkoutCouponInput"
+      );
+      assert.ok(
+        reviewStepHtml.includes('id="btnApplyCheckoutCoupon"'),
+        "Review step must render #btnApplyCheckoutCoupon"
+      );
+
+      const previewPayload = buildCouponPreviewPayloadFromCart(
+        cartItems,
+        "  welcome20 "
+      );
+      assert.deepEqual(previewPayload, {
+        items: [
+          {
+            productId: "550e8400-e29b-41d4-a716-446655440000",
+            size: "M",
+            toppingIds: ["7d44a44c-8d1a-4af3-98cb-90e5d4c8a001"],
+            quantity: 2,
+          },
+        ],
+        couponCode: "WELCOME20",
+      });
+      const rawRecord = previewPayload as unknown as Record<string, unknown>;
+      assert.equal("discountVnd" in rawRecord, false);
+      assert.equal("subtotalVnd" in rawRecord, false);
+      assert.equal("totalVnd" in rawRecord, false);
+      assert.equal("userId" in rawRecord, false);
+    });
+
+    it("renders Apply loading (validating) state and transitions to applied state with backend subtotal/discount/total without creating an Order", async () => {
+      const mockToken = createValidMockJwt();
+      const cartItems = createSampleCartItems();
+      const savedFetch = globalThis.fetch;
+      const calledEndpoints: string[] = [];
+      const observedStatuses: CouponValidationStatus[] = [];
+
+      // Verify loading markup when couponStatus === "validating"
+      const validatingHtml = renderCartDrawerMarkup({
+        items: cartItems,
+        initialCheckoutStep: "review",
+        couponCode: "FREE100",
+        couponStatus: "validating",
+      });
+      assert.ok(validatingHtml.includes('data-coupon-status="validating"'));
+      assert.ok(validatingHtml.includes("Đang kiểm tra..."));
+      assert.ok(validatingHtml.includes('aria-busy="true"'));
+
+      globalThis.fetch = async (input: RequestInfo | URL) => {
+        const url = String(input);
+        calledEndpoints.push(url);
+        return new Response(
+          JSON.stringify({
+            valid: true,
+            couponCode: "FREE100",
+            subtotalVnd: 158400,
+            discountVnd: 158400,
+            totalVnd: 0,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      };
+
+      try {
+        const finalState = await executeCouponPreview({
+          items: cartItems,
+          couponCode: "  free100 ",
+          accessToken: mockToken,
+          isAuthenticated: true,
+          applyingRef: { current: false },
+          isSubmittingOrder: false,
+          verifySession: () => true,
+          openAuthModal: () => {},
+          setCouponStatus: (status) => {
+            observedStatuses.push(status);
+          },
+          setAppliedCoupon: () => {},
+          setCouponErrorMessage: () => {},
+          setCouponCode: () => {},
+        });
+
+        // Must transition through validating -> applied
+        assert.deepEqual(observedStatuses, ["validating", "applied"]);
+        assert.equal(finalState.status, "applied");
+        assert.deepEqual(finalState.preview, {
+          valid: true,
+          couponCode: "FREE100",
+          subtotalVnd: 158400,
+          discountVnd: 158400,
+          totalVnd: 0,
+        });
+
+        // Previewing coupon must NEVER call POST /orders
+        assert.equal(calledEndpoints.length, 1);
+        assert.ok(calledEndpoints[0].endsWith("/coupons/preview"));
+        assert.equal(
+          calledEndpoints.some((u) => u.endsWith("/orders")),
+          false,
+          "Coupon preview must NEVER create an Order"
+        );
+
+        // Render applied coupon in both cart and review steps:
+        // Tạm tính: 158.400 ₫ | Voucher FREE100: -158.400 ₫ | Tổng thanh toán: 0 ₫
+        const appliedReviewHtml = renderCartDrawerMarkup({
+          items: cartItems,
+          initialCheckoutStep: "review",
+          couponCode: "FREE100",
+          appliedCoupon: finalState.preview,
+          couponStatus: "applied",
+        });
+        assert.ok(appliedReviewHtml.includes('data-coupon-status="applied"'));
+        assert.ok(appliedReviewHtml.includes("158.400\u00A0₫"));
+        assert.ok(appliedReviewHtml.includes("Voucher FREE100"));
+        assert.ok(appliedReviewHtml.includes("-158.400\u00A0₫"));
+        assert.ok(appliedReviewHtml.includes("0\u00A0₫"));
+        assert.ok(
+          appliedReviewHtml.includes('id="btnRemoveCheckoutCoupon"'),
+          "Applied coupon must render remove button"
+        );
+      } finally {
+        globalThis.fetch = savedFetch;
+      }
+    });
+
+    it("handles invalid, expired, not_eligible, usage_limit_exceeded, and backend/network error states while preserving cart", async () => {
+      const mockToken = createValidMockJwt();
+      const cartItems = createSampleCartItems();
+      const savedFetch = globalThis.fetch;
+      let cartCleared = false;
+
+      const errorScenarios: Array<{
+        coupon: string;
+        httpStatus: number;
+        body: Record<string, unknown> | "NETWORK_THROW";
+        expectedStatus: CouponValidationStatus;
+        expectedBannerSubstring: string;
+      }> = [
+        {
+          coupon: "UNKNOWN99",
+          httpStatus: 400,
+          body: {
+            statusCode: 400,
+            code: "INVALID_COUPON",
+            message: "Coupon does not exist",
+          },
+          expectedStatus: "invalid",
+          expectedBannerSubstring: "không tồn tại",
+        },
+        {
+          coupon: "EXPIRED10",
+          httpStatus: 400,
+          body: {
+            statusCode: 400,
+            code: "INVALID_COUPON",
+            message: "Coupon has expired",
+          },
+          expectedStatus: "expired",
+          expectedBannerSubstring: "đã hết hạn",
+        },
+        {
+          coupon: "GIAM50K",
+          httpStatus: 400,
+          body: {
+            statusCode: 400,
+            code: "INVALID_COUPON",
+            message: "Order subtotal does not meet coupon minimum",
+          },
+          expectedStatus: "not_eligible",
+          expectedBannerSubstring: "giá trị tối thiểu",
+        },
+        {
+          coupon: "WELCOME20",
+          httpStatus: 409,
+          body: {
+            statusCode: 409,
+            code: "COUPON_UNAVAILABLE",
+            message: "Coupon usage limit reached",
+          },
+          expectedStatus: "usage_limit_exceeded",
+          expectedBannerSubstring: "hết lượt sử dụng",
+        },
+        {
+          coupon: "WELCOME20",
+          httpStatus: 500,
+          body: {
+            statusCode: 500,
+            code: "INTERNAL_ERROR",
+            message: "Internal server error",
+          },
+          expectedStatus: "error",
+          expectedBannerSubstring: "Không thể kết nối",
+        },
+        {
+          coupon: "WELCOME20",
+          httpStatus: 503,
+          body: "NETWORK_THROW",
+          expectedStatus: "error",
+          expectedBannerSubstring: "Không thể kết nối",
+        },
+      ];
+
+      try {
+        for (const scenario of errorScenarios) {
+          globalThis.fetch = async () => {
+            if (scenario.body === "NETWORK_THROW") {
+              throw new TypeError("Failed to fetch");
+            }
+            return new Response(JSON.stringify(scenario.body), {
+              status: scenario.httpStatus,
+              headers: { "Content-Type": "application/json" },
+            });
+          };
+
+          const state = await executeCouponPreview({
+            items: cartItems,
+            couponCode: scenario.coupon,
+            accessToken: mockToken,
+            isAuthenticated: true,
+            applyingRef: { current: false },
+            isSubmittingOrder: false,
+            verifySession: () => true,
+            openAuthModal: () => {},
+            setCouponStatus: () => {},
+            setAppliedCoupon: () => {},
+            setCouponErrorMessage: () => {},
+            setCouponCode: () => {},
+          });
+
+          assert.equal(
+            state.status,
+            scenario.expectedStatus,
+            `Coupon ${scenario.coupon} must classify as ${scenario.expectedStatus}`
+          );
+          assert.equal(
+            state.preview,
+            null,
+            "Failed coupon validation must never leave an appliedCoupon"
+          );
+          assert.ok(
+            state.errorMessage?.includes(scenario.expectedBannerSubstring),
+            `Expected "${state.errorMessage}" to include "${scenario.expectedBannerSubstring}"`
+          );
+
+          const html = renderCartDrawerMarkup({
+            items: cartItems,
+            initialCheckoutStep: "review",
+            couponCode: scenario.coupon,
+            appliedCoupon: null,
+            couponStatus: state.status,
+            couponErrorMessage: state.errorMessage,
+            couponErrorCode: state.errorCode,
+            onClearCart: () => {
+              cartCleared = true;
+            },
+          });
+          assert.ok(
+            html.includes(`data-coupon-status="${scenario.expectedStatus}"`),
+            `Markup must render data-coupon-status="${scenario.expectedStatus}"`
+          );
+          assert.equal(
+            cartCleared,
+            false,
+            "Cart must NEVER be cleared when coupon validation fails"
+          );
+        }
+      } finally {
+        globalThis.fetch = savedFetch;
+      }
+    });
+
+    it("clears stale discount immediately when coupon is removed/changed and sends couponCode on Create Order without client discountVnd", async () => {
+      const mockToken = createValidMockJwt();
+      const cartItems = createSampleCartItems();
+      const savedFetch = globalThis.fetch;
+
+      const appliedWelcome20: CouponPreviewResponseDto = {
+        valid: true,
+        couponCode: "WELCOME20",
+        subtotalVnd: 118000,
+        discountVnd: 23600,
+        totalVnd: 94400,
+      };
+
+      // 1. While coupon is applied, discount row is rendered
+      const htmlWithCoupon = renderCartDrawerMarkup({
+        items: cartItems,
+        initialCheckoutStep: "review",
+        couponCode: "WELCOME20",
+        appliedCoupon: appliedWelcome20,
+        couponStatus: "applied",
+      });
+      assert.ok(htmlWithCoupon.includes("-23.600\u00A0₫"));
+      assert.ok(htmlWithCoupon.includes("94.400\u00A0₫"));
+
+      // 2. After coupon is removed or code is changed, discount row disappears and total returns to 118.000 ₫
+      const htmlAfterRemove = renderCartDrawerMarkup({
+        items: cartItems,
+        initialCheckoutStep: "review",
+        couponCode: "",
+        appliedCoupon: null,
+        couponStatus: "idle",
+      });
+      assert.equal(
+        htmlAfterRemove.includes("-23.600\u00A0₫"),
+        false,
+        "Old discount must NOT remain when coupon is removed/changed"
+      );
+      assert.ok(htmlAfterRemove.includes("118.000\u00A0₫"));
+
+      // 3. Create Order sends couponCode when coupon is applied, and never sends discountVnd/subtotalVnd/totalVnd
+      let capturedCreateOrderBody = null as Record<string, unknown> | null;
+      globalThis.fetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
+        capturedCreateOrderBody = JSON.parse(String(init?.body ?? "{}")) as Record<
+          string,
+          unknown
+        >;
+        const responseOrder: CreateOrderResponseDto = {
+          ...createValidOrderResponse(),
+          couponCode: "WELCOME20",
+          subtotalVnd: 118000,
+          discountVnd: 23600,
+          totalVnd: 94400,
+        };
+        return new Response(JSON.stringify(responseOrder), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        });
+      };
+
+      try {
+        const submission = await executeCheckoutOrderSubmission({
+          items: cartItems,
+          accessToken: mockToken,
+          submittingRef: { current: false },
+          isSubmittingOrder: false,
+          setIsSubmittingOrder: () => {},
+          setCheckoutStep: () => {},
+          setOrderCallOutcome: () => {},
+          verifySession: () => true,
+          handleUnauthorizedCheckout: () => {},
+          mapToCreateOrderPayload: () =>
+            buildCreateOrderPayloadFromCart(
+              cartItems,
+              appliedWelcome20.couponCode
+            ),
+        });
+
+        assert.ok(submission.outcome?.type === "success");
+        assert.ok(capturedCreateOrderBody);
+        assert.equal(capturedCreateOrderBody.couponCode, "WELCOME20");
+        assert.equal("discountVnd" in capturedCreateOrderBody, false);
+        assert.equal("subtotalVnd" in capturedCreateOrderBody, false);
+        assert.equal("totalVnd" in capturedCreateOrderBody, false);
+      } finally {
+        globalThis.fetch = savedFetch;
+      }
+    });
+
+    it("uses backend Order snapshot to override cached preview after Create Order, and prompts user to re-apply or remove coupon if backend rejects coupon on Create Order", async () => {
+      const mockToken = createValidMockJwt();
+      const cartItems = createSampleCartItems();
+      const savedFetch = globalThis.fetch;
+
+      // Cached preview had discount 50.000đ -> total 68.000đ,
+      // but backend Create Order returns authoritative discount 30.000đ -> total 88.000đ.
+      const staleCachedPreview: CouponPreviewResponseDto = {
+        valid: true,
+        couponCode: "GIAM50K",
+        subtotalVnd: 118000,
+        discountVnd: 50000,
+        totalVnd: 68000,
+      };
+      const authoritativeBackendOrder: CreateOrderResponseDto = {
+        ...createValidOrderResponse(),
+        couponCode: "GIAM50K",
+        subtotalVnd: 118000,
+        discountVnd: 30000,
+        totalVnd: 88000,
+      };
+
+      const htmlAfterCreateOrder = renderCartDrawerMarkup({
+        items: cartItems,
+        initialCheckoutStep: "review",
+        couponCode: "GIAM50K",
+        appliedCoupon: staleCachedPreview,
+        couponStatus: "applied",
+        activeOrder: authoritativeBackendOrder,
+        initialOrderOutcome: {
+          type: "success",
+          order: authoritativeBackendOrder,
+        },
+      });
+
+      assert.ok(
+        htmlAfterCreateOrder.includes("-30.000\u00A0₫") &&
+          htmlAfterCreateOrder.includes("88.000\u00A0₫"),
+        "UI must render backend Order snapshot (-30.000 ₫ / 88.000 ₫) as authoritative source of truth"
+      );
+      assert.equal(
+        htmlAfterCreateOrder.includes("-50.000\u00A0₫"),
+        false,
+        "UI must NOT use cached preview discount (-50.000 ₫) after Create Order"
+      );
+
+      // Now test when coupon expires right before Create Order -> backend returns 400 INVALID_COUPON
+      let couponRejectedMessage: string | null = null;
+      let couponRejectedCode: string | null = null;
+      let capturedOutcome = null as OrderCallOutcome | null;
+
+      globalThis.fetch = async () =>
+        new Response(
+          JSON.stringify({
+            statusCode: 400,
+            code: "INVALID_COUPON",
+            message: "Coupon has expired",
+          }),
+          { status: 400, headers: { "Content-Type": "application/json" } }
+        );
+
+      try {
+        await executeCheckoutOrderSubmission({
+          items: cartItems,
+          accessToken: mockToken,
+          submittingRef: { current: false },
+          isSubmittingOrder: false,
+          setIsSubmittingOrder: () => {},
+          setCheckoutStep: () => {},
+          setOrderCallOutcome: (val) => {
+            capturedOutcome = val;
+          },
+          verifySession: () => true,
+          handleUnauthorizedCheckout: () => {},
+          onCouponRejected: (rejected) => {
+            couponRejectedMessage = rejected.message;
+            couponRejectedCode = rejected.code;
+          },
+          mapToCreateOrderPayload: () =>
+            buildCreateOrderPayloadFromCart(cartItems, "EXPIRED10"),
+        });
+
+        assert.equal(couponRejectedCode, "INVALID_COUPON");
+        assert.ok(couponRejectedMessage);
+        assert.ok(capturedOutcome && capturedOutcome.type === "error");
+
+        const rejectedOrderHtml = renderCartDrawerMarkup({
+          items: cartItems,
+          initialCheckoutStep: "review",
+          couponCode: "EXPIRED10",
+          appliedCoupon: null,
+          couponStatus: "expired",
+          couponErrorMessage: couponRejectedMessage,
+          couponErrorCode: couponRejectedCode,
+          initialOrderOutcome: capturedOutcome,
+        });
+        assert.ok(
+          rejectedOrderHtml.includes('id="couponOrderRejectedPrompt"'),
+          "Must display #couponOrderRejectedPrompt when backend rejects coupon during Create Order"
+        );
+        assert.ok(
+          rejectedOrderHtml.includes('id="btnErrorModalReapplyCoupon"'),
+          "Must offer button to re-apply/change coupon"
+        );
+        assert.ok(
+          rejectedOrderHtml.includes('id="btnErrorModalRemoveCoupon"'),
+          "Must offer button to remove coupon"
+        );
+      } finally {
+        globalThis.fetch = savedFetch;
+      }
+    });
+
+    it("executes ZERO_AMOUNT flow when order.totalVnd = 0 (FREE100): never redirects VNPay, never calls Mock Payment, and never fakes payment success", async () => {
+      const mockToken = createValidMockJwt();
+      const cartItems = createSampleCartItems();
+      const savedFetch = globalThis.fetch;
+
+      const zeroAmountOrder: CreateOrderResponseDto = {
+        ...createValidOrderResponse(),
+        id: "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb99",
+        couponCode: "FREE100",
+        subtotalVnd: 118000,
+        discountVnd: 118000,
+        totalVnd: 0,
+      };
+
+      // 1. Success modal for totalVnd === 0 renders ZERO_AMOUNT completion CTA (#btnCompleteZeroAmountOrder)
+      // and explicitly states that it does NOT go through VNPay
+      const zeroModalHtml = renderCartDrawerMarkup({
+        items: cartItems,
+        initialCheckoutStep: "review",
+        activeOrder: zeroAmountOrder,
+        initialOrderOutcome: {
+          type: "success",
+          order: zeroAmountOrder,
+        },
+      });
+      assert.ok(
+        zeroModalHtml.includes('id="zeroAmountOrderNotice"'),
+        "Zero-amount order modal must display #zeroAmountOrderNotice"
+      );
+      assert.ok(
+        zeroModalHtml.includes('id="btnCompleteZeroAmountOrder"'),
+        "Zero-amount order modal must display #btnCompleteZeroAmountOrder"
+      );
+      assert.ok(
+        zeroModalHtml.includes("Không qua cổng VNPay"),
+        "Zero-amount order modal must clarify that 0 VND order does not redirect to VNPay"
+      );
+
+      // 2. When backend POST /payments/zero-amount fails (or returns non-SUCCESS),
+      // frontend must NOT fake payment success and must NOT clear cart!
+      const calledUrlsOnFailure: string[] = [];
+      let cartClearedOnFailure = false;
+      let navigatedUrlOnFailure: string | null = null;
+      let capturedZeroError: string | null = null;
+
+      globalThis.fetch = async (input: RequestInfo | URL) => {
+        calledUrlsOnFailure.push(String(input));
+        return new Response(
+          JSON.stringify({
+            statusCode: 409,
+            code: "PAYMENT_CONFLICT",
+            message: "Order is not eligible for zero-amount completion",
+          }),
+          { status: 409, headers: { "Content-Type": "application/json" } }
+        );
+      };
+
+      try {
+        const failedResult = await executeZeroAmountOrderCompletion({
+          order: zeroAmountOrder,
+          accessToken: mockToken,
+          submittingRef: { current: false },
+          setIsSubmitting: () => {},
+          setZeroAmountError: (msg) => {
+            capturedZeroError = msg;
+          },
+          clearCart: () => {
+            cartClearedOnFailure = true;
+          },
+          setActiveOrder: () => {},
+          onNavigateSuccess: (url) => {
+            navigatedUrlOnFailure = url;
+          },
+        });
+
+        assert.equal(failedResult.success, false);
+        assert.equal(
+          cartClearedOnFailure,
+          false,
+          "Must NEVER clear cart when POST /payments/zero-amount fails"
+        );
+        assert.equal(
+          navigatedUrlOnFailure,
+          null,
+          "Must NEVER navigate to confirmation or fake payment success when backend rejects"
+        );
+        assert.ok(capturedZeroError);
+        assert.equal(calledUrlsOnFailure.length, 1);
+        assert.ok(calledUrlsOnFailure[0].endsWith("/payments/zero-amount"));
+        assert.equal(
+          calledUrlsOnFailure.some((u) => u.includes("/payments/vnpay/initiate")),
+          false,
+          "Must NEVER call VNPay initiate for totalVnd = 0"
+        );
+        assert.equal(
+          calledUrlsOnFailure.some((u) => u.endsWith("/payments")),
+          false,
+          "Must NEVER call Mock Payment POST /payments for totalVnd = 0"
+        );
+
+        // 3. When backend POST /payments/zero-amount confirms paymentStatus=SUCCESS and orderStatus=PAID,
+        // frontend clears cart and navigates to confirmation
+        const calledUrlsOnSuccess: string[] = [];
+        let cartClearedOnSuccess = false;
+        let navigatedUrlOnSuccess: string | null = null;
+
+        globalThis.fetch = async (input: RequestInfo | URL) => {
+          calledUrlsOnSuccess.push(String(input));
+          return new Response(
+            JSON.stringify({
+              paymentId: "771deb4d-3b7d-4bad-9bdd-2b0d7b3dcb77",
+              orderId: zeroAmountOrder.id,
+              provider: "ZERO_AMOUNT",
+              paymentStatus: "SUCCESS",
+              orderStatus: "PAID",
+              amountVnd: 0,
+              pointsEarned: 0,
+              createdAt: "2026-11-05T07:00:00.000Z",
+            }),
+            { status: 201, headers: { "Content-Type": "application/json" } }
+          );
+        };
+
+        const successResult = await executeZeroAmountOrderCompletion({
+          order: zeroAmountOrder,
+          accessToken: mockToken,
+          submittingRef: { current: false },
+          setIsSubmitting: () => {},
+          setZeroAmountError: () => {},
+          clearCart: () => {
+            cartClearedOnSuccess = true;
+          },
+          setActiveOrder: () => {},
+          onNavigateSuccess: (url) => {
+            navigatedUrlOnSuccess = url;
+          },
+        });
+
+        assert.equal(successResult.success, true);
+        assert.equal(
+          cartClearedOnSuccess,
+          true,
+          "Cart must be cleared once backend confirms ZERO_AMOUNT payment SUCCESS and order PAID"
+        );
+        assert.equal(
+          navigatedUrlOnSuccess,
+          `/order-confirmation?orderId=${encodeURIComponent(zeroAmountOrder.id)}&view=zero`
+        );
+        assert.equal(calledUrlsOnSuccess.length, 1);
+        assert.ok(calledUrlsOnSuccess[0].endsWith("/payments/zero-amount"));
+        assert.equal(
+          calledUrlsOnSuccess.some((u) => u.includes("/payments/vnpay/initiate")),
+          false
+        );
+        assert.equal(
+          calledUrlsOnSuccess.some((u) => u.endsWith("/payments")),
+          false
+        );
       } finally {
         globalThis.fetch = savedFetch;
       }
