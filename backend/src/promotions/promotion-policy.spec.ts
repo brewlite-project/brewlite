@@ -1,5 +1,6 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import {
+  assertCouponQuotaAvailable,
   assertCouponValid,
   calculateDiscount,
   calculateLoyaltyPoints,
@@ -25,10 +26,47 @@ describe('SCRUM-56 promotion and loyalty rules', () => {
       expect(subtotal - expected).toBeGreaterThanOrEqual(0n);
     },
   );
+  it('caps PERCENT discounts and preserves FIXED maxDiscountVnd semantics', () => {
+    expect(
+      calculateDiscount(500000n, {
+        type: 'PERCENT',
+        value: 20,
+        maxDiscountVnd: 30000n,
+      }),
+    ).toBe(30000n);
+    expect(
+      calculateDiscount(100000n, {
+        type: 'FIXED',
+        value: 50000,
+        maxDiscountVnd: 10000n,
+      }),
+    ).toBe(50000n);
+  });
+  it('rejects exhausted global and per-user quotas', () => {
+    expect(() =>
+      assertCouponQuotaAvailable(
+        { activeUsageCount: 1, usageLimit: 1, perUserLimit: 2 },
+        0,
+      ),
+    ).toThrow(ConflictException);
+    expect(() =>
+      assertCouponQuotaAvailable(
+        { activeUsageCount: 0, usageLimit: 1, perUserLimit: 2 },
+        2,
+      ),
+    ).toThrow(ConflictException);
+    expect(() =>
+      assertCouponQuotaAvailable(
+        { activeUsageCount: 0, usageLimit: 1, perUserLimit: 2 },
+        1,
+      ),
+    ).not.toThrow();
+  });
   it.each([
     [0n, 0],
     [9999n, 0],
     [10000n, 1],
+    [12004n, 1],
     [19999n, 1],
     [20000n, 2],
     [98000n, 9],

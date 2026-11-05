@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   ConflictException,
   HttpException,
   Inject,
@@ -11,6 +10,7 @@ import {
   assertCouponValid,
   reserveCoupon,
 } from '../promotions/promotion-policy.js';
+import { money, priceCart } from './cart-pricing.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { Prisma } from '../generated/prisma/client.js';
 import { readPaymentSnapshot } from '../payments/payment-snapshot.js';
@@ -24,7 +24,6 @@ import {
 import { runInventoryTransaction } from './inventory-transaction.js';
 import { ORDER_TTL_MS } from './order-expiration.config.js';
 
-const SIZE_PERCENT = { S: 100, M: 120, L: 140, ONE_SIZE: 100 } as const;
 const pending = () =>
   new ConflictException({
     statusCode: 409,
@@ -32,21 +31,6 @@ const pending = () =>
     code: 'PENDING_ORDER_EXISTS',
     message: 'An active order already exists',
   });
-const invalidCart = (productId: string, reason: string) =>
-  new BadRequestException({
-    statusCode: 400,
-    error: 'Bad Request',
-    code: 'INVALID_CART',
-    message: 'Invalid cart',
-    details: [{ productId, reason }],
-  });
-const money = (value: bigint) => {
-  const number = Number(value);
-  if (value < 0n || !Number.isSafeInteger(number))
-    throw new InternalServerErrorException('Invalid monetary amount');
-  return number;
-};
-
 @Injectable()
 export class OrdersService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
@@ -186,94 +170,33 @@ export class OrdersService {
           return null; // Commit cleanup, then recheck in a fresh transaction.
         }
         const quantities = inventoryQuantities(dto.items);
-        const products = await tx.product.findMany({
-          where: { id: { in: quantities.map(([id]) => id) } },
-          include: {
-            category: { select: { isActive: true } },
-            productToppings: { select: { toppingId: true } },
-          },
-        });
-        const toppingIds = [
-          ...new Set(dto.items.flatMap((item) => item.toppingIds)),
-        ];
-        const toppings = await tx.topping.findMany({
-          where: { id: { in: toppingIds } },
-        });
-        const lines = dto.items.map((item) => {
-          if (item.toppingIds.length > 3)
-            throw invalidCart(item.productId, 'TOO_MANY_TOPPINGS');
-          if (new Set(item.toppingIds).size !== item.toppingIds.length)
-            throw invalidCart(item.productId, 'DUPLICATE_TOPPING');
-          const product = products.find(
-            (p) => p.id === item.productId.toLowerCase(),
-          );
-          if (!product) throw invalidCart(item.productId, 'PRODUCT_NOT_FOUND');
-          if (!product.category.isActive)
-            throw invalidCart(product.id, 'PRODUCT_UNAVAILABLE');
-          if (
-            (product.sizePolicy === 'ONE_SIZE') !==
-            (item.size === 'ONE_SIZE')
-          )
-            throw invalidCart(product.id, 'INVALID_SIZE');
-          const selected = item.toppingIds.map((id) => {
-            const topping = toppings.find((t) => t.id === id);
-            if (!topping) throw invalidCart(product.id, 'TOPPING_NOT_FOUND');
-            if (!product.productToppings.some((link) => link.toppingId === id))
-              throw invalidCart(product.id, 'TOPPING_NOT_ALLOWED');
-            if (!topping.isAvailable)
-              throw invalidCart(product.id, 'TOPPING_UNAVAILABLE');
-            return topping;
-          });
-          money(product.basePriceVnd);
-          selected.forEach((t) => money(t.priceVnd));
-          const percent = SIZE_PERCENT[item.size];
-          const unit =
-            (product.basePriceVnd * BigInt(percent)) / 100n +
-            selected.reduce((sum, t) => sum + t.priceVnd, 0n);
-          return {
-            productId: product.id,
-            productNameSnapshot: product.name,
-            size: item.size,
-            sizePercentSnapshot: percent,
-            basePriceSnapshotVnd: product.basePriceVnd,
-            quantity: item.quantity,
-            unitPriceVnd: unit,
-            lineTotalVnd: unit * BigInt(item.quantity),
-            toppings: {
-              create: selected.map((t) => ({
-                toppingId: t.id,
-                toppingCodeSnapshot: t.code,
-                toppingNameSnapshot: t.name,
-                toppingPriceSnapshotVnd: t.priceVnd,
-              })),
-            },
-          };
-        });
-        const subtotal = lines.reduce(
-          (sum, line) => sum + line.lineTotalVnd,
-          0n,
-        );
-        money(subtotal);
-        const [clock] = await tx.$queryRaw<{ now: Date }[]>`
-          SELECT clock_timestamp() AS now`;
-        if (!clock) throw new Error('Missing Order creation clock');
-        const now = clock.now;
+        const { lines: pricedLines, subtotal } = await priceCart(tx, dto.items);
         let discount = 0n;
         let coupon = dto.couponCode
           ? await tx.coupon.findUnique({ where: { code: dto.couponCode } })
           : null;
-        // Invalid code/validity stays 400; quota follows stock per Contract v3.0.
-        if (dto.couponCode) assertCouponValid(coupon, subtotal, now);
+        // A missing code can be rejected immediately. Validity/configuration
+        // decisions use the fresh DB clock and row data after the Coupon lock.
+        if (dto.couponCode && !coupon)
+          assertCouponValid(null, subtotal, new Date());
         await reserveInventory(tx, quantities);
+        let now: Date;
         if (coupon) {
           const reservation = await reserveCoupon(
             tx,
             userId,
             coupon.id,
             subtotal,
+            dto.couponCode!,
           );
           coupon = reservation.coupon;
           discount = reservation.discount;
+          now = reservation.now;
+        } else {
+          const [clock] = await tx.$queryRaw<{ now: Date }[]>`
+            SELECT clock_timestamp() AS now`;
+          if (!clock) throw new Error('Missing Order creation clock');
+          now = clock.now;
         }
         const order = await tx.order.create({
           data: {
@@ -286,7 +209,26 @@ export class OrdersService {
             totalVnd: subtotal - discount,
             couponId: coupon?.id,
             couponCodeSnapshot: coupon?.code,
-            items: { create: lines },
+            items: {
+              create: pricedLines.map((line) => ({
+                productId: line.productId,
+                productNameSnapshot: line.productNameSnapshot,
+                size: line.size,
+                sizePercentSnapshot: line.sizePercentSnapshot,
+                basePriceSnapshotVnd: line.basePriceSnapshotVnd,
+                quantity: line.quantity,
+                unitPriceVnd: line.unitPriceVnd,
+                lineTotalVnd: line.lineTotalVnd,
+                toppings: {
+                  create: line.selectedToppings.map((topping) => ({
+                    toppingId: topping.id,
+                    toppingCodeSnapshot: topping.code,
+                    toppingNameSnapshot: topping.name,
+                    toppingPriceSnapshotVnd: topping.priceVnd,
+                  })),
+                },
+              })),
+            },
             ...(coupon
               ? {
                   couponRedemption: {

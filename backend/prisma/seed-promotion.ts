@@ -7,6 +7,10 @@ import { PrismaClient } from '../src/generated/prisma/client.js';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
+import {
+  buildDemoPromotionCoupons,
+  promotionCouponCreateManyArgs,
+} from '../src/promotions/promotion-seed-data.js';
 
 const url = process.env.DATABASE_URL;
 if (!url) throw new Error('DATABASE_URL must be set');
@@ -22,9 +26,6 @@ if (!['localhost', '127.0.0.1', '::1'].includes(parsed.hostname)) {
 }
 
 const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: url }) });
-const VALIDITY_DAYS = 30;
-const DAY_MS = 24 * 60 * 60 * 1000;
-
 async function main(): Promise<void> {
   const rows = await prisma.$queryRaw<Array<{ name: string; addr: string | null }>>`
     SELECT current_database() AS name, inet_server_addr()::text AS addr
@@ -46,56 +47,20 @@ async function main(): Promise<void> {
     throw new Error('Confirmation failed; nothing written');
   }
 
-  // Compute dates at execution time, after user confirmation. Same window for all coupons.
-  const startsAt = new Date();
-  const expiresAt = new Date(startsAt.getTime() + VALIDITY_DAYS * DAY_MS);
-
-  // Officially approved demo data. QUOTA1K is for total/per-user quota integration tests.
-  const coupons = [
-    {
-      code: 'WELCOME20',
-      type: 'PERCENT' as const,
-      value: 20,
-      minSubtotalVnd: 50000n,
-      maxDiscountVnd: 30000n,
-      usageLimit: 100,
-      perUserLimit: 1,
-    },
-    {
-      code: 'BREWLITE10K',
-      type: 'FIXED' as const,
-      value: 10000,
-      minSubtotalVnd: 50000n,
-      maxDiscountVnd: null,
-      usageLimit: 100,
-      perUserLimit: 2,
-    },
-    {
-      code: 'QUOTA1K',
-      type: 'FIXED' as const,
-      value: 1000,
-      minSubtotalVnd: 10000n,
-      maxDiscountVnd: null,
-      usageLimit: 1,
-      perUserLimit: 1,
-    },
-  ];
-
-  // Single INSERT .. ON CONFLICT DO NOTHING operation. No update, delete or counter reset.
-  const result = await prisma.coupon.createMany({
-    data: coupons.map((coupon) => ({
-      ...coupon,
-      startsAt,
-      expiresAt,
-      activeUsageCount: 0,
-    })),
-    skipDuplicates: true,
-  });
+  // Compute dates after confirmation. INSERT .. ON CONFLICT DO NOTHING never
+  // changes dates, usage counters or redemption rows for an existing code.
+  const generatedAt = new Date();
+  const coupons = buildDemoPromotionCoupons(generatedAt);
+  const result = await prisma.coupon.createMany(
+    promotionCouponCreateManyArgs(coupons),
+  );
   console.log(
     `Promotion seed complete: ${result.count} created, ${coupons.length - result.count} already existed.`,
   );
   if (result.count > 0) {
-    console.log(`New coupon validity: ${startsAt.toISOString()} to ${expiresAt.toISOString()} (30 days).`);
+    console.log(
+      `New active coupon validity: ${generatedAt.toISOString()} to ${coupons[0]!.expiresAt.toISOString()} (30 days).`,
+    );
   }
   console.log('Existing coupons were not modified, including their validity and usage counters.');
 }
