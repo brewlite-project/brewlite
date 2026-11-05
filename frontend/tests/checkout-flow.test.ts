@@ -3137,5 +3137,234 @@ describe("SCRUM-43 & SCRUM-44 Checkout Flow, Cart Integration & POST /orders Aut
         g.IS_REACT_ACT_ENVIRONMENT = savedActEnv;
       }
     });
+
+    it("mounted JSDOM: auth transition A -> B in same act -> resolve/reject request A before passive effects -> zero state of A leaks to B", async () => {
+      const userAId = "550e8400-e29b-41d4-a716-446655440000";
+      const userBId = "660e8400-e29b-41d4-a716-446655440999";
+      const tokenA = createValidMockJwt(userAId);
+      const tokenB = createValidMockJwt(userBId);
+
+      setStoredSession(tokenA, {
+        id: userAId,
+        email: "usera@brewlite.vn",
+        fullName: "Nguyễn Văn A",
+      });
+      localStorageMock.setItem(
+        `brewlite_cart_user_${userAId.toLowerCase()}`,
+        JSON.stringify(createSampleCartItems())
+      );
+      localStorageMock.setItem("brewlite_cart_v1", JSON.stringify(createSampleCartItems()));
+      localStorageMock.setItem(CART_OWNER_STORAGE_KEY, userAId);
+
+      const dom = new JSDOM(
+        "<!doctype html><html><body><div id='root'></div></body></html>",
+        { url: "http://localhost:3000" }
+      );
+      const g = globalThis as Record<string, unknown>;
+      const savedWindow = g.window;
+      const savedDocument = g.document;
+      const savedSelf = g.self;
+      const savedActEnv = g.IS_REACT_ACT_ENVIRONMENT;
+
+      g.window = dom.window;
+      g.document = dom.window.document;
+      g.self = dom.window;
+      g.HTMLElement = dom.window.HTMLElement;
+      g.HTMLInputElement = dom.window.HTMLInputElement;
+      g.HTMLButtonElement = dom.window.HTMLButtonElement;
+      g.Element = dom.window.Element;
+      g.Node = dom.window.Node;
+      g.Event = dom.window.Event;
+      g.InputEvent = dom.window.InputEvent;
+      g.MouseEvent = dom.window.MouseEvent;
+      g.IS_REACT_ACT_ENVIRONMENT = true;
+      Object.defineProperty(dom.window, "localStorage", { value: localStorageMock, configurable: true });
+      Object.defineProperty(dom.window, "sessionStorage", { value: sessionStorageMock, configurable: true });
+
+      const container = dom.window.document.getElementById("root") as HTMLDivElement;
+      let root: Root | null = null;
+      const cartCtxRef: { current: CartContextValue | null } = { current: null };
+
+      function CartInspector() {
+        cartCtxRef.current = useCart();
+        return null;
+      }
+
+      const makeAuthValue = (
+        userId: string | null,
+        token: string | null
+      ): AuthContextType => ({
+        user: userId
+          ? {
+              id: userId,
+              email: `${userId}@brewlite.vn`,
+              fullName: userId === userAId ? "Nguyễn Văn A" : "Trần Thị B",
+            }
+          : null,
+        accessToken: token,
+        isAuthenticated: Boolean(userId && token),
+        isLoading: false,
+        login: async () => {},
+        register: async () => ({
+          id: userId ?? "",
+          email: "test@brewlite.vn",
+          fullName: "Test",
+          createdAt: "2026-10-26T15:00:00.000Z",
+        }),
+        logout: () => {},
+        verifySession: () => Boolean(userId && token),
+        handleUnauthorizedCheckout: () => {},
+        pendingCheckout: false,
+        setPendingCheckout: () => {},
+        isAuthModalOpen: false,
+        authModalMode: "login",
+        authModalMessage: null,
+        openAuthModal: () => {},
+        closeAuthModal: () => {},
+      });
+
+      const pendingList: Array<{
+        resolve: (val: CouponPreviewResponseDto) => void;
+        reject: (err: unknown) => void;
+        signal?: AbortSignal;
+      }> = [];
+
+      const mockPreviewFn = (
+        _payload: unknown,
+        _token?: string | null,
+        options?: { signal?: AbortSignal }
+      ) =>
+        new Promise<CouponPreviewResponseDto>((resolve, reject) => {
+          pendingList.push({ resolve, reject, signal: options?.signal });
+        });
+
+      const setInputValue = (input: HTMLInputElement, val: string) => {
+        const prev = input.value;
+        const setter = Object.getOwnPropertyDescriptor(
+          dom.window.HTMLInputElement.prototype,
+          "value"
+        )?.set;
+        setter?.call(input, val);
+        const tracker = (
+          input as unknown as { _valueTracker?: { setValue: (v: string) => void } }
+        )._valueTracker;
+        tracker?.setValue(prev);
+        input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+        input.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+      };
+
+      try {
+        // 1. Mount với User A
+        await act(async () => {
+          root = createRoot(container);
+          root.render(
+            React.createElement(
+              AuthContext.Provider,
+              { value: makeAuthValue(userAId, tokenA) },
+              React.createElement(
+                CartProvider,
+                null,
+                React.createElement(CartInspector),
+                React.createElement(CartDrawer, {
+                  initialCheckoutStep: "review",
+                  previewCouponFn: mockPreviewFn,
+                })
+              )
+            )
+          );
+        });
+
+        await act(async () => {
+          cartCtxRef.current?.openCart();
+        });
+
+        const couponInput = container.querySelector(
+          "#checkoutCouponInput"
+        ) as HTMLInputElement;
+        const applyBtn = container.querySelector(
+          "#btnApplyCheckoutCoupon"
+        ) as HTMLButtonElement;
+        assert.ok(couponInput && applyBtn);
+
+        // Bắt đầu preview WELCOME20 cho User A
+        await act(async () => {
+          setInputValue(couponInput, "WELCOME20");
+        });
+        await act(async () => {
+          applyBtn.click();
+        });
+
+        assert.equal(pendingList.length, 1);
+        const reqA = pendingList[0];
+
+        // 2. Chuyển auth sang User B và đồng thời resolve response A trong cùng act
+        // trước khi passive effects có cơ hội chạy
+        await act(async () => {
+          // Rerender root với User B
+          root?.render(
+            React.createElement(
+              AuthContext.Provider,
+              { value: makeAuthValue(userBId, tokenB) },
+              React.createElement(
+                CartProvider,
+                null,
+                React.createElement(CartInspector),
+                React.createElement(CartDrawer, {
+                  initialCheckoutStep: "review",
+                  previewCouponFn: mockPreviewFn,
+                })
+              )
+            )
+          );
+
+          // Resolve ngay response A trong cùng act/microtask
+          reqA.resolve({
+            valid: true,
+            couponCode: "WELCOME20",
+            subtotalVnd: 118000,
+            discountVnd: 23600,
+            totalVnd: 94400,
+          });
+        });
+
+        // Assert: Không coupon, discount, error, loading state nào của User A xuất hiện cho User B!
+        assert.equal(
+          cartCtxRef.current?.appliedCoupon,
+          null,
+          "User A's resolved preview must NEVER commit appliedCoupon to User B"
+        );
+        assert.equal(
+          cartCtxRef.current?.couponCode,
+          "",
+          "User B couponCode must remain empty"
+        );
+        assert.equal(
+          cartCtxRef.current?.couponStatus,
+          "idle",
+          "User B couponStatus must be idle, never validating or applied"
+        );
+        assert.equal(
+          cartCtxRef.current?.couponErrorMessage,
+          null,
+          "User B must not have any error message"
+        );
+        const renderedText = container.textContent ?? "";
+        assert.equal(
+          renderedText.includes("-23.600") || renderedText.includes("WELCOME20"),
+          false,
+          "User A discount or coupon name must NOT appear in User B's UI"
+        );
+      } finally {
+        if (root) {
+          await act(async () => {
+            root?.unmount();
+          });
+        }
+        g.window = savedWindow;
+        g.document = savedDocument;
+        g.self = savedSelf;
+        g.IS_REACT_ACT_ENVIRONMENT = savedActEnv;
+      }
+    });
   });
 });

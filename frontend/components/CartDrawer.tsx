@@ -659,14 +659,14 @@ export default function CartDrawer({
     subtotalVnd,
     formattedSubtotal,
     isCartOpen,
-    couponCode: contextCouponCode,
-    setCouponCode: setContextCouponCode,
-    appliedCoupon: contextAppliedCoupon,
-    couponStatus: contextCouponStatus,
-    couponErrorMessage: contextCouponErrorMessage,
-    applyCoupon: contextApplyCoupon,
-    removeCoupon: contextRemoveCoupon,
-    setCouponApplicationState: setContextCouponApplicationState,
+    couponCode,
+    setCouponCode,
+    appliedCoupon,
+    couponStatus,
+    couponErrorMessage,
+    applyCoupon,
+    removeCoupon,
+    setCouponApplicationState,
     openCart,
     closeCart,
     clearCart,
@@ -714,52 +714,12 @@ export default function CartDrawer({
   );
   const [voucherNoticeVisible, setVoucherNoticeVisible] = useState(false);
   const submittingRef = useRef(initialIsSubmittingOrder);
-  const applyingCouponRef = useRef(false);
-  const couponRequestVersionRef = useRef(0);
-  const couponAbortControllerRef = useRef<AbortController | null>(null);
   const zeroAmountSubmittingRef = useRef(false);
-
-  // State cục bộ kết hợp với CartContext để hỗ trợ cả tương tác trực tiếp trên UI và kiểm thử độc lập
-  const [localCouponCode, setLocalCouponCode] = useState<string>(
-    initialCouponCode ?? contextCouponCode ?? ""
-  );
-  const [localAppliedCoupon, setLocalAppliedCoupon] =
-    useState<CouponPreviewResponseDto | null>(
-      initialAppliedCoupon !== undefined
-        ? initialAppliedCoupon
-        : contextAppliedCoupon ?? null
-    );
-  const [localCouponStatus, setLocalCouponStatus] =
-    useState<CouponValidationStatus>(
-      initialCouponStatus ??
-        contextCouponStatus ??
-        (initialAppliedCoupon ? "applied" : "idle")
-    );
-  const [localCouponErrorMessage, setLocalCouponErrorMessage] = useState<
-    string | null
-  >(
-    initialCouponErrorMessage !== undefined
-      ? initialCouponErrorMessage
-      : contextCouponErrorMessage ?? null
-  );
 
   const [isCompletingZeroAmount, setIsCompletingZeroAmount] = useState(false);
   const [zeroAmountPaidResult, setZeroAmountPaidResult] =
     useState<ZeroAmountPaymentResponseDto | null>(null);
   const [zeroAmountError, setZeroAmountError] = useState<string | null>(null);
-
-  const cancelLocalPendingCouponPreview = () => {
-    couponRequestVersionRef.current += 1;
-    if (couponAbortControllerRef.current) {
-      try {
-        couponAbortControllerRef.current.abort();
-      } catch {
-        // Ignore abort error
-      }
-      couponAbortControllerRef.current = null;
-    }
-    applyingCouponRef.current = false;
-  };
 
   const setOrderCallOutcome = React.useCallback(
     (outcome: OrderCallOutcome | null) => {
@@ -903,86 +863,24 @@ export default function CartDrawer({
     openCart,
   ]);
 
-  const currentCartFingerprint = useMemo(
-    () => computeCartFingerprint(items),
-    [items]
-  );
-
-  // Đồng bộ state coupon giữa CartContext và state cục bộ của CartDrawer
-  const effectiveCouponCodeInput =
-    contextCouponCode !== undefined && contextCouponCode !== ""
-      ? contextCouponCode
-      : localCouponCode;
-
-  // Chỉ cho phép hiển thị appliedCoupon khi user đang đăng nhập hợp lệ
+  // Single Source of Truth cho coupon: Trực tiếp lấy từ CartContext (kèm hỗ trợ fallback initialProps khi unit test)
+  const effectiveCouponCodeInput = couponCode || initialCouponCode || "";
   const effectiveAppliedCoupon: CouponPreviewResponseDto | null =
     !isAuthenticated || !currentAuthUserId
       ? null
-      : contextAppliedCoupon !== undefined
-      ? contextAppliedCoupon
-      : localAppliedCoupon;
+      : appliedCoupon !== null && appliedCoupon !== undefined
+      ? appliedCoupon
+      : initialAppliedCoupon ?? null;
 
   const effectiveCouponStatus: CouponValidationStatus =
     !isAuthenticated || !currentAuthUserId
-      ? localCouponStatus === "error"
-        ? "error"
-        : "idle"
-      : contextCouponStatus && contextCouponStatus !== "idle"
-      ? contextCouponStatus
-      : localCouponStatus;
+      ? "idle"
+      : couponStatus !== "idle" && couponStatus !== undefined
+      ? couponStatus
+      : initialCouponStatus ?? (initialAppliedCoupon ? "applied" : "idle");
 
   const effectiveCouponErrorMessage: string | null =
-    contextCouponErrorMessage ?? localCouponErrorMessage;
-
-  const latestSnapshotRef = useRef<CouponPreviewLiveSnapshot>({
-    userId: currentAuthUserId,
-    accessToken,
-    isAuthenticated,
-    cartFingerprint: currentCartFingerprint,
-    normalizedCouponCode: effectiveCouponCodeInput.trim().toUpperCase(),
-  });
-
-  useEffect(() => {
-    latestSnapshotRef.current = {
-      userId: currentAuthUserId,
-      accessToken,
-      isAuthenticated,
-      cartFingerprint: currentCartFingerprint,
-      normalizedCouponCode: effectiveCouponCodeInput.trim().toUpperCase(),
-    };
-  }, [
-    currentAuthUserId,
-    accessToken,
-    isAuthenticated,
-    currentCartFingerprint,
-    effectiveCouponCodeInput,
-  ]);
-
-  const prevDrawerAuthUserIdRef = useRef<string | null>(currentAuthUserId);
-  const prevDrawerCartFingerprintRef = useRef<string>(currentCartFingerprint);
-
-  // Hủy ngay preview đang pending và xóa sạch state coupon cục bộ khi logout / đổi user (A -> B)
-  useEffect(() => {
-    if (prevDrawerAuthUserIdRef.current !== currentAuthUserId) {
-      prevDrawerAuthUserIdRef.current = currentAuthUserId;
-      cancelLocalPendingCouponPreview();
-      setLocalCouponCode("");
-      setLocalAppliedCoupon(null);
-      setLocalCouponStatus("idle");
-      setLocalCouponErrorMessage(null);
-    }
-  }, [currentAuthUserId]);
-
-  // Hủy ngay preview đang pending và xóa appliedCoupon cục bộ khi giỏ hàng thay đổi (số lượng / xóa món / thêm món)
-  useEffect(() => {
-    if (prevDrawerCartFingerprintRef.current !== currentCartFingerprint) {
-      prevDrawerCartFingerprintRef.current = currentCartFingerprint;
-      cancelLocalPendingCouponPreview();
-      setLocalAppliedCoupon(null);
-      setLocalCouponStatus("idle");
-      setLocalCouponErrorMessage(null);
-    }
-  }, [currentCartFingerprint]);
+    couponErrorMessage ?? initialCouponErrorMessage ?? null;
 
   // Sau khi Create Order (POST /orders) thành công, UI bắt buộc dùng snapshot từ backend trả về làm source of truth
   const authoritativeOrderSnapshot: CreateOrderResponseDto | null =
@@ -1017,124 +915,22 @@ export default function CartDrawer({
   const handleCouponCodeChange = (nextRawCode: string) => {
     if (isSubmittingOrder) return;
     setVoucherNoticeVisible(false);
-
-    const normalizedPrev = latestSnapshotRef.current.normalizedCouponCode;
-    const normalizedNext = nextRawCode.trim().toUpperCase();
-    latestSnapshotRef.current = {
-      ...latestSnapshotRef.current,
-      normalizedCouponCode: normalizedNext,
-    };
-
-    if (normalizedPrev !== normalizedNext) {
-      cancelLocalPendingCouponPreview();
-    }
-
-    setLocalCouponCode(nextRawCode);
-    setContextCouponCode(nextRawCode);
-
-    if (
-      effectiveAppliedCoupon &&
-      effectiveAppliedCoupon.couponCode !== normalizedNext
-    ) {
-      // Không giữ discount cũ nếu coupon bị thay đổi
-      setLocalAppliedCoupon(null);
-      setLocalCouponStatus("idle");
-      setLocalCouponErrorMessage(null);
-      setContextCouponApplicationState?.({
-        appliedCoupon: null,
-        status: "idle",
-        errorMessage: null,
-        errorCode: null,
-      });
-    } else if (!effectiveAppliedCoupon && effectiveCouponStatus !== "idle") {
-      setLocalCouponStatus("idle");
-      setLocalCouponErrorMessage(null);
-      setContextCouponApplicationState?.({
-        status: "idle",
-        errorMessage: null,
-        errorCode: null,
-      });
-    }
+    setCouponCode(nextRawCode);
   };
 
   const handleRemoveCoupon = () => {
     if (isSubmittingOrder) return;
     setVoucherNoticeVisible(false);
-    cancelLocalPendingCouponPreview();
-    latestSnapshotRef.current = {
-      ...latestSnapshotRef.current,
-      normalizedCouponCode: "",
-    };
-    setLocalCouponCode("");
-    setLocalAppliedCoupon(null);
-    setLocalCouponStatus("idle");
-    setLocalCouponErrorMessage(null);
-    setContextCouponCode("");
-    contextRemoveCoupon?.();
-    setContextCouponApplicationState?.({
-      appliedCoupon: null,
-      status: "idle",
-      errorMessage: null,
-      errorCode: null,
-    });
+    removeCoupon?.();
   };
 
   const handleApplyCoupon = async () => {
     if (isSubmittingOrder) return;
     setVoucherNoticeVisible(false);
-    const codeToApply = effectiveCouponCodeInput;
-
-    // Ưu tiên gọi trực tiếp qua CartContext để CartContext giữ duy nhất quyền sở hữu request version & abort controller
-    if (contextApplyCoupon) {
-      await contextApplyCoupon({
-        couponCodeOverride: codeToApply,
-        accessToken,
-        previewCouponFn,
-      });
-      return;
-    }
-
-    latestSnapshotRef.current = {
-      userId: currentAuthUserId,
-      accessToken,
-      isAuthenticated,
-      cartFingerprint: currentCartFingerprint,
-      normalizedCouponCode: codeToApply.trim().toUpperCase(),
-    };
-    await executeCouponPreview({
-      items,
-      couponCode: codeToApply,
-      accessToken,
-      userId: currentAuthUserId,
-      isAuthenticated,
-      applyingRef: applyingCouponRef,
-      requestVersionRef: couponRequestVersionRef,
-      abortControllerRef: couponAbortControllerRef,
-      getLatestSnapshot: () => latestSnapshotRef.current,
-      isSubmittingOrder,
-      verifySession,
-      openAuthModal,
-      setCouponStatus: (status) => {
-        setLocalCouponStatus(status);
-        setContextCouponApplicationState?.({ status });
-      },
-      setAppliedCoupon: (preview) => {
-        setLocalAppliedCoupon(preview);
-        setContextCouponApplicationState?.({ appliedCoupon: preview });
-      },
-      setCouponErrorMessage: (msg) => {
-        setLocalCouponErrorMessage(msg);
-        setContextCouponApplicationState?.({ errorMessage: msg });
-      },
-      setCouponCode: (normalizedCode) => {
-        latestSnapshotRef.current = {
-          ...latestSnapshotRef.current,
-          normalizedCouponCode: normalizedCode.trim().toUpperCase(),
-        };
-        setLocalCouponCode(normalizedCode);
-        setContextCouponCode(normalizedCode);
-      },
+    await applyCoupon?.({
+      couponCodeOverride: effectiveCouponCodeInput,
       previewCouponFn,
+      accessToken,
     });
   };
 
@@ -1175,10 +971,7 @@ export default function CartDrawer({
       setActiveOrder: setContextActiveOrder,
       setOrderError: setContextOrderError,
       onCouponRejected: (rejected) => {
-        setLocalAppliedCoupon(null);
-        setLocalCouponStatus(rejected.status);
-        setLocalCouponErrorMessage(rejected.message);
-        setContextCouponApplicationState?.({
+        setCouponApplicationState?.({
           appliedCoupon: null,
           status: rejected.status,
           errorMessage: rejected.message,
@@ -1209,10 +1002,7 @@ export default function CartDrawer({
       setIsSubmitting: setIsCompletingZeroAmount,
       clearCart: () => {
         clearCart();
-        setLocalCouponCode("");
-        setLocalAppliedCoupon(null);
-        setLocalCouponStatus("idle");
-        setLocalCouponErrorMessage(null);
+        removeCoupon?.();
       },
       setActiveOrder: setContextActiveOrder,
       setZeroAmountPaidResult,

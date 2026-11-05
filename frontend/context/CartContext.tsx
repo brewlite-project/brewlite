@@ -713,6 +713,71 @@ export function validateAndSanitizeCartItem(raw: unknown): CartItem | null {
   };
 }
 
+// Synchronous Auth Session Generation & Global Identity Store
+// Đảm bảo identity version được update đồng bộ ngay tại nguồn auth transition,
+// loại bỏ hoàn toàn race window giữa render auth mới và passive-effect cleanup.
+class AuthSessionStore {
+  private generation = 0;
+  private currentUserId: string | null = null;
+  private currentAbortController: AbortController | null = null;
+  private currentRequestId = 0;
+
+  syncUser(userId: string | null): number {
+    if (this.currentUserId !== userId) {
+      this.currentUserId = userId;
+      this.generation += 1;
+      this.cancelPending();
+    }
+    return this.generation;
+  }
+
+  getGeneration(): number {
+    return this.generation;
+  }
+
+  getCurrentUserId(): string | null {
+    return this.currentUserId;
+  }
+
+  nextRequestId(): number {
+    this.currentRequestId += 1;
+    return this.currentRequestId;
+  }
+
+  getCurrentRequestId(): number {
+    return this.currentRequestId;
+  }
+
+  setAbortController(controller: AbortController | null): void {
+    this.currentAbortController = controller;
+  }
+
+  cancelPending(): void {
+    this.currentRequestId += 1;
+    if (this.currentAbortController) {
+      try {
+        this.currentAbortController.abort();
+      } catch {
+        // Ignore abort error
+      }
+      this.currentAbortController = null;
+    }
+  }
+
+  isCurrent(
+    requestId: number,
+    authGeneration: number,
+    requestUserId: string | null
+  ): boolean {
+    if (this.currentRequestId !== requestId) return false;
+    if (this.generation !== authGeneration) return false;
+    if (this.currentUserId !== requestUserId) return false;
+    return true;
+  }
+}
+
+export const authSessionStore = new AuthSessionStore();
+
 export function CartProvider({ children }: { children: React.ReactNode }) {
   const authContext = useContext(AuthContext);
   const authenticatedUserId = useMemo<string | null>(() => {
@@ -724,6 +789,10 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     }
     return resolveStoredAuthenticatedUserId();
   }, [authContext]);
+
+  // Synchronous identity version / generation tracking:
+  // Cập nhật đồng bộ ngay tại nguồn render khi authenticatedUserId thay đổi (A -> B hoặc logout)
+  authSessionStore.syncUser(authenticatedUserId);
 
   const [items, setItems] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState<boolean>(false);
@@ -740,8 +809,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     null
   );
   const isApplyingCouponRef = useRef<boolean>(false);
-  const couponPreviewRequestIdRef = useRef<number>(0);
-  const couponPreviewAbortRef = useRef<AbortController | null>(null);
 
   const latestItemsRef = useRef<CartItem[]>(items);
   const latestCouponCodeRef = useRef<string>(couponCode);
@@ -770,15 +837,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   >(null);
 
   const cancelPendingCouponPreview = useCallback(() => {
-    couponPreviewRequestIdRef.current += 1;
-    if (couponPreviewAbortRef.current) {
-      try {
-        couponPreviewAbortRef.current.abort();
-      } catch {
-        // Ignore abort error
-      }
-      couponPreviewAbortRef.current = null;
-    }
+    authSessionStore.cancelPending();
     isApplyingCouponRef.current = false;
   }, []);
 
@@ -1474,9 +1533,10 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
       // Hủy request preview cũ (nếu có) và khởi tạo requestId + AbortController mới
       clearAppliedCouponPreview();
-      const requestId = couponPreviewRequestIdRef.current;
+      const requestId = authSessionStore.nextRequestId();
+      const requestAuthGeneration = authSessionStore.getGeneration();
       const controller = new AbortController();
-      couponPreviewAbortRef.current = controller;
+      authSessionStore.setAbortController(controller);
 
       const requestCartFingerprint = computeCartFingerprint(currentItems);
       const requestCouponCode = normalizedCode;
@@ -1490,13 +1550,15 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
       const isStillCurrent = (): boolean => {
         if (controller.signal.aborted) return false;
-        if (couponPreviewRequestIdRef.current !== requestId) return false;
-        const currentUserId =
-          latestAuthUserIdRef.current ??
-          resolveStoredAuthenticatedUserId(
-            options?.accessToken ?? authContext?.accessToken ?? getStoredToken()
-          );
-        if (!requestUserId || currentUserId !== requestUserId) return false;
+        if (
+          !authSessionStore.isCurrent(
+            requestId,
+            requestAuthGeneration,
+            requestUserId
+          )
+        ) {
+          return false;
+        }
         if (
           computeCartFingerprint(latestItemsRef.current) !==
           requestCartFingerprint
@@ -1546,11 +1608,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         }
         return null;
       } finally {
-        if (couponPreviewRequestIdRef.current === requestId) {
+        if (authSessionStore.getCurrentRequestId() === requestId) {
           isApplyingCouponRef.current = false;
-          if (couponPreviewAbortRef.current === controller) {
-            couponPreviewAbortRef.current = null;
-          }
+          authSessionStore.setAbortController(null);
         }
       }
     },
