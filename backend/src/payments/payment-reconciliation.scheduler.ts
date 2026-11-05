@@ -109,11 +109,19 @@ export class PaymentReconciliationScheduler
       await this.querydr.reconcileClaimed(
         paymentId, claim.requestId, claim.claimToken, this.options.ipAddr,
       );
-    } catch {
+    } catch (error) {
       // HTTP timeout, unverified response or transaction failure is UNKNOWN,
       // never proof that the customer payment FAILED.
       errorCode = 'QUERYDR_UNVERIFIED_OR_TEMPORARY_FAILURE';
-      this.logger.warn('QueryDR attempt inconclusive; retain PENDING and cooldown');
+
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Unknown QueryDR error';
+
+      this.logger.warn(
+        `QueryDR attempt inconclusive; retain PENDING and cooldown: ${message}`,
+      );
     } finally {
       try {
         await this.querydr.releaseClaim(paymentId, claim.claimToken, errorCode);
