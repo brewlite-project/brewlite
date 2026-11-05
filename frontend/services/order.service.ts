@@ -1213,6 +1213,38 @@ export function validateCouponPreviewResponseData(
  * - `usage_limit_exceeded` (`409 COUPON_UNAVAILABLE` "Coupon usage limit reached")
  * - `error` (Lỗi mạng, `500 INTERNAL_ERROR`, `401 UNAUTHORIZED`, `400 INVALID_CART`)
  */
+export function extractCouponErrorSubcode(err: unknown): string | null {
+  if (!err || typeof err !== "object") return null;
+  const record = err as Record<string, unknown>;
+  if (typeof record.subcode === "string" && record.subcode.trim()) {
+    return record.subcode.trim().toUpperCase();
+  }
+  if (typeof record.reason === "string" && record.reason.trim()) {
+    return record.reason.trim().toUpperCase();
+  }
+  const details = record.details;
+  if (Array.isArray(details) && details.length > 0) {
+    const first = details[0] as Record<string, unknown> | null;
+    if (first && typeof first === "object") {
+      if (typeof first.subcode === "string" && first.subcode.trim()) {
+        return first.subcode.trim().toUpperCase();
+      }
+      if (typeof first.reason === "string" && first.reason.trim()) {
+        return first.reason.trim().toUpperCase();
+      }
+    }
+  } else if (details && typeof details === "object") {
+    const detRecord = details as Record<string, unknown>;
+    if (typeof detRecord.subcode === "string" && detRecord.subcode.trim()) {
+      return detRecord.subcode.trim().toUpperCase();
+    }
+    if (typeof detRecord.reason === "string" && detRecord.reason.trim()) {
+      return detRecord.reason.trim().toUpperCase();
+    }
+  }
+  return null;
+}
+
 export function classifyCouponPreviewError(err: unknown): {
   status: Exclude<CouponValidationStatus, "idle" | "validating" | "applied">;
   message: string;
@@ -1224,17 +1256,13 @@ export function classifyCouponPreviewError(err: unknown): {
     typeof candidate?.statusCode === "number" ? candidate.statusCode : 500;
   const code =
     typeof candidate?.code === "string" && candidate.code.trim()
-      ? candidate.code.trim()
+      ? candidate.code.trim().toUpperCase()
       : statusCode === 409
       ? "COUPON_UNAVAILABLE"
       : statusCode === 400
       ? "INVALID_COUPON"
       : "SERVER_ERROR";
-  const rawMessage =
-    typeof candidate?.message === "string" && candidate.message.trim()
-      ? candidate.message.trim()
-      : "Không thể kiểm tra mã ưu đãi vào lúc này.";
-  const lowerMsg = rawMessage.toLowerCase();
+  const subcode = extractCouponErrorSubcode(err);
 
   if (statusCode === 401 || code === "UNAUTHORIZED") {
     return {
@@ -1246,7 +1274,12 @@ export function classifyCouponPreviewError(err: unknown): {
     };
   }
 
-  if (code === "COUPON_UNAVAILABLE" || statusCode === 409) {
+  if (
+    code === "COUPON_UNAVAILABLE" ||
+    statusCode === 409 ||
+    subcode === "COUPON_UNAVAILABLE" ||
+    subcode === "USAGE_LIMIT_EXCEEDED"
+  ) {
     return {
       status: "usage_limit_exceeded",
       code: "COUPON_UNAVAILABLE",
@@ -1256,49 +1289,43 @@ export function classifyCouponPreviewError(err: unknown): {
     };
   }
 
+  if (
+    code === "COUPON_EXPIRED" ||
+    subcode === "EXPIRED" ||
+    subcode === "COUPON_EXPIRED"
+  ) {
+    return {
+      status: "expired",
+      code: "INVALID_COUPON",
+      statusCode: statusCode || 400,
+      message: "Mã ưu đãi đã hết hạn sử dụng.",
+    };
+  }
+
+  if (
+    code === "COUPON_NOT_ELIGIBLE" ||
+    subcode === "NOT_ELIGIBLE" ||
+    subcode === "COUPON_NOT_ELIGIBLE" ||
+    subcode === "MIN_SUBTOTAL_NOT_MET" ||
+    subcode === "COUPON_NOT_ACTIVE"
+  ) {
+    return {
+      status: "not_eligible",
+      code: "INVALID_COUPON",
+      statusCode: statusCode || 400,
+      message:
+        "Đơn hàng chưa đủ điều kiện áp dụng hoặc mã ưu đãi chưa đến thời gian có hiệu lực.",
+    };
+  }
+
   if (code === "INVALID_COUPON") {
-    if (lowerMsg.includes("expired") || lowerMsg.includes("hết hạn")) {
-      return {
-        status: "expired",
-        code: "INVALID_COUPON",
-        statusCode: statusCode || 400,
-        message: "Mã ưu đãi đã hết hạn sử dụng.",
-      };
-    }
-
-    if (
-      lowerMsg.includes("minimum") ||
-      lowerMsg.includes("tối thiểu") ||
-      lowerMsg.includes("not eligible") ||
-      lowerMsg.includes("điều kiện")
-    ) {
-      return {
-        status: "not_eligible",
-        code: "INVALID_COUPON",
-        statusCode: statusCode || 400,
-        message:
-          "Đơn hàng chưa đạt giá trị tối thiểu để áp dụng mã ưu đãi này.",
-      };
-    }
-
-    if (
-      lowerMsg.includes("not active") ||
-      lowerMsg.includes("chưa đến") ||
-      lowerMsg.includes("chưa có hiệu lực")
-    ) {
-      return {
-        status: "not_eligible",
-        code: "INVALID_COUPON",
-        statusCode: statusCode || 400,
-        message: "Mã ưu đãi chưa đến thời gian có hiệu lực.",
-      };
-    }
-
+    // Fallback generic INVALID_COUPON khi backend chỉ trả về code = INVALID_COUPON mà không có subcode/reason cấu trúc ổn định
     return {
       status: "invalid",
       code: "INVALID_COUPON",
       statusCode: statusCode || 400,
-      message: "Mã ưu đãi không tồn tại hoặc không hợp lệ.",
+      message:
+        "Mã ưu đãi không hợp lệ, đã hết hạn hoặc đơn hàng chưa đủ điều kiện áp dụng.",
     };
   }
 
@@ -1334,11 +1361,23 @@ export function classifyCouponPreviewError(err: unknown): {
  * Gọi API `POST /coupons/preview` tới Backend thật để kiểm tra tính hợp lệ của Coupon
  * và nhận giá trị giảm giá chính thức (`subtotalVnd`, `discountVnd`, `totalVnd`) từ Server (P2-21 & P2-22).
  * - KHÔNG tạo Order, KHÔNG giữ chỗ tồn kho, KHÔNG xóa giỏ hàng khi lỗi.
+ * - Hỗ trợ `AbortSignal` để hủy request đang pending khi giỏ hàng/coupon/user thay đổi.
  */
 export async function previewCouponApi(
   rawPayload: CouponPreviewRequestDto,
-  tokenOverride?: string | null
+  tokenOverride?: string | null,
+  options?: { signal?: AbortSignal }
 ): Promise<CouponPreviewResponseDto> {
+  if (options?.signal?.aborted) {
+    throw createOrderError(
+      "Yêu cầu kiểm tra mã ưu đãi đã bị hủy.",
+      499,
+      "ABORTED",
+      undefined,
+      false
+    );
+  }
+
   const candidateToken = tokenOverride || getStoredToken();
   if (!candidateToken) {
     clearStoredSession();
@@ -1430,12 +1469,35 @@ export async function previewCouponApi(
       },
       body: JSON.stringify(sanitizedPreviewPayload),
       cache: "no-store",
+      ...(options?.signal ? { signal: options.signal } : {}),
     });
-  } catch {
+  } catch (err: unknown) {
+    if (
+      options?.signal?.aborted ||
+      (err instanceof Error && err.name === "AbortError")
+    ) {
+      throw createOrderError(
+        "Yêu cầu kiểm tra mã ưu đãi đã bị hủy.",
+        499,
+        "ABORTED",
+        undefined,
+        false
+      );
+    }
     throw createOrderError(
       "Lỗi kết nối mạng khi kiểm tra mã ưu đãi. Vui lòng thử lại.",
       503,
       "NETWORK_ERROR",
+      undefined,
+      false
+    );
+  }
+
+  if (options?.signal?.aborted) {
+    throw createOrderError(
+      "Yêu cầu kiểm tra mã ưu đãi đã bị hủy.",
+      499,
+      "ABORTED",
       undefined,
       false
     );
@@ -1485,11 +1547,18 @@ export async function previewCouponApi(
     ? errorData.message.trim()
     : `Không thể áp dụng mã ưu đãi (HTTP ${response.status}).`;
 
+  const structuredDetails =
+    errorData?.details !== undefined
+      ? errorData.details
+      : errorData?.reason || errorData?.subcode
+      ? { reason: errorData.reason, subcode: errorData.subcode }
+      : undefined;
+
   throw createOrderError(
     rawMessage,
     response.status,
     resolvedCode,
-    errorData?.details,
+    structuredDetails,
     false
   );
 }

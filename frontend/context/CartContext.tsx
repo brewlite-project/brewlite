@@ -51,6 +51,7 @@ import {
 
 export const MAX_CART_ITEMS = 20;
 export const CART_STORAGE_KEY = "brewlite_cart_v1";
+export const CART_OWNER_STORAGE_KEY = "brewlite_cart_owner_v1";
 export const ACTIVE_ORDER_STORAGE_KEY = ACTIVE_ORDER_SESSION_KEY;
 
 /**
@@ -359,6 +360,26 @@ export function generateCartItemKey(
     .sort()
     .join(",");
   return `${normalizedProductId}_${size}_[${sortedToppingKey}]`;
+
+}
+
+/**
+ * Tạo dấu vân tay (fingerprint) tất định cho giỏ hàng hiện tại dựa trên (productId, size, toppingIds, quantity).
+ * Dùng để phát hiện giỏ hàng đã thay đổi trong lúc request `POST /coupons/preview` đang pending.
+ */
+export function computeCartFingerprint(items: CartItem[]): string {
+  if (!Array.isArray(items) || items.length === 0) return "empty";
+  return items
+    .map((item) => {
+      const key = generateCartItemKey(
+        item.productId || "",
+        item.size,
+        Array.isArray(item.toppingIds) ? item.toppingIds : []
+      );
+      return `${key}:${item.quantity}`;
+    })
+    .sort()
+    .join("|");
 }
 
 /**
@@ -625,6 +646,21 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     null
   );
   const isApplyingCouponRef = useRef<boolean>(false);
+  const couponPreviewRequestIdRef = useRef<number>(0);
+  const couponPreviewAbortRef = useRef<AbortController | null>(null);
+
+  const latestItemsRef = useRef<CartItem[]>(items);
+  const latestCouponCodeRef = useRef<string>(couponCode);
+  const latestAuthUserIdRef = useRef<string | null>(authenticatedUserId);
+
+  useEffect(() => {
+    latestItemsRef.current = items;
+    latestCouponCodeRef.current = couponCode;
+    latestAuthUserIdRef.current = authenticatedUserId;
+  }, [items, couponCode, authenticatedUserId]);
+  const prevAuthenticatedUserIdRef = useRef<string | null | undefined>(
+    undefined
+  );
 
   const [activeOrderRecord, setActiveOrderRecordState] =
     useState<StoredActiveOrderRecord | null>(null);
@@ -639,12 +675,26 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     "success" | "warning" | "error" | null
   >(null);
 
+  const cancelPendingCouponPreview = useCallback(() => {
+    couponPreviewRequestIdRef.current += 1;
+    if (couponPreviewAbortRef.current) {
+      try {
+        couponPreviewAbortRef.current.abort();
+      } catch {
+        // Ignore abort error
+      }
+      couponPreviewAbortRef.current = null;
+    }
+    isApplyingCouponRef.current = false;
+  }, []);
+
   const clearAppliedCouponPreview = useCallback(() => {
+    cancelPendingCouponPreview();
     setAppliedCouponState(null);
     setCouponStatusState("idle");
     setCouponErrorMessageState(null);
     setCouponErrorCodeState(null);
-  }, []);
+  }, [cancelPendingCouponPreview]);
 
   const setCouponApplicationState = useCallback(
     (next: {
@@ -671,8 +721,15 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
   const setCouponCode = useCallback(
     (code: string) => {
-      setCouponCodeState(code);
+      const normalizedPrev = latestCouponCodeRef.current.trim().toUpperCase();
       const normalizedNext = code.trim().toUpperCase();
+      latestCouponCodeRef.current = code;
+      setCouponCodeState(code);
+
+      if (normalizedPrev !== normalizedNext) {
+        cancelPendingCouponPreview();
+      }
+
       setAppliedCouponState((prevApplied) => {
         if (prevApplied && prevApplied.couponCode !== normalizedNext) {
           setCouponStatusState("idle");
@@ -681,19 +738,18 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
           return null;
         }
         if (!prevApplied) {
-          setCouponStatusState((prevStatus) =>
-            prevStatus === "validating" ? prevStatus : "idle"
-          );
+          setCouponStatusState("idle");
           setCouponErrorMessageState(null);
           setCouponErrorCodeState(null);
         }
         return prevApplied;
       });
     },
-    []
+    [cancelPendingCouponPreview]
   );
 
   const removeCoupon = useCallback(() => {
+    latestCouponCodeRef.current = "";
     setCouponCodeState("");
     clearAppliedCouponPreview();
   }, [clearAppliedCouponPreview]);
@@ -760,35 +816,59 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     clearStoredActiveOrder();
   }, []);
 
-  // Khôi phục giỏ hàng từ localStorage khi khởi động (SSR Safe + Chặt chẽ)
+  // Khôi phục giỏ hàng từ localStorage khi khởi động (SSR Safe + Cô lập theo user)
   useEffect(() => {
     try {
-      const stored = localStorage.getItem(CART_STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed)) {
-          const sanitizedItems = mergeDuplicateCartItems(
-            parsed
-              .map(validateAndSanitizeCartItem)
-              .filter((item): item is CartItem => item !== null)
-          ).slice(0, MAX_CART_ITEMS);
+      const rawOwner = localStorage.getItem(CART_OWNER_STORAGE_KEY);
+      const storedOwner =
+        typeof rawOwner === "string" && rawOwner.trim()
+          ? rawOwner.trim().toLowerCase()
+          : null;
 
-          // eslint-disable-next-line react-hooks/set-state-in-effect
-          setItems(sanitizedItems);
-
-          // Nếu có item sai cấu trúc hoặc trùng cấu hình đã được gộp, cập nhật lại localStorage
-          if (sanitizedItems.length !== parsed.length) {
-            localStorage.setItem(
-              CART_STORAGE_KEY,
-              JSON.stringify(sanitizedItems)
-            );
-          }
+      // Nếu trong localStorage có giỏ hàng gắn với User A nhưng hiện tại là Guest hoặc User B,
+      // không được phép tái sử dụng giỏ hàng của User A!
+      if (storedOwner && storedOwner !== authenticatedUserId) {
+        latestItemsRef.current = [];
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setItems([]);
+        localStorage.setItem(CART_STORAGE_KEY, JSON.stringify([]));
+        if (authenticatedUserId) {
+          localStorage.setItem(CART_OWNER_STORAGE_KEY, authenticatedUserId);
         } else {
-          setItems([]);
-          localStorage.setItem(CART_STORAGE_KEY, JSON.stringify([]));
+          localStorage.removeItem(CART_OWNER_STORAGE_KEY);
+        }
+      } else {
+        const stored = localStorage.getItem(CART_STORAGE_KEY);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed)) {
+            const sanitizedItems = mergeDuplicateCartItems(
+              parsed
+                .map(validateAndSanitizeCartItem)
+                .filter((item): item is CartItem => item !== null)
+            ).slice(0, MAX_CART_ITEMS);
+
+            latestItemsRef.current = sanitizedItems;
+            setItems(sanitizedItems);
+
+            if (sanitizedItems.length !== parsed.length) {
+              localStorage.setItem(
+                CART_STORAGE_KEY,
+                JSON.stringify(sanitizedItems)
+              );
+            }
+          } else {
+            latestItemsRef.current = [];
+            setItems([]);
+            localStorage.setItem(CART_STORAGE_KEY, JSON.stringify([]));
+          }
+        }
+        if (authenticatedUserId) {
+          localStorage.setItem(CART_OWNER_STORAGE_KEY, authenticatedUserId);
         }
       }
     } catch {
+      latestItemsRef.current = [];
       setItems([]);
       try {
         localStorage.setItem(CART_STORAGE_KEY, JSON.stringify([]));
@@ -798,11 +878,62 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsHydrated(true);
     }
-  }, []);
+  }, [authenticatedUserId]);
 
-  // Đồng bộ hoặc xóa snapshot đơn hàng PENDING khi user đăng nhập / logout / đổi tài khoản / 401
+  // Cô lập Coupon, Cart & ActiveOrder khi user đăng nhập / logout / đổi tài khoản (A -> B)
   useEffect(() => {
     if (authContext?.isLoading) return;
+
+    const prevUserId = prevAuthenticatedUserIdRef.current;
+    prevAuthenticatedUserIdRef.current = authenticatedUserId;
+    latestAuthUserIdRef.current = authenticatedUserId;
+
+    if (prevUserId !== undefined && prevUserId !== authenticatedUserId) {
+      // 1. Hủy ngay mọi request coupon preview đang pending và xóa sạch couponCode / appliedCoupon
+      cancelPendingCouponPreview();
+      latestCouponCodeRef.current = "";
+      setCouponCodeState("");
+      setAppliedCouponState(null);
+      setCouponStatusState("idle");
+      setCouponErrorMessageState(null);
+      setCouponErrorCodeState(null);
+
+      // 2. Nếu đổi từ một user đã đăng nhập (User A -> logout hoặc User A -> User B),
+      // hoặc nếu chủ sở hữu giỏ hàng lưu trữ khác với user hiện tại -> xóa sạch giỏ hàng của User A
+      let storedOwner: string | null = null;
+      try {
+        const rawOwner = localStorage.getItem(CART_OWNER_STORAGE_KEY);
+        storedOwner =
+          typeof rawOwner === "string" && rawOwner.trim()
+            ? rawOwner.trim().toLowerCase()
+            : null;
+      } catch {
+        storedOwner = null;
+      }
+
+      if (
+        prevUserId !== null ||
+        (storedOwner !== null && storedOwner !== authenticatedUserId)
+      ) {
+        latestItemsRef.current = [];
+        setItems([]);
+        try {
+          localStorage.setItem(CART_STORAGE_KEY, JSON.stringify([]));
+        } catch {
+          // Bỏ qua lỗi localStorage
+        }
+      }
+    }
+
+    try {
+      if (authenticatedUserId) {
+        localStorage.setItem(CART_OWNER_STORAGE_KEY, authenticatedUserId);
+      } else {
+        localStorage.removeItem(CART_OWNER_STORAGE_KEY);
+      }
+    } catch {
+      // Bỏ qua lỗi localStorage
+    }
 
     if (!authenticatedUserId) {
       clearStoredActiveOrder();
@@ -821,17 +952,20 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     } else {
       setActiveOrderRecordState(null);
     }
-  }, [authContext?.isLoading, authenticatedUserId]);
+  }, [authContext?.isLoading, authenticatedUserId, cancelPendingCouponPreview]);
 
   // Lưu lại giỏ hàng vào localStorage mỗi khi có cập nhật
   useEffect(() => {
     if (!isHydrated) return;
     try {
       localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(items));
+      if (authenticatedUserId) {
+        localStorage.setItem(CART_OWNER_STORAGE_KEY, authenticatedUserId);
+      }
     } catch {
       // Bỏ qua lỗi quotaExceeded
     }
-  }, [items, isHydrated]);
+  }, [authenticatedUserId, items, isHydrated]);
 
   // Hiển thị feedback nhanh
   const showFeedback = useCallback(
@@ -1011,7 +1145,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       );
 
       if (existingIndex >= 0) {
-        // Đã có món trong giỏ: kiểm tra tổng số lượng sau khi cộng dồn, KHÔNG dùng Math.min() để tự ý cắt bớt
         const current = items[existingIndex];
         const newQty = current.quantity + requestedQty;
         if (newQty > MAX_ORDER_QUANTITY) {
@@ -1032,6 +1165,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
           note: cleanNote || current.note,
         };
 
+        latestItemsRef.current = updatedItems;
         setItems(updatedItems);
         clearAppliedCouponPreview();
         setIsCartOpen(true);
@@ -1040,7 +1174,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         return { success: true, message: msg };
       }
 
-      // Chưa có món trong giỏ: kiểm tra giới hạn 20 dòng món
       if (items.length >= MAX_CART_ITEMS) {
         const msg = `Giỏ hàng chỉ có thể chứa tối đa ${MAX_CART_ITEMS} dòng món khác nhau.`;
         showFeedback(msg, "error");
@@ -1068,7 +1201,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         sizePolicy: input.sizePolicy,
       };
 
-      setItems([...items, newItem]);
+      const nextItems = [...items, newItem];
+      latestItemsRef.current = nextItems;
+      setItems(nextItems);
       clearAppliedCouponPreview();
       setIsCartOpen(true);
       const msg = `Đã thêm "${newItem.productName}" vào giỏ hàng`;
@@ -1098,8 +1233,10 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
           if (itemToRemove) {
             showFeedback(`Đã xóa ${itemToRemove.productName} khỏi giỏ hàng`);
           }
+          const next = prevItems.filter((i) => i.id !== itemId);
+          latestItemsRef.current = next;
           clearAppliedCouponPreview();
-          return prevItems.filter((i) => i.id !== itemId);
+          return next;
         }
 
         if (newQuantity > MAX_ORDER_QUANTITY) {
@@ -1110,8 +1247,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
           return prevItems;
         }
 
-        clearAppliedCouponPreview();
-        return prevItems.map((item) => {
+        const next = prevItems.map((item) => {
           if (item.id === itemId) {
             return {
               ...item,
@@ -1124,6 +1260,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
           }
           return item;
         });
+        latestItemsRef.current = next;
+        clearAppliedCouponPreview();
+        return next;
       });
     },
     [clearAppliedCouponPreview, isSubmittingOrder, showFeedback]
@@ -1142,9 +1281,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
           );
           return prevItems;
         }
-        clearAppliedCouponPreview();
         const nextQty = item.quantity + 1;
-        return prevItems.map((i) =>
+        const next = prevItems.map((i) =>
           i.id === itemId
             ? {
                 ...i,
@@ -1153,6 +1291,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
               }
             : i
         );
+        latestItemsRef.current = next;
+        clearAppliedCouponPreview();
+        return next;
       });
     },
     [clearAppliedCouponPreview, isSubmittingOrder, showFeedback]
@@ -1164,13 +1305,15 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       setItems((prevItems) => {
         const item = prevItems.find((i) => i.id === itemId);
         if (!item) return prevItems;
-        clearAppliedCouponPreview();
         if (item.quantity <= 1) {
           showFeedback(`Đã xóa ${item.productName} khỏi giỏ hàng`);
-          return prevItems.filter((i) => i.id !== itemId);
+          const next = prevItems.filter((i) => i.id !== itemId);
+          latestItemsRef.current = next;
+          clearAppliedCouponPreview();
+          return next;
         }
         const nextQty = item.quantity - 1;
-        return prevItems.map((i) =>
+        const next = prevItems.map((i) =>
           i.id === itemId
             ? {
                 ...i,
@@ -1179,6 +1322,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
               }
             : i
         );
+        latestItemsRef.current = next;
+        clearAppliedCouponPreview();
+        return next;
       });
     },
     [clearAppliedCouponPreview, isSubmittingOrder, showFeedback]
@@ -1193,8 +1339,10 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         if (item) {
           showFeedback(`Đã xóa "${item.productName}" khỏi giỏ hàng`);
         }
+        const next = prevItems.filter((i) => i.id !== itemId);
+        latestItemsRef.current = next;
         clearAppliedCouponPreview();
-        return prevItems.filter((i) => i.id !== itemId);
+        return next;
       });
     },
     [clearAppliedCouponPreview, isSubmittingOrder, showFeedback]
@@ -1203,6 +1351,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   // Xóa toàn bộ giỏ hàng (khóa khi đang gửi POST /orders)
   const clearCart = useCallback(() => {
     if (isSubmittingOrderRef.current || isSubmittingOrder) return;
+    latestItemsRef.current = [];
+    latestCouponCodeRef.current = "";
     setItems([]);
     setCouponCodeState("");
     clearAppliedCouponPreview();
@@ -1210,34 +1360,48 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   }, [clearAppliedCouponPreview, isSubmittingOrder, showFeedback]);
 
   // Gọi POST /coupons/preview để kiểm tra và áp dụng mã ưu đãi (P2-22)
+  // Có bảo vệ chống stale-response bằng AbortController + requestId + kiểm tra khớp (userId, cartFingerprint, couponCode)
   const applyCoupon = useCallback(
     async (options?: {
       couponCodeOverride?: string;
       accessToken?: string | null;
       previewCouponFn?: typeof previewCouponApi;
     }): Promise<CouponPreviewResponseDto | null> => {
-      if (isApplyingCouponRef.current || isSubmittingOrderRef.current) {
+      if (isSubmittingOrderRef.current) {
         return null;
       }
 
       const rawInput =
         options?.couponCodeOverride !== undefined
           ? options.couponCodeOverride
-          : couponCode;
+          : latestCouponCodeRef.current;
       const normalizedCode = rawInput.trim().toUpperCase();
 
+      if (options?.couponCodeOverride !== undefined) {
+        latestCouponCodeRef.current = normalizedCode;
+        setCouponCodeState(normalizedCode);
+      }
+
       if (!normalizedCode) {
+        cancelPendingCouponPreview();
         setAppliedCouponState(null);
         setCouponStatusState("invalid");
-        setCouponErrorMessageState("Vui lòng nhập mã ưu đãi trước khi bấm Áp dụng.");
+        setCouponErrorMessageState(
+          "Vui lòng nhập mã ưu đãi trước khi bấm Áp dụng."
+        );
         setCouponErrorCodeState("VALIDATION_ERROR");
         return null;
       }
 
+      const currentItems = latestItemsRef.current;
       let previewPayload: CouponPreviewRequestDto;
       try {
-        previewPayload = buildCouponPreviewPayloadFromCart(items, normalizedCode);
+        previewPayload = buildCouponPreviewPayloadFromCart(
+          currentItems,
+          normalizedCode
+        );
       } catch (err: unknown) {
+        cancelPendingCouponPreview();
         const classified = classifyCouponPreviewError(err);
         setAppliedCouponState(null);
         setCouponStatusState(classified.status);
@@ -1246,17 +1410,58 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         return null;
       }
 
+      // Hủy request preview cũ (nếu có) và khởi tạo requestId + AbortController mới
+      cancelPendingCouponPreview();
+      const requestId = couponPreviewRequestIdRef.current;
+      const controller = new AbortController();
+      couponPreviewAbortRef.current = controller;
+
+      const effectiveToken =
+        options?.accessToken ?? authContext?.accessToken ?? getStoredToken();
+      const requestUserId =
+        latestAuthUserIdRef.current ??
+        resolveStoredAuthenticatedUserId(effectiveToken);
+      const requestCartFingerprint = computeCartFingerprint(currentItems);
+      const requestCouponCode = normalizedCode;
+
       isApplyingCouponRef.current = true;
       setCouponStatusState("validating");
       setCouponErrorMessageState(null);
       setCouponErrorCodeState(null);
 
       const callPreview = options?.previewCouponFn || previewCouponApi;
-      const effectiveToken =
-        options?.accessToken ?? authContext?.accessToken ?? getStoredToken();
+
+      const isStillCurrent = (): boolean => {
+        if (controller.signal.aborted) return false;
+        if (couponPreviewRequestIdRef.current !== requestId) return false;
+        const currentUserId =
+          latestAuthUserIdRef.current ??
+          resolveStoredAuthenticatedUserId(
+            options?.accessToken ?? authContext?.accessToken ?? getStoredToken()
+          );
+        if (!requestUserId || currentUserId !== requestUserId) return false;
+        if (
+          computeCartFingerprint(latestItemsRef.current) !==
+          requestCartFingerprint
+        ) {
+          return false;
+        }
+        if (
+          latestCouponCodeRef.current.trim().toUpperCase() !== requestCouponCode
+        ) {
+          return false;
+        }
+        return true;
+      };
 
       try {
-        const previewRes = await callPreview(previewPayload, effectiveToken);
+        const previewRes = await callPreview(previewPayload, effectiveToken, {
+          signal: controller.signal,
+        });
+        if (!isStillCurrent()) {
+          return null;
+        }
+        latestCouponCodeRef.current = previewRes.couponCode;
         setCouponCodeState(previewRes.couponCode);
         setAppliedCouponState(previewRes);
         setCouponStatusState("applied");
@@ -1264,6 +1469,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         setCouponErrorCodeState(null);
         return previewRes;
       } catch (err: unknown) {
+        if (!isStillCurrent()) {
+          return null;
+        }
         const classified = classifyCouponPreviewError(err);
         setAppliedCouponState(null);
         setCouponStatusState(classified.status);
@@ -1277,10 +1485,13 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         }
         return null;
       } finally {
-        isApplyingCouponRef.current = false;
+        if (couponPreviewRequestIdRef.current === requestId) {
+          isApplyingCouponRef.current = false;
+          couponPreviewAbortRef.current = null;
+        }
       }
     },
-    [authContext, couponCode, items]
+    [authContext, cancelPendingCouponPreview]
   );
 
   // Chuyển đổi giỏ hàng sang định dạng CreateOrderDto theo API Contract v2.1 Mục 8.2

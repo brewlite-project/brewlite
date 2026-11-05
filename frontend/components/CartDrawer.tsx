@@ -8,6 +8,7 @@ import {
   buildCreateOrderPayloadFromCart,
   type CartItem,
   clearStoredActiveOrder,
+  computeCartFingerprint,
   persistActiveOrderForUser,
   resolveStoredAuthenticatedUserId,
   restoreActiveOrderForUser,
@@ -95,12 +96,24 @@ export function proceedToCheckoutStep(deps: ProceedToCheckoutFlowDeps): boolean 
   return true;
 }
 
+export interface CouponPreviewLiveSnapshot {
+  userId: string | null;
+  accessToken: string | null;
+  isAuthenticated: boolean;
+  cartFingerprint: string;
+  normalizedCouponCode: string;
+}
+
 export interface ExecuteCouponPreviewDeps {
   items: CartItem[];
   couponCode: string;
   accessToken: string | null;
+  userId?: string | null;
   isAuthenticated: boolean;
   applyingRef: { current: boolean };
+  requestVersionRef?: { current: number };
+  abortControllerRef?: { current: AbortController | null };
+  getLatestSnapshot?: () => CouponPreviewLiveSnapshot;
   isSubmittingOrder: boolean;
   verifySession: () => boolean;
   openAuthModal: (
@@ -116,6 +129,7 @@ export interface ExecuteCouponPreviewDeps {
 
 export interface ExecuteCouponPreviewResult {
   skipped: boolean;
+  stale?: boolean;
   status: CouponValidationStatus;
   preview: CouponPreviewResponseDto | null;
   errorMessage: string | null;
@@ -126,11 +140,12 @@ export interface ExecuteCouponPreviewResult {
  * Điều phối gọi `POST /coupons/preview` (P2-21 & P2-22):
  * - KHÔNG tạo Order (`POST /orders`), KHÔNG xóa giỏ hàng khi lỗi.
  * - Frontend chỉ hiển thị kết quả do backend trả về, không tự quyết định coupon hợp lệ hay tự tính authoritative discount.
+ * - Bảo vệ chống stale-response bằng `AbortController` + `requestVersionRef` + đối chiếu `(userId, accessToken, cartFingerprint, normalizedCouponCode)`.
  */
 export async function executeCouponPreview(
   deps: ExecuteCouponPreviewDeps
 ): Promise<ExecuteCouponPreviewResult> {
-  if (deps.applyingRef.current || deps.isSubmittingOrder) {
+  if (deps.isSubmittingOrder) {
     return {
       skipped: true,
       status: "validating",
@@ -139,7 +154,21 @@ export async function executeCouponPreview(
     };
   }
 
+  // Hủy request preview đang pending trước đó (nếu có) trước khi xử lý yêu cầu mới
+  if (deps.abortControllerRef?.current) {
+    try {
+      deps.abortControllerRef.current.abort();
+    } catch {
+      // Bỏ qua lỗi abort
+    }
+    deps.abortControllerRef.current = null;
+  }
+  const versionRef = deps.requestVersionRef ?? { current: 0 };
+  versionRef.current += 1;
+  const requestId = versionRef.current;
+
   if (deps.items.length === 0) {
+    deps.applyingRef.current = false;
     const msg =
       "Giỏ hàng đang trống. Vui lòng chọn món trước khi áp dụng mã ưu đãi.";
     deps.setAppliedCoupon(null);
@@ -157,6 +186,7 @@ export async function executeCouponPreview(
   const trimmedCode =
     typeof deps.couponCode === "string" ? deps.couponCode.trim() : "";
   if (!trimmedCode) {
+    deps.applyingRef.current = false;
     const msg = "Vui lòng nhập mã ưu đãi trước khi bấm Áp dụng.";
     deps.setAppliedCoupon(null);
     deps.setCouponStatus("invalid");
@@ -172,6 +202,7 @@ export async function executeCouponPreview(
 
   const hasSession = deps.verifySession();
   if (!hasSession || !deps.isAuthenticated || !deps.accessToken) {
+    deps.applyingRef.current = false;
     const msg =
       "Vui lòng đăng nhập để kiểm tra và áp dụng mã ưu đãi. Giỏ hàng của bạn vẫn được giữ nguyên.";
     deps.setAppliedCoupon(null);
@@ -194,6 +225,7 @@ export async function executeCouponPreview(
   try {
     payload = buildCouponPreviewPayloadFromCart(deps.items, trimmedCode);
   } catch (err: unknown) {
+    deps.applyingRef.current = false;
     const classified = classifyCouponPreviewError(err);
     deps.setAppliedCoupon(null);
     deps.setCouponStatus(classified.status);
@@ -207,14 +239,65 @@ export async function executeCouponPreview(
     };
   }
 
+  const controller = new AbortController();
+  if (deps.abortControllerRef) {
+    deps.abortControllerRef.current = controller;
+  }
+
+  const requestUserId =
+    (
+      deps.userId ??
+      resolveStoredAuthenticatedUserId(deps.accessToken) ??
+      ""
+    )
+      .trim()
+      .toLowerCase() || null;
+  const requestToken = deps.accessToken;
+  const requestCartFingerprint = computeCartFingerprint(deps.items);
+  const requestCouponCode = trimmedCode.toUpperCase();
+
+  const isRequestStillCurrent = (): boolean => {
+    if (controller.signal.aborted) return false;
+    if (versionRef.current !== requestId) return false;
+    if (deps.getLatestSnapshot) {
+      const latest = deps.getLatestSnapshot();
+      if (!latest.isAuthenticated) return false;
+      if (!requestUserId || latest.userId !== requestUserId) return false;
+      if (!requestToken || latest.accessToken !== requestToken) return false;
+      if (latest.cartFingerprint !== requestCartFingerprint) return false;
+      if (latest.normalizedCouponCode !== requestCouponCode) return false;
+    }
+    return true;
+  };
+
   const callPreview = deps.previewCouponFn || previewCouponApi;
   deps.applyingRef.current = true;
   deps.setCouponStatus("validating");
   deps.setCouponErrorMessage(null);
 
   try {
-    const rawPreview = await callPreview(payload, deps.accessToken);
+    const rawPreview = await callPreview(payload, deps.accessToken, {
+      signal: controller.signal,
+    });
+    if (!isRequestStillCurrent()) {
+      return {
+        skipped: true,
+        stale: true,
+        status: "idle",
+        preview: null,
+        errorMessage: null,
+      };
+    }
     const verifiedPreview = validateCouponPreviewResponseData(rawPreview);
+    if (!isRequestStillCurrent()) {
+      return {
+        skipped: true,
+        stale: true,
+        status: "idle",
+        preview: null,
+        errorMessage: null,
+      };
+    }
     deps.setCouponCode?.(verifiedPreview.couponCode);
     deps.setAppliedCoupon(verifiedPreview);
     deps.setCouponStatus("applied");
@@ -227,6 +310,15 @@ export async function executeCouponPreview(
       errorCode: null,
     };
   } catch (err: unknown) {
+    if (!isRequestStillCurrent()) {
+      return {
+        skipped: true,
+        stale: true,
+        status: "idle",
+        preview: null,
+        errorMessage: null,
+      };
+    }
     const classified = classifyCouponPreviewError(err);
     deps.setAppliedCoupon(null);
     deps.setCouponStatus(classified.status);
@@ -245,7 +337,12 @@ export async function executeCouponPreview(
       errorCode: classified.code,
     };
   } finally {
-    deps.applyingRef.current = false;
+    if (versionRef.current === requestId) {
+      deps.applyingRef.current = false;
+      if (deps.abortControllerRef?.current === controller) {
+        deps.abortControllerRef.current = null;
+      }
+    }
   }
 }
 
@@ -617,6 +714,8 @@ export default function CartDrawer({
   const [voucherNoticeVisible, setVoucherNoticeVisible] = useState(false);
   const submittingRef = useRef(initialIsSubmittingOrder);
   const applyingCouponRef = useRef(false);
+  const couponRequestVersionRef = useRef(0);
+  const couponAbortControllerRef = useRef<AbortController | null>(null);
   const zeroAmountSubmittingRef = useRef(false);
 
   // State cục bộ kết hợp với CartContext để hỗ trợ cả tương tác trực tiếp trên UI và kiểm thử độc lập
@@ -647,6 +746,19 @@ export default function CartDrawer({
   const [zeroAmountPaidResult, setZeroAmountPaidResult] =
     useState<ZeroAmountPaymentResponseDto | null>(null);
   const [zeroAmountError, setZeroAmountError] = useState<string | null>(null);
+
+  const cancelLocalPendingCouponPreview = () => {
+    couponRequestVersionRef.current += 1;
+    if (couponAbortControllerRef.current) {
+      try {
+        couponAbortControllerRef.current.abort();
+      } catch {
+        // Ignore abort error
+      }
+      couponAbortControllerRef.current = null;
+    }
+    applyingCouponRef.current = false;
+  };
 
   const setOrderCallOutcome = (outcome: OrderCallOutcome | null) => {
     if (!outcome) {
@@ -786,24 +898,86 @@ export default function CartDrawer({
     openCart,
   ]);
 
+  const currentCartFingerprint = useMemo(
+    () => computeCartFingerprint(items),
+    [items]
+  );
+
   // Đồng bộ state coupon giữa CartContext và state cục bộ của CartDrawer
   const effectiveCouponCodeInput =
     contextCouponCode !== undefined && contextCouponCode !== ""
       ? contextCouponCode
       : localCouponCode;
 
+  // Chỉ cho phép hiển thị appliedCoupon khi user đang đăng nhập hợp lệ
   const effectiveAppliedCoupon: CouponPreviewResponseDto | null =
-    contextAppliedCoupon !== undefined
+    !isAuthenticated || !currentAuthUserId
+      ? null
+      : contextAppliedCoupon !== undefined
       ? contextAppliedCoupon
       : localAppliedCoupon;
 
   const effectiveCouponStatus: CouponValidationStatus =
-    contextCouponStatus && contextCouponStatus !== "idle"
+    !isAuthenticated || !currentAuthUserId
+      ? localCouponStatus === "error"
+        ? "error"
+        : "idle"
+      : contextCouponStatus && contextCouponStatus !== "idle"
       ? contextCouponStatus
       : localCouponStatus;
 
   const effectiveCouponErrorMessage: string | null =
     contextCouponErrorMessage ?? localCouponErrorMessage;
+
+  const latestSnapshotRef = useRef<CouponPreviewLiveSnapshot>({
+    userId: currentAuthUserId,
+    accessToken,
+    isAuthenticated,
+    cartFingerprint: currentCartFingerprint,
+    normalizedCouponCode: effectiveCouponCodeInput.trim().toUpperCase(),
+  });
+
+  useEffect(() => {
+    latestSnapshotRef.current = {
+      userId: currentAuthUserId,
+      accessToken,
+      isAuthenticated,
+      cartFingerprint: currentCartFingerprint,
+      normalizedCouponCode: effectiveCouponCodeInput.trim().toUpperCase(),
+    };
+  }, [
+    currentAuthUserId,
+    accessToken,
+    isAuthenticated,
+    currentCartFingerprint,
+    effectiveCouponCodeInput,
+  ]);
+
+  const prevDrawerAuthUserIdRef = useRef<string | null>(currentAuthUserId);
+  const prevDrawerCartFingerprintRef = useRef<string>(currentCartFingerprint);
+
+  // Hủy ngay preview đang pending và xóa sạch state coupon cục bộ khi logout / đổi user (A -> B)
+  useEffect(() => {
+    if (prevDrawerAuthUserIdRef.current !== currentAuthUserId) {
+      prevDrawerAuthUserIdRef.current = currentAuthUserId;
+      cancelLocalPendingCouponPreview();
+      setLocalCouponCode("");
+      setLocalAppliedCoupon(null);
+      setLocalCouponStatus("idle");
+      setLocalCouponErrorMessage(null);
+    }
+  }, [currentAuthUserId]);
+
+  // Hủy ngay preview đang pending và xóa appliedCoupon cục bộ khi giỏ hàng thay đổi (số lượng / xóa món / thêm món)
+  useEffect(() => {
+    if (prevDrawerCartFingerprintRef.current !== currentCartFingerprint) {
+      prevDrawerCartFingerprintRef.current = currentCartFingerprint;
+      cancelLocalPendingCouponPreview();
+      setLocalAppliedCoupon(null);
+      setLocalCouponStatus("idle");
+      setLocalCouponErrorMessage(null);
+    }
+  }, [currentCartFingerprint]);
 
   // Sau khi Create Order (POST /orders) thành công, UI bắt buộc dùng snapshot từ backend trả về làm source of truth
   const authoritativeOrderSnapshot: CreateOrderResponseDto | null =
@@ -836,12 +1010,23 @@ export default function CartDrawer({
     : null;
 
   const handleCouponCodeChange = (nextRawCode: string) => {
-    if (isSubmittingOrder || effectiveCouponStatus === "validating") return;
+    if (isSubmittingOrder) return;
     setVoucherNoticeVisible(false);
+
+    const normalizedPrev = latestSnapshotRef.current.normalizedCouponCode;
+    const normalizedNext = nextRawCode.trim().toUpperCase();
+    latestSnapshotRef.current = {
+      ...latestSnapshotRef.current,
+      normalizedCouponCode: normalizedNext,
+    };
+
+    if (normalizedPrev !== normalizedNext) {
+      cancelLocalPendingCouponPreview();
+    }
+
     setLocalCouponCode(nextRawCode);
     setContextCouponCode(nextRawCode);
 
-    const normalizedNext = nextRawCode.trim().toUpperCase();
     if (
       effectiveAppliedCoupon &&
       effectiveAppliedCoupon.couponCode !== normalizedNext
@@ -868,8 +1053,13 @@ export default function CartDrawer({
   };
 
   const handleRemoveCoupon = () => {
-    if (isSubmittingOrder || effectiveCouponStatus === "validating") return;
+    if (isSubmittingOrder) return;
     setVoucherNoticeVisible(false);
+    cancelLocalPendingCouponPreview();
+    latestSnapshotRef.current = {
+      ...latestSnapshotRef.current,
+      normalizedCouponCode: "",
+    };
     setLocalCouponCode("");
     setLocalAppliedCoupon(null);
     setLocalCouponStatus("idle");
@@ -885,14 +1075,26 @@ export default function CartDrawer({
   };
 
   const handleApplyCoupon = async () => {
-    if (isSubmittingOrder || applyingCouponRef.current) return;
+    if (isSubmittingOrder) return;
     setVoucherNoticeVisible(false);
-    await executeCouponPreview({
-      items,
-      couponCode: effectiveCouponCodeInput,
+    const codeToApply = effectiveCouponCodeInput;
+    latestSnapshotRef.current = {
+      userId: currentAuthUserId,
       accessToken,
       isAuthenticated,
+      cartFingerprint: currentCartFingerprint,
+      normalizedCouponCode: codeToApply.trim().toUpperCase(),
+    };
+    await executeCouponPreview({
+      items,
+      couponCode: codeToApply,
+      accessToken,
+      userId: currentAuthUserId,
+      isAuthenticated,
       applyingRef: applyingCouponRef,
+      requestVersionRef: couponRequestVersionRef,
+      abortControllerRef: couponAbortControllerRef,
+      getLatestSnapshot: () => latestSnapshotRef.current,
       isSubmittingOrder,
       verifySession,
       openAuthModal,
@@ -909,6 +1111,10 @@ export default function CartDrawer({
         setContextCouponApplicationState?.({ errorMessage: msg });
       },
       setCouponCode: (normalizedCode) => {
+        latestSnapshotRef.current = {
+          ...latestSnapshotRef.current,
+          normalizedCouponCode: normalizedCode.trim().toUpperCase(),
+        };
         setLocalCouponCode(normalizedCode);
         setContextCouponCode(normalizedCode);
       },
@@ -1068,9 +1274,14 @@ export default function CartDrawer({
               id={options.inputId}
               type="text"
               maxLength={30}
-              disabled={isSubmittingOrder || isValidating}
+              disabled={isSubmittingOrder}
               value={effectiveCouponCodeInput}
               onChange={(e) => handleCouponCodeChange(e.target.value)}
+              onInput={(e) =>
+                handleCouponCodeChange(
+                  (e.currentTarget as HTMLInputElement).value
+                )
+              }
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   e.preventDefault();
@@ -1108,7 +1319,7 @@ export default function CartDrawer({
             <button
               id={options.removeButtonId}
               type="button"
-              disabled={isSubmittingOrder || isValidating}
+              disabled={isSubmittingOrder}
               onClick={handleRemoveCoupon}
               className="px-2.5 py-2 border border-outline-variant hover:bg-surface-container text-on-surface-variant font-label-md text-[12px] font-semibold rounded-lg transition-colors whitespace-nowrap cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               title="Bỏ mã ưu đãi"

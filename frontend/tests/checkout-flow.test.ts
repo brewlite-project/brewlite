@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
-import React from "react";
+import React, { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import ReactDOMServer from "react-dom/server";
+import { JSDOM } from "jsdom";
 import CartDrawer, {
   executeCheckoutOrderSubmission,
   executeCouponPreview,
@@ -14,13 +16,16 @@ import {
   ACTIVE_ORDER_STORAGE_KEY,
   buildCouponPreviewPayloadFromCart,
   buildCreateOrderPayloadFromCart,
+  CART_OWNER_STORAGE_KEY,
   CartContext,
   type CartContextValue,
   type CartItem,
+  CartProvider,
   generateCartItemKey,
   mergeDuplicateCartItems,
   persistActiveOrderForUser,
   restoreActiveOrderForUser,
+  useCart,
   validateAndSanitizeCartItem,
 } from "@/context/CartContext";
 import type {
@@ -1303,7 +1308,18 @@ describe("SCRUM-43 & SCRUM-44 Checkout Flow, Cart Integration & POST /orders Aut
             message: "Coupon does not exist",
           },
           expectedStatus: "invalid",
-          expectedBannerSubstring: "không tồn tại",
+          expectedBannerSubstring: "không hợp lệ",
+        },
+        {
+          coupon: "EXPIRED10_GENERIC",
+          httpStatus: 400,
+          body: {
+            statusCode: 400,
+            code: "INVALID_COUPON",
+            message: "Coupon has expired",
+          },
+          expectedStatus: "invalid",
+          expectedBannerSubstring: "không hợp lệ",
         },
         {
           coupon: "EXPIRED10",
@@ -1311,6 +1327,7 @@ describe("SCRUM-43 & SCRUM-44 Checkout Flow, Cart Integration & POST /orders Aut
           body: {
             statusCode: 400,
             code: "INVALID_COUPON",
+            reason: "EXPIRED",
             message: "Coupon has expired",
           },
           expectedStatus: "expired",
@@ -1322,10 +1339,11 @@ describe("SCRUM-43 & SCRUM-44 Checkout Flow, Cart Integration & POST /orders Aut
           body: {
             statusCode: 400,
             code: "INVALID_COUPON",
+            subcode: "MIN_SUBTOTAL_NOT_MET",
             message: "Order subtotal does not meet coupon minimum",
           },
           expectedStatus: "not_eligible",
-          expectedBannerSubstring: "giá trị tối thiểu",
+          expectedBannerSubstring: "chưa đủ điều kiện áp dụng",
         },
         {
           coupon: "WELCOME20",
@@ -1788,6 +1806,785 @@ describe("SCRUM-43 & SCRUM-44 Checkout Flow, Cart Integration & POST /orders Aut
         );
       } finally {
         globalThis.fetch = savedFetch;
+      }
+    });
+
+    it("mounted JSDOM: preview pending -> cart changes (quantity update or item removal) -> stale preview response is ignored", async () => {
+      const userAId = "550e8400-e29b-41d4-a716-446655440000";
+      const tokenA = createValidMockJwt(userAId);
+      setStoredSession(tokenA, {
+        id: userAId,
+        email: "usera@brewlite.vn",
+        fullName: "Nguyễn Văn A",
+      });
+      localStorageMock.setItem(
+        "brewlite_cart_v1",
+        JSON.stringify(createSampleCartItems())
+      );
+      localStorageMock.setItem(CART_OWNER_STORAGE_KEY, userAId);
+
+      const dom = new JSDOM(
+        "<!doctype html><html><body><div id='root'></div></body></html>",
+        { url: "http://localhost:3000" }
+      );
+      const g = globalThis as Record<string, unknown>;
+      const savedWindow = g.window;
+      const savedDocument = g.document;
+      const savedSelf = g.self;
+      const savedActEnv = g.IS_REACT_ACT_ENVIRONMENT;
+
+      g.window = dom.window;
+      g.document = dom.window.document;
+      g.self = dom.window;
+      g.HTMLElement = dom.window.HTMLElement;
+      g.HTMLInputElement = dom.window.HTMLInputElement;
+      g.HTMLButtonElement = dom.window.HTMLButtonElement;
+      g.Element = dom.window.Element;
+      g.Node = dom.window.Node;
+      g.Event = dom.window.Event;
+      g.InputEvent = dom.window.InputEvent;
+      g.MouseEvent = dom.window.MouseEvent;
+      g.IS_REACT_ACT_ENVIRONMENT = true;
+      Object.defineProperty(dom.window, "localStorage", { value: localStorageMock, configurable: true });
+      Object.defineProperty(dom.window, "sessionStorage", { value: sessionStorageMock, configurable: true });
+
+      const container = dom.window.document.getElementById("root") as HTMLDivElement;
+      let root: Root | null = null;
+      const cartCtxRef: { current: CartContextValue | null } = { current: null };
+
+      function CartInspector() {
+        cartCtxRef.current = useCart();
+        return null;
+      }
+
+      const authValue: AuthContextType = {
+        user: {
+          id: userAId,
+          email: "usera@brewlite.vn",
+          fullName: "Nguyễn Văn A",
+        },
+        accessToken: tokenA,
+        isAuthenticated: true,
+        isLoading: false,
+        login: async () => {},
+        register: async () => ({
+          id: userAId,
+          email: "usera@brewlite.vn",
+          fullName: "Nguyễn Văn A",
+          createdAt: "2026-10-26T15:00:00.000Z",
+        }),
+        logout: () => {},
+        verifySession: () => true,
+        handleUnauthorizedCheckout: () => {},
+        pendingCheckout: false,
+        setPendingCheckout: () => {},
+        isAuthModalOpen: false,
+        authModalMode: "login",
+        authModalMessage: null,
+        openAuthModal: () => {},
+        closeAuthModal: () => {},
+      };
+
+      const pendingRequests: Array<{
+        resolve: (val: CouponPreviewResponseDto) => void;
+        signal?: AbortSignal;
+      }> = [];
+
+      const mockPreviewFn = (
+        _payload: unknown,
+        _token?: string | null,
+        options?: { signal?: AbortSignal }
+      ) =>
+        new Promise<CouponPreviewResponseDto>((resolve) => {
+          pendingRequests.push({ resolve, signal: options?.signal });
+        });
+
+      const setInputValue = (input: HTMLInputElement, val: string) => {
+        const prev = input.value;
+        const setter = Object.getOwnPropertyDescriptor(
+          dom.window.HTMLInputElement.prototype,
+          "value"
+        )?.set;
+        setter?.call(input, val);
+        const tracker = (
+          input as unknown as { _valueTracker?: { setValue: (v: string) => void } }
+        )._valueTracker;
+        tracker?.setValue(prev);
+        input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+        input.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+      };
+
+      try {
+        await act(async () => {
+          root = createRoot(container);
+          root.render(
+            React.createElement(
+              AuthContext.Provider,
+              { value: authValue },
+              React.createElement(
+                CartProvider,
+                null,
+                React.createElement(CartInspector),
+                React.createElement(CartDrawer, {
+                  initialCheckoutStep: "review",
+                  previewCouponFn: mockPreviewFn,
+                })
+              )
+            )
+          );
+        });
+
+        await act(async () => {
+          cartCtxRef.current?.openCart();
+        });
+
+        const couponInput = container.querySelector(
+          "#checkoutCouponInput"
+        ) as HTMLInputElement;
+        const applyBtn = container.querySelector(
+          "#btnApplyCheckoutCoupon"
+        ) as HTMLButtonElement;
+        assert.ok(couponInput, "Must mount #checkoutCouponInput in JSDOM");
+        assert.ok(applyBtn, "Must mount #btnApplyCheckoutCoupon in JSDOM");
+
+        // 1. User types WELCOME20 and clicks Apply -> request 1 is pending
+        await act(async () => {
+          setInputValue(couponInput, "WELCOME20");
+        });
+        await act(async () => {
+          applyBtn.click();
+        });
+
+        assert.equal(pendingRequests.length, 1);
+        assert.ok(
+          container
+            .querySelector("#checkoutCouponStatusBanner")
+            ?.getAttribute("data-coupon-status") === "validating",
+          "Coupon box must be in validating state while preview is pending"
+        );
+
+        // 2. While preview is pending, user changes item quantity (qty 2 -> 3)
+        await act(async () => {
+          cartCtxRef.current?.incrementQuantity("cart-line-1");
+        });
+
+        assert.equal(
+          pendingRequests[0].signal?.aborted,
+          true,
+          "Changing cart quantity must abort the pending coupon preview request"
+        );
+        assert.equal(
+          container
+            .querySelector("#checkoutCouponStatusBanner")
+            ?.getAttribute("data-coupon-status"),
+          "idle",
+          "Coupon status must reset to idle immediately when cart changes"
+        );
+
+        // 3. Stale response for the old 2-item cart arrives late -> must be ignored
+        await act(async () => {
+          pendingRequests[0].resolve({
+            valid: true,
+            couponCode: "WELCOME20",
+            subtotalVnd: 118000,
+            discountVnd: 23600,
+            totalVnd: 94400,
+          });
+        });
+
+        assert.equal(
+          cartCtxRef.current?.appliedCoupon,
+          null,
+          "Stale preview response after quantity change must NOT set appliedCoupon in CartContext"
+        );
+        assert.equal(
+          container
+            .querySelector("#checkoutCouponStatusBanner")
+            ?.getAttribute("data-coupon-status"),
+          "idle",
+          "Stale preview response after quantity change must NOT transition UI to applied"
+        );
+        const drawerTextAfterQtyChange = container.textContent ?? "";
+        assert.equal(
+          drawerTextAfterQtyChange.includes("-23.600"),
+          false,
+          "Stale discount (-23.600 ₫) must NOT be rendered after cart quantity changed"
+        );
+        assert.ok(
+          drawerTextAfterQtyChange.includes("177.000"),
+          "Updated cart subtotal/total (3 x 59.000 = 177.000 ₫) must be rendered"
+        );
+
+        // 4. Start another preview and remove item while pending -> stale response is also ignored
+        await act(async () => {
+          applyBtn.click();
+        });
+        assert.equal(pendingRequests.length, 2);
+
+        await act(async () => {
+          cartCtxRef.current?.removeFromCart("cart-line-1");
+        });
+        assert.equal(
+          pendingRequests[1].signal?.aborted,
+          true,
+          "Removing cart item must abort the pending coupon preview request"
+        );
+
+        await act(async () => {
+          pendingRequests[1].resolve({
+            valid: true,
+            couponCode: "WELCOME20",
+            subtotalVnd: 177000,
+            discountVnd: 35400,
+            totalVnd: 141600,
+          });
+        });
+
+        assert.equal(
+          cartCtxRef.current?.appliedCoupon,
+          null,
+          "Stale preview response after item removal must NOT set appliedCoupon"
+        );
+      } finally {
+        if (root) {
+          await act(async () => {
+            root?.unmount();
+          });
+        }
+        g.window = savedWindow;
+        g.document = savedDocument;
+        g.self = savedSelf;
+        g.IS_REACT_ACT_ENVIRONMENT = savedActEnv;
+      }
+    });
+
+    it("mounted JSDOM: preview pending -> logout or user switch (User A -> User B) -> stale response is ignored and User A coupon/cart is isolated from User B", async () => {
+      const userAId = "550e8400-e29b-41d4-a716-446655440000";
+      const userBId = "660e8400-e29b-41d4-a716-446655440999";
+      const tokenA = createValidMockJwt(userAId);
+      const tokenB = createValidMockJwt(userBId);
+
+      setStoredSession(tokenA, {
+        id: userAId,
+        email: "usera@brewlite.vn",
+        fullName: "Nguyễn Văn A",
+      });
+      localStorageMock.setItem(
+        "brewlite_cart_v1",
+        JSON.stringify(createSampleCartItems())
+      );
+      localStorageMock.setItem(CART_OWNER_STORAGE_KEY, userAId);
+
+      const dom = new JSDOM(
+        "<!doctype html><html><body><div id='root'></div></body></html>",
+        { url: "http://localhost:3000" }
+      );
+      const g = globalThis as Record<string, unknown>;
+      const savedWindow = g.window;
+      const savedDocument = g.document;
+      const savedSelf = g.self;
+      const savedActEnv = g.IS_REACT_ACT_ENVIRONMENT;
+
+      g.window = dom.window;
+      g.document = dom.window.document;
+      g.self = dom.window;
+      g.HTMLElement = dom.window.HTMLElement;
+      g.HTMLInputElement = dom.window.HTMLInputElement;
+      g.HTMLButtonElement = dom.window.HTMLButtonElement;
+      g.Element = dom.window.Element;
+      g.Node = dom.window.Node;
+      g.Event = dom.window.Event;
+      g.InputEvent = dom.window.InputEvent;
+      g.MouseEvent = dom.window.MouseEvent;
+      g.IS_REACT_ACT_ENVIRONMENT = true;
+      Object.defineProperty(dom.window, "localStorage", { value: localStorageMock, configurable: true });
+      Object.defineProperty(dom.window, "sessionStorage", { value: sessionStorageMock, configurable: true });
+
+      const container = dom.window.document.getElementById("root") as HTMLDivElement;
+      let root: Root | null = null;
+      const cartCtxRef: { current: CartContextValue | null } = { current: null };
+
+      function CartInspector() {
+        cartCtxRef.current = useCart();
+        return null;
+      }
+
+      const makeAuthValue = (
+        userId: string | null,
+        token: string | null
+      ): AuthContextType => ({
+        user: userId
+          ? {
+              id: userId,
+              email: `${userId}@brewlite.vn`,
+              fullName: userId === userAId ? "Nguyễn Văn A" : "Trần Thị B",
+            }
+          : null,
+        accessToken: token,
+        isAuthenticated: Boolean(userId && token),
+        isLoading: false,
+        login: async () => {},
+        register: async () => ({
+          id: userId ?? "",
+          email: "test@brewlite.vn",
+          fullName: "Test",
+          createdAt: "2026-10-26T15:00:00.000Z",
+        }),
+        logout: () => {},
+        verifySession: () => Boolean(userId && token),
+        handleUnauthorizedCheckout: () => {},
+        pendingCheckout: false,
+        setPendingCheckout: () => {},
+        isAuthModalOpen: false,
+        authModalMode: "login",
+        authModalMessage: null,
+        openAuthModal: () => {},
+        closeAuthModal: () => {},
+      });
+
+      const pendingRequests: Array<{
+        resolve: (val: CouponPreviewResponseDto) => void;
+        signal?: AbortSignal;
+      }> = [];
+
+      const mockPreviewFn = (
+        _payload: unknown,
+        _token?: string | null,
+        options?: { signal?: AbortSignal }
+      ) =>
+        new Promise<CouponPreviewResponseDto>((resolve) => {
+          pendingRequests.push({ resolve, signal: options?.signal });
+        });
+
+      const renderWithAuth = async (authVal: AuthContextType) => {
+        await act(async () => {
+          if (!root) {
+            root = createRoot(container);
+          }
+          root.render(
+            React.createElement(
+              AuthContext.Provider,
+              { value: authVal },
+              React.createElement(
+                CartProvider,
+                null,
+                React.createElement(CartInspector),
+                React.createElement(CartDrawer, {
+                  initialCheckoutStep: "review",
+                  previewCouponFn: mockPreviewFn,
+                })
+              )
+            )
+          );
+        });
+      };
+
+      const setInputValue = (input: HTMLInputElement, val: string) => {
+        const prev = input.value;
+        const setter = Object.getOwnPropertyDescriptor(
+          dom.window.HTMLInputElement.prototype,
+          "value"
+        )?.set;
+        setter?.call(input, val);
+        const tracker = (
+          input as unknown as { _valueTracker?: { setValue: (v: string) => void } }
+        )._valueTracker;
+        tracker?.setValue(prev);
+        input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+        input.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+      };
+
+      try {
+        // 1. Mount as User A with cart items and start a pending preview for WELCOME20
+        await renderWithAuth(makeAuthValue(userAId, tokenA));
+        await act(async () => {
+          cartCtxRef.current?.openCart();
+        });
+
+        const couponInput = container.querySelector(
+          "#checkoutCouponInput"
+        ) as HTMLInputElement;
+        const applyBtn = container.querySelector(
+          "#btnApplyCheckoutCoupon"
+        ) as HTMLButtonElement;
+        assert.ok(couponInput && applyBtn);
+
+        await act(async () => {
+          setInputValue(couponInput, "WELCOME20");
+        });
+        await act(async () => {
+          applyBtn.click();
+        });
+        assert.equal(pendingRequests.length, 1);
+
+        // 2. While User A's preview is pending, User A logs out (auth -> null)
+        clearStoredSession();
+        await renderWithAuth(makeAuthValue(null, null));
+
+        assert.equal(
+          pendingRequests[0].signal?.aborted,
+          true,
+          "Logging out must abort User A's pending coupon preview request"
+        );
+        assert.equal(
+          cartCtxRef.current?.couponCode,
+          "",
+          "Logging out must clear couponCode"
+        );
+        assert.equal(
+          cartCtxRef.current?.appliedCoupon,
+          null,
+          "Logging out must clear appliedCoupon"
+        );
+        assert.equal(
+          cartCtxRef.current?.items.length,
+          0,
+          "Logging out must clear User A's cart so next user/guest does not reuse User A's cart"
+        );
+
+        // 3. User A's delayed preview response resolves after logout -> must be ignored
+        await act(async () => {
+          pendingRequests[0].resolve({
+            valid: true,
+            couponCode: "WELCOME20",
+            subtotalVnd: 118000,
+            discountVnd: 23600,
+            totalVnd: 94400,
+          });
+        });
+
+        assert.equal(
+          cartCtxRef.current?.appliedCoupon,
+          null,
+          "Delayed response from User A must NEVER apply after logout"
+        );
+        assert.equal(
+          (container.textContent ?? "").includes("-23.600"),
+          false,
+          "Delayed response from User A must NEVER render discount after logout"
+        );
+
+        // 4. Now test User A (with applied coupon & cart) switching directly to User B (A -> B)
+        setStoredSession(tokenA, {
+          id: userAId,
+          email: "usera@brewlite.vn",
+          fullName: "Nguyễn Văn A",
+        });
+        await renderWithAuth(makeAuthValue(userAId, tokenA));
+
+        await act(async () => {
+          cartCtxRef.current?.addToCart(createSampleCartItems()[0]);
+          cartCtxRef.current?.openCart();
+        });
+        assert.equal(cartCtxRef.current?.items.length, 1);
+
+        const cartCouponInput = (container.querySelector("#checkoutCouponInput") ??
+          container.querySelector("#couponCodeInput")) as HTMLInputElement;
+        const cartApplyBtn = (container.querySelector("#btnApplyCheckoutCoupon") ??
+          container.querySelector("#btnApplyVoucher")) as HTMLButtonElement;
+        assert.ok(cartCouponInput && cartApplyBtn);
+
+        await act(async () => {
+          setInputValue(cartCouponInput, "WELCOME20");
+        });
+        await act(async () => {
+          cartApplyBtn.click();
+        });
+        assert.equal(pendingRequests.length, 2);
+
+        // Switch directly from User A to User B while preview #2 is pending
+        setStoredSession(tokenB, {
+          id: userBId,
+          email: "userb@brewlite.vn",
+          fullName: "Trần Thị B",
+        });
+        await renderWithAuth(makeAuthValue(userBId, tokenB));
+
+        assert.equal(
+          pendingRequests[1].signal?.aborted,
+          true,
+          "Switching from User A to User B must abort User A's pending preview"
+        );
+        assert.equal(
+          cartCtxRef.current?.items.length,
+          0,
+          "User B must NOT inherit User A's cart items"
+        );
+        assert.equal(
+          cartCtxRef.current?.couponCode,
+          "",
+          "User B must NOT inherit User A's couponCode"
+        );
+        assert.equal(
+          cartCtxRef.current?.appliedCoupon,
+          null,
+          "User B must NOT inherit User A's appliedCoupon"
+        );
+
+        // Resolve User A's pending preview after User B is active -> must be ignored
+        await act(async () => {
+          pendingRequests[1].resolve({
+            valid: true,
+            couponCode: "WELCOME20",
+            subtotalVnd: 118000,
+            discountVnd: 23600,
+            totalVnd: 94400,
+          });
+        });
+
+        assert.equal(
+          cartCtxRef.current?.appliedCoupon,
+          null,
+          "User A's stale preview response must NEVER set appliedCoupon on User B's session"
+        );
+        assert.equal(
+          (container.textContent ?? "").includes("-23.600"),
+          false,
+          "User A's stale discount must NEVER render in User B's UI"
+        );
+      } finally {
+        if (root) {
+          await act(async () => {
+            root?.unmount();
+          });
+        }
+        g.window = savedWindow;
+        g.document = savedDocument;
+        g.self = savedSelf;
+        g.IS_REACT_ACT_ENVIRONMENT = savedActEnv;
+      }
+    });
+
+    it("mounted JSDOM: coupon A request -> coupon B request -> late coupon A response never overwrites coupon B", async () => {
+      const userAId = "550e8400-e29b-41d4-a716-446655440000";
+      const tokenA = createValidMockJwt(userAId);
+      setStoredSession(tokenA, {
+        id: userAId,
+        email: "usera@brewlite.vn",
+        fullName: "Nguyễn Văn A",
+      });
+      localStorageMock.setItem(
+        "brewlite_cart_v1",
+        JSON.stringify(createSampleCartItems())
+      );
+      localStorageMock.setItem(CART_OWNER_STORAGE_KEY, userAId);
+
+      const dom = new JSDOM(
+        "<!doctype html><html><body><div id='root'></div></body></html>",
+        { url: "http://localhost:3000" }
+      );
+      const g = globalThis as Record<string, unknown>;
+      const savedWindow = g.window;
+      const savedDocument = g.document;
+      const savedSelf = g.self;
+      const savedActEnv = g.IS_REACT_ACT_ENVIRONMENT;
+
+      g.window = dom.window;
+      g.document = dom.window.document;
+      g.self = dom.window;
+      g.HTMLElement = dom.window.HTMLElement;
+      g.HTMLInputElement = dom.window.HTMLInputElement;
+      g.HTMLButtonElement = dom.window.HTMLButtonElement;
+      g.Element = dom.window.Element;
+      g.Node = dom.window.Node;
+      g.Event = dom.window.Event;
+      g.InputEvent = dom.window.InputEvent;
+      g.MouseEvent = dom.window.MouseEvent;
+      g.IS_REACT_ACT_ENVIRONMENT = true;
+      Object.defineProperty(dom.window, "localStorage", { value: localStorageMock, configurable: true });
+      Object.defineProperty(dom.window, "sessionStorage", { value: sessionStorageMock, configurable: true });
+
+      const container = dom.window.document.getElementById("root") as HTMLDivElement;
+      let root: Root | null = null;
+      const cartCtxRef: { current: CartContextValue | null } = { current: null };
+
+      function CartInspector() {
+        cartCtxRef.current = useCart();
+        return null;
+      }
+
+      const authValue: AuthContextType = {
+        user: {
+          id: userAId,
+          email: "usera@brewlite.vn",
+          fullName: "Nguyễn Văn A",
+        },
+        accessToken: tokenA,
+        isAuthenticated: true,
+        isLoading: false,
+        login: async () => {},
+        register: async () => ({
+          id: userAId,
+          email: "usera@brewlite.vn",
+          fullName: "Nguyễn Văn A",
+          createdAt: "2026-10-26T15:00:00.000Z",
+        }),
+        logout: () => {},
+        verifySession: () => true,
+        handleUnauthorizedCheckout: () => {},
+        pendingCheckout: false,
+        setPendingCheckout: () => {},
+        isAuthModalOpen: false,
+        authModalMode: "login",
+        authModalMessage: null,
+        openAuthModal: () => {},
+        closeAuthModal: () => {},
+      };
+
+      const pendingByCode = new Map<
+        string,
+        {
+          resolve: (val: CouponPreviewResponseDto) => void;
+          signal?: AbortSignal;
+        }
+      >();
+
+      const mockPreviewFn = (
+        rawPayload: unknown,
+        _token?: string | null,
+        options?: { signal?: AbortSignal }
+      ) => {
+        const code = String(
+          (rawPayload as Record<string, unknown>)?.couponCode ?? ""
+        );
+        return new Promise<CouponPreviewResponseDto>((resolve) => {
+          pendingByCode.set(code, { resolve, signal: options?.signal });
+        });
+      };
+
+      const setInputValue = (input: HTMLInputElement, val: string) => {
+        const prev = input.value;
+        const setter = Object.getOwnPropertyDescriptor(
+          dom.window.HTMLInputElement.prototype,
+          "value"
+        )?.set;
+        setter?.call(input, val);
+        const tracker = (
+          input as unknown as { _valueTracker?: { setValue: (v: string) => void } }
+        )._valueTracker;
+        tracker?.setValue(prev);
+        input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+        input.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+      };
+
+      try {
+        await act(async () => {
+          root = createRoot(container);
+          root.render(
+            React.createElement(
+              AuthContext.Provider,
+              { value: authValue },
+              React.createElement(
+                CartProvider,
+                null,
+                React.createElement(CartInspector),
+                React.createElement(CartDrawer, {
+                  initialCheckoutStep: "review",
+                  previewCouponFn: mockPreviewFn,
+                })
+              )
+            )
+          );
+        });
+
+        await act(async () => {
+          cartCtxRef.current?.openCart();
+        });
+
+        const couponInput = container.querySelector(
+          "#checkoutCouponInput"
+        ) as HTMLInputElement;
+        const applyBtn = container.querySelector(
+          "#btnApplyCheckoutCoupon"
+        ) as HTMLButtonElement;
+        assert.ok(couponInput && applyBtn);
+
+        // 1. User enters Coupon A (WELCOME20) and clicks Apply -> Request A is in-flight
+        await act(async () => {
+          setInputValue(couponInput, "WELCOME20");
+        });
+        await act(async () => {
+          applyBtn.click();
+        });
+        const reqA = pendingByCode.get("WELCOME20");
+        assert.ok(reqA, "Request A (WELCOME20) must be started");
+
+        // 2. While Request A is still pending, user switches input to Coupon B (GIAM50K) and clicks Apply
+        await act(async () => {
+          setInputValue(couponInput, "GIAM50K");
+        });
+        assert.equal(
+          reqA.signal?.aborted,
+          true,
+          "Changing coupon code from WELCOME20 to GIAM50K must abort Request A"
+        );
+
+        await act(async () => {
+          applyBtn.click();
+        });
+        const reqB = pendingByCode.get("GIAM50K");
+        assert.ok(reqB, "Request B (GIAM50K) must be started");
+
+        // 3. Request B resolves first with -50.000 ₫ (total 68.000 ₫)
+        await act(async () => {
+          reqB.resolve({
+            valid: true,
+            couponCode: "GIAM50K",
+            subtotalVnd: 118000,
+            discountVnd: 50000,
+            totalVnd: 68000,
+          });
+        });
+
+        assert.equal(cartCtxRef.current?.appliedCoupon?.couponCode, "GIAM50K");
+        assert.equal(cartCtxRef.current?.appliedCoupon?.discountVnd, 50000);
+        assert.ok((container.textContent ?? "").includes("Voucher GIAM50K"));
+        assert.ok((container.textContent ?? "").includes("-50.000"));
+        assert.ok((container.textContent ?? "").includes("68.000"));
+
+        // 4. Late Request A (WELCOME20, -23.600 ₫, total 94.400 ₫) resolves AFTER Request B -> must NOT overwrite B!
+        await act(async () => {
+          reqA.resolve({
+            valid: true,
+            couponCode: "WELCOME20",
+            subtotalVnd: 118000,
+            discountVnd: 23600,
+            totalVnd: 94400,
+          });
+        });
+
+        assert.equal(
+          cartCtxRef.current?.appliedCoupon?.couponCode,
+          "GIAM50K",
+          "Late response A (WELCOME20) must NEVER overwrite applied coupon B (GIAM50K)"
+        );
+        assert.equal(
+          cartCtxRef.current?.appliedCoupon?.discountVnd,
+          50000,
+          "Discount must remain 50.000 ₫ from coupon B"
+        );
+        const finalText = container.textContent ?? "";
+        assert.ok(
+          finalText.includes("Voucher GIAM50K") &&
+            finalText.includes("-50.000") &&
+            finalText.includes("68.000"),
+          "UI must continue displaying Voucher GIAM50K (-50.000 ₫ / 68.000 ₫)"
+        );
+        assert.equal(
+          finalText.includes("Voucher WELCOME20") || finalText.includes("-23.600"),
+          false,
+          "UI must NOT display stale Voucher WELCOME20 or -23.600 ₫"
+        );
+      } finally {
+        if (root) {
+          await act(async () => {
+            root?.unmount();
+          });
+        }
+        g.window = savedWindow;
+        g.document = savedDocument;
+        g.self = savedSelf;
+        g.IS_REACT_ACT_ENVIRONMENT = savedActEnv;
       }
     });
   });
