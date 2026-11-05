@@ -9,6 +9,8 @@ The main Compose stack runs four services: `postgres`, `migrate`, `backend`, and
 - PostgreSQL database: `brewlite_compose`
 - named volume: `brewlite_compose_brewlite_pgdata`
 - host database port: `127.0.0.1:${POSTGRES_HOST_PORT:-15432}` (default `15432`, outside the Windows Hyper-V/WinNAT reserved ephemeral range `49152-65535`)
+- host backend port: `127.0.0.1:${BACKEND_HOST_PORT:-3001}` (default `3001`)
+- host frontend port: `${FRONTEND_HOST_PORT:-3000}` (default `3000`)
 
 Do not point this stack at a development, test, shared, or production database.
 It does not reuse SCRUM-80's project, database, port `55480`, or volume.
@@ -176,11 +178,17 @@ curl --fail http://localhost:3000/images/bac-xiu-kem-beo-phin.jpg
 
 ## Isolated E2E Verification (`SCRUM-92`)
 
-To run the automated end-to-end integration and restart-persistence verification without touching your `brewlite_compose` development stack or volume (`brewlite_compose_brewlite_pgdata`), use `scripts/scrum92/verify_compose_e2e.mjs`. It enforces an isolated Compose project (`-p brewlite_scrum92_e2e`), isolated volume (`brewlite_scrum92_e2e_brewlite_pgdata`), and isolated database (`brewlite_seed_scrum92_e2e`), and cleans up all exact test IDs in `finally` by default:
+To run the automated end-to-end integration and restart-persistence verification without stopping or touching your `brewlite_compose` development stack, use `scripts/scrum92/verify_compose_e2e.mjs`. It enforces an isolated Compose project (`-p brewlite_scrum92_e2e`), isolated volume (`brewlite_scrum92_e2e_brewlite_pgdata`), isolated database (`brewlite_seed_scrum92_e2e`), and dedicated host ports (`13000` frontend, `13001` backend, `15492` postgres), and cleans up all exact test IDs in `finally` by default:
 
 ```bash
-# Stop default brewlite_compose first if running on ports 3000/3001/15432, then start isolated E2E stack & run verification:
+# Start isolated E2E stack (-p brewlite_scrum92_e2e) on ports 13000/13001/15492 and run E2E verification:
 node scripts/scrum92/verify_compose_e2e.mjs --up
+
+# Optional: keep created test records in the isolated DB for manual inspection:
+node scripts/scrum92/verify_compose_e2e.mjs --keep-artifacts
+
+# Safe recovery / cleanup of exact test records after --keep-artifacts (or before re-running):
+node scripts/scrum92/verify_compose_e2e.mjs --cleanup-artifacts
 
 # Tear down the isolated E2E stack when finished:
 node scripts/scrum92/verify_compose_e2e.mjs --down

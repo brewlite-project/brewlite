@@ -4,36 +4,41 @@
  *   node scripts/scrum92/verify_compose_e2e.mjs --up
  *   node scripts/scrum92/verify_compose_e2e.mjs
  *   node scripts/scrum92/verify_compose_e2e.mjs --keep-artifacts
+ *   node scripts/scrum92/verify_compose_e2e.mjs --cleanup-artifacts
  *   node scripts/scrum92/verify_compose_e2e.mjs --down
  *
  * Determinism & Isolation Guarantees:
- * - Requires an isolated Docker Compose project (`-p brewlite_scrum92_e2e`), isolated named volume
- *   (`brewlite_scrum92_e2e_brewlite_pgdata`), and isolated database (`brewlite_seed_scrum92_e2e`).
- * - Refuses to run against the default `brewlite_compose` project, `brewlite_compose_brewlite_pgdata`
- *   volume, `brewlite_compose` database, or `brewlite_db` local dev database.
- * - Disables background `ORDER_EXPIRATION_ENABLED` and `PAYMENT_RECONCILIATION_ENABLED` schedulers
- *   in the isolated E2E stack so pre-restart and post-restart snapshots are 100% deterministic.
- * - Uses fixed test coupon ID `c9200000-0000-4000-8000-000000000092` (`SCRUM92FREE`) without
- *   `ON CONFLICT DO UPDATE`; refuses to run if the coupon code/ID collides with existing data.
- * - Tracks exact entity UUIDs created during the run and restores stock + deletes only those exact
- *   IDs in a `finally` block by default (unless `--keep-artifacts` is explicitly passed).
+ * - Enforces an isolated Docker Compose project (`-p brewlite_scrum92_e2e`), isolated named volume
+ *   (`brewlite_scrum92_e2e_brewlite_pgdata`), isolated database (`brewlite_seed_scrum92_e2e`), and
+ *   dedicated host ports (`13000` frontend, `13001` backend, `15492` postgres) so it never collides
+ *   with or requires stopping an active `brewlite_compose` development stack.
+ * - Revalidates project/DB/volume metadata (fail-closed) before every lifecycle or cleanup action.
+ * - Ensures isolated `postgres` is started and healthy before running `finally` cleanup even if a
+ *   prior stack restart (`stop -> start`) failed mid-way, and never swallows cleanup errors.
  */
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const ENV_FILE = path.join(ROOT, 'compose.env');
-const FE_URL = 'http://localhost:3000';
-const BE_URL = 'http://localhost:3001';
-const PROXY_API = `${FE_URL}/api/backend`;
+export const ARTIFACT_STATE_FILE = path.join(os.tmpdir(), 'brewlite-scrum92-e2e-artifacts.json');
 
 export const ISOLATED_PROJECT_NAME = 'brewlite_scrum92_e2e';
 export const ISOLATED_VOLUME_NAME = 'brewlite_scrum92_e2e_brewlite_pgdata';
 export const ISOLATED_DATABASE_NAME = 'brewlite_seed_scrum92_e2e';
+
+export const ISOLATED_POSTGRES_HOST_PORT = '15492';
+export const ISOLATED_BACKEND_HOST_PORT = '13001';
+export const ISOLATED_FRONTEND_HOST_PORT = '13000';
+
+const FE_URL = `http://localhost:${ISOLATED_FRONTEND_HOST_PORT}`;
+const BE_URL = `http://localhost:${ISOLATED_BACKEND_HOST_PORT}`;
+const PROXY_API = `${FE_URL}/api/backend`;
 
 export const TEST_COUPON_ID = 'c9200000-0000-4000-8000-000000000092';
 export const TEST_COUPON_CODE = 'SCRUM92FREE';
@@ -48,6 +53,8 @@ export const COMPOSE_VARIABLES = [
   'POSTGRES_PASSWORD',
   'POSTGRES_DB',
   'POSTGRES_HOST_PORT',
+  'BACKEND_HOST_PORT',
+  'FRONTEND_HOST_PORT',
   'JWT_SECRET',
   'INTERNAL_SECRET',
   'ORDER_EXPIRATION_ENABLED',
@@ -122,10 +129,14 @@ export function buildIsolatedComposeEnv(baseEnvCfg, hostEnv = process.env) {
     ...baseEnvCfg,
     COMPOSE_PROJECT_NAME: ISOLATED_PROJECT_NAME,
     POSTGRES_DB: ISOLATED_DATABASE_NAME,
+    POSTGRES_HOST_PORT: ISOLATED_POSTGRES_HOST_PORT,
+    BACKEND_HOST_PORT: ISOLATED_BACKEND_HOST_PORT,
+    FRONTEND_HOST_PORT: ISOLATED_FRONTEND_HOST_PORT,
     DATABASE_URL: dbUrl.toString(),
     ORDER_EXPIRATION_ENABLED: 'false',
     PAYMENT_RECONCILIATION_ENABLED: 'false',
     VNPAY_ALLOW_HTTP_LOCAL_RETURN_URL: baseEnvCfg.VNPAY_ALLOW_HTTP_LOCAL_RETURN_URL || 'true',
+    VNPAY_RETURN_URL: `http://localhost:${ISOLATED_FRONTEND_HOST_PORT}/order-confirmation`,
   };
 }
 
@@ -174,17 +185,25 @@ function parseContainerEnvList(rawEnvLines) {
   return map;
 }
 
-function assertDevStackNotRunning() {
-  const res = spawnSync('docker', ['compose', '-p', 'brewlite_compose', 'ps', '-q'], {
-    cwd: ROOT,
-    encoding: 'utf8',
-    windowsHide: true,
-  });
-  const activeIds = stripTrailingWhitespace(res.stdout);
-  if (activeIds) {
+export function validateIsolatedPostgresMetadata({ pgProject, pgVolume, pgDbEnv, actualDb }) {
+  if (pgProject !== ISOLATED_PROJECT_NAME || FORBIDDEN_PROJECTS.has(pgProject)) {
     throw new Error(
-      'Safety Guard: Default dev stack "brewlite_compose" has running containers. ' +
-        'Stop "brewlite_compose" first so SCRUM-92 E2E never collides with your active dev stack or host ports.',
+      `Safety Guard (Fail-Closed): Postgres container project "${pgProject}" !== "${ISOLATED_PROJECT_NAME}". Refusing operation.`,
+    );
+  }
+  if (pgVolume !== ISOLATED_VOLUME_NAME || FORBIDDEN_VOLUMES.has(pgVolume)) {
+    throw new Error(
+      `Safety Guard (Fail-Closed): Postgres volume "${pgVolume}" !== "${ISOLATED_VOLUME_NAME}". Refusing operation.`,
+    );
+  }
+  if (pgDbEnv !== ISOLATED_DATABASE_NAME) {
+    throw new Error(
+      `Safety Guard (Fail-Closed): Postgres container POSTGRES_DB="${pgDbEnv}" !== "${ISOLATED_DATABASE_NAME}". Refusing operation.`,
+    );
+  }
+  if (actualDb !== undefined && (actualDb !== ISOLATED_DATABASE_NAME || FORBIDDEN_DATABASES.has(actualDb))) {
+    throw new Error(
+      `Safety Guard (Fail-Closed): Connected database "${actualDb}" !== "${ISOLATED_DATABASE_NAME}". Refusing operation.`,
     );
   }
 }
@@ -198,32 +217,17 @@ export function validateIsolatedTargetMetadata({
   beEnvMap,
   actualDb,
 }) {
+  validateIsolatedPostgresMetadata({ pgProject, pgVolume, pgDbEnv, actualDb });
+
   if (
-    pgProject !== ISOLATED_PROJECT_NAME ||
     beProject !== ISOLATED_PROJECT_NAME ||
     feProject !== ISOLATED_PROJECT_NAME ||
-    FORBIDDEN_PROJECTS.has(pgProject)
+    FORBIDDEN_PROJECTS.has(beProject) ||
+    FORBIDDEN_PROJECTS.has(feProject)
   ) {
     throw new Error(
-      `Safety Guard: Container project mismatch (postgres="${pgProject}", backend="${beProject}", frontend="${feProject}"). ` +
+      `Safety Guard (Fail-Closed): Container project mismatch (postgres="${pgProject}", backend="${beProject}", frontend="${feProject}"). ` +
         `Expected isolated project "${ISOLATED_PROJECT_NAME}".`,
-    );
-  }
-
-  if (pgVolume !== ISOLATED_VOLUME_NAME || FORBIDDEN_VOLUMES.has(pgVolume)) {
-    throw new Error(
-      `Safety Guard: Postgres volume "${pgVolume}" is not isolated test volume "${ISOLATED_VOLUME_NAME}". Refusing to run.`,
-    );
-  }
-
-  if (
-    pgDbEnv !== ISOLATED_DATABASE_NAME ||
-    actualDb !== ISOLATED_DATABASE_NAME ||
-    FORBIDDEN_DATABASES.has(actualDb)
-  ) {
-    throw new Error(
-      `Safety Guard: Database target mismatch (container POSTGRES_DB="${pgDbEnv}", current_database()="${actualDb}"). ` +
-        `Expected isolated test database "${ISOLATED_DATABASE_NAME}".`,
     );
   }
 
@@ -232,7 +236,7 @@ export function validateIsolatedTargetMetadata({
     beEnvMap.ORDER_EXPIRATION_ENABLED !== 'false'
   ) {
     throw new Error(
-      `Safety Guard: Background schedulers must be disabled in the isolated E2E stack to prevent snapshot races ` +
+      `Safety Guard (Fail-Closed): Background schedulers must be disabled in the isolated E2E stack to prevent snapshot races ` +
         `(got PAYMENT_RECONCILIATION_ENABLED="${beEnvMap.PAYMENT_RECONCILIATION_ENABLED}", ` +
         `ORDER_EXPIRATION_ENABLED="${beEnvMap.ORDER_EXPIRATION_ENABLED}"). ` +
         `Start the isolated stack using: node scripts/scrum92/verify_compose_e2e.mjs --up`,
@@ -240,9 +244,41 @@ export function validateIsolatedTargetMetadata({
   }
 }
 
-function assertIsolatedComposeTarget() {
-  assertDevStackNotRunning();
+function assertIsolatedPostgresTarget({ requireLiveSql = true } = {}) {
+  const pgId = runDockerCompose(['ps', '-a', '-q', 'postgres']);
+  if (!pgId) {
+    throw new Error(
+      `Safety Guard (Fail-Closed): No postgres container found in isolated project "${ISOLATED_PROJECT_NAME}".`,
+    );
+  }
 
+  const pgProject = inspectContainer(pgId, '{{ index .Config.Labels "com.docker.compose.project" }}');
+  const pgVolume = inspectContainer(
+    pgId,
+    '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql"}}{{.Name}}{{end}}{{end}}',
+  );
+  const pgEnvMap = parseContainerEnvList(inspectContainer(pgId, '{{range .Config.Env}}{{println .}}{{end}}'));
+
+  validateIsolatedPostgresMetadata({
+    pgProject,
+    pgVolume,
+    pgDbEnv: pgEnvMap.POSTGRES_DB,
+  });
+
+  if (requireLiveSql) {
+    const actualDb = runPsqlTuple('SELECT current_database();');
+    validateIsolatedPostgresMetadata({
+      pgProject,
+      pgVolume,
+      pgDbEnv: pgEnvMap.POSTGRES_DB,
+      actualDb,
+    });
+  }
+
+  return pgId;
+}
+
+function assertIsolatedComposeTarget() {
   const pgId = runDockerCompose(['ps', '-q', 'postgres']);
   const beId = runDockerCompose(['ps', '-q', 'backend']);
   const feId = runDockerCompose(['ps', '-q', 'frontend']);
@@ -278,8 +314,60 @@ function assertIsolatedComposeTarget() {
     project: pgProject,
     volume: pgVolume,
     database: actualDb,
+    ports: {
+      frontend: ISOLATED_FRONTEND_HOST_PORT,
+      backend: ISOLATED_BACKEND_HOST_PORT,
+      postgres: ISOLATED_POSTGRES_HOST_PORT,
+    },
     schedulersDisabled: true,
   };
+}
+
+function assertIsolatedDownTarget() {
+  const rawIds = runDockerCompose(['ps', '-a', '-q']);
+  if (!rawIds) return;
+  for (const id of rawIds.split(/\r?\n/).filter(Boolean)) {
+    const proj = inspectContainer(id, '{{ index .Config.Labels "com.docker.compose.project" }}');
+    if (proj !== ISOLATED_PROJECT_NAME || FORBIDDEN_PROJECTS.has(proj)) {
+      throw new Error(
+        `Safety Guard (Fail-Closed): Container ${id} belongs to project "${proj}", not "${ISOLATED_PROJECT_NAME}". Refusing down.`,
+      );
+    }
+  }
+}
+
+async function ensureIsolatedPostgresReadyForCleanup() {
+  // 1. Validate container metadata fail-closed BEFORE starting postgres
+  const pgId = assertIsolatedPostgresTarget({ requireLiveSql: false });
+  const initialState = inspectContainer(pgId, '{{.State.Status}}:{{.State.Health.Status}}');
+
+  if (initialState !== 'running:healthy') {
+    console.log(
+      `[SCRUM-92] Isolated postgres state is "${initialState}"; starting/recovering postgres before cleanup...`,
+    );
+    runDockerCompose(['start', 'postgres']);
+    const deadline = Date.now() + 45_000;
+    let ready = false;
+    while (Date.now() < deadline) {
+      const currentPgId = runDockerCompose(['ps', '-a', '-q', 'postgres']);
+      if (currentPgId) {
+        const health = inspectContainer(currentPgId, '{{.State.Status}}:{{.State.Health.Status}}');
+        if (health === 'running:healthy') {
+          ready = true;
+          break;
+        }
+      }
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    if (!ready) {
+      throw new Error(
+        `Failed to recover isolated postgres container (${ISOLATED_PROJECT_NAME}) to running:healthy within 45s for cleanup.`,
+      );
+    }
+  }
+
+  // 2. Revalidate live SQL database connection fail-closed AFTER postgres is healthy
+  assertIsolatedPostgresTarget({ requireLiveSql: true });
 }
 
 function runPsql(sql) {
@@ -296,7 +384,46 @@ function runPsqlTuple(sql) {
   );
 }
 
+function saveArtifactStateFile(createdArtifacts) {
+  const payload = {
+    project: ISOLATED_PROJECT_NAME,
+    database: ISOLATED_DATABASE_NAME,
+    volume: ISOLATED_VOLUME_NAME,
+    updatedAt: new Date().toISOString(),
+    userIds: Array.from(createdArtifacts.userIds || []),
+    orderIds: Array.from(createdArtifacts.orderIds || []),
+    paymentIds: Array.from(createdArtifacts.paymentIds || []),
+    couponId: createdArtifacts.couponId || null,
+  };
+  fs.writeFileSync(ARTIFACT_STATE_FILE, JSON.stringify(payload, null, 2), 'utf8');
+}
+
+function removeArtifactStateFile() {
+  if (fs.existsSync(ARTIFACT_STATE_FILE)) {
+    fs.unlinkSync(ARTIFACT_STATE_FILE);
+  }
+}
+
+function loadArtifactStateFile() {
+  const artifacts = {
+    userIds: new Set(),
+    orderIds: new Set(),
+    paymentIds: new Set(),
+    couponId: null,
+  };
+  if (!fs.existsSync(ARTIFACT_STATE_FILE)) {
+    return artifacts;
+  }
+  const raw = JSON.parse(fs.readFileSync(ARTIFACT_STATE_FILE, 'utf8'));
+  for (const id of raw.userIds || []) artifacts.userIds.add(assertUuid(id, 'saved userId'));
+  for (const id of raw.orderIds || []) artifacts.orderIds.add(assertUuid(id, 'saved orderId'));
+  for (const id of raw.paymentIds || []) artifacts.paymentIds.add(assertUuid(id, 'saved paymentId'));
+  if (raw.couponId) artifacts.couponId = assertUuid(raw.couponId, 'saved couponId');
+  return artifacts;
+}
+
 function seedIsolatedZeroCoupon(createdArtifacts) {
+  assertIsolatedPostgresTarget({ requireLiveSql: true });
   assertUuid(TEST_COUPON_ID, 'TEST_COUPON_ID');
   const existingRowsRaw = runPsqlTuple(
     `SELECT id || '|' || code || '|' || active_usage_count
@@ -317,13 +444,14 @@ function seedIsolatedZeroCoupon(createdArtifacts) {
       }
       if (Number(activeUsageCount) > 0) {
         throw new Error(
-          `Safety Guard: Fixture coupon "${TEST_COUPON_CODE}" (${TEST_COUPON_ID}) already exists with active_usage_count=${activeUsageCount}. Refusing to mutate.`,
+          `Safety Guard: Fixture coupon "${TEST_COUPON_CODE}" (${TEST_COUPON_ID}) already exists with active_usage_count=${activeUsageCount}. ` +
+            `Run recovery cleanup first: node scripts/scrum92/verify_compose_e2e.mjs --cleanup-artifacts`,
         );
       }
     }
     throw new Error(
       `Safety Guard: Fixture coupon "${TEST_COUPON_CODE}" (${TEST_COUPON_ID}) already exists before test start. ` +
-        `Clean up isolated test stack or run without --keep-artifacts.`,
+        `Run recovery cleanup first: node scripts/scrum92/verify_compose_e2e.mjs --cleanup-artifacts`,
     );
   }
 
@@ -347,6 +475,7 @@ INSERT INTO coupons (
 `;
   runPsqlTuple(insertSql);
   createdArtifacts.couponId = TEST_COUPON_ID;
+  saveArtifactStateFile(createdArtifacts);
 }
 
 export function buildExactIdCleanupSql(createdArtifacts) {
@@ -457,16 +586,52 @@ WHERE id IN (${userInList})
   return statements.join('\n');
 }
 
-function cleanupExactTestArtifacts(createdArtifacts) {
+async function cleanupExactTestArtifacts(createdArtifacts) {
   const hasWork =
     createdArtifacts.orderIds.size > 0 ||
     createdArtifacts.paymentIds.size > 0 ||
     createdArtifacts.userIds.size > 0 ||
     Boolean(createdArtifacts.couponId);
-  if (!hasWork) return;
+  if (!hasWork) return false;
 
+  await ensureIsolatedPostgresReadyForCleanup();
   const sql = buildExactIdCleanupSql(createdArtifacts);
   runPsqlTuple(sql);
+  removeArtifactStateFile();
+  return true;
+}
+
+async function runExplicitArtifactCleanupRecovery() {
+  await ensureIsolatedPostgresReadyForCleanup();
+  const artifacts = loadArtifactStateFile();
+
+  // Also check if the exact fixture coupon ID exists in the isolated DB (e.g. from --keep-artifacts)
+  const couponMatch = runPsqlTuple(
+    `SELECT id FROM coupons WHERE id = '${TEST_COUPON_ID}' AND code = '${TEST_COUPON_CODE}';`,
+  );
+  if (couponMatch === TEST_COUPON_ID) {
+    artifacts.couponId = TEST_COUPON_ID;
+    const redemptionRows = runPsqlTuple(
+      `SELECT order_id || '|' || user_id FROM coupon_redemptions WHERE coupon_id = '${TEST_COUPON_ID}';`,
+    );
+    for (const row of redemptionRows.split(/\r?\n/).filter(Boolean)) {
+      const [orderId, userId] = row.split('|');
+      if (orderId) artifacts.orderIds.add(assertUuid(orderId, 'redemption orderId'));
+      if (userId) artifacts.userIds.add(assertUuid(userId, 'redemption userId'));
+    }
+  }
+
+  const cleaned = await cleanupExactTestArtifacts(artifacts);
+  console.log(
+    '[SCRUM-92] Recovery cleanup completed:',
+    JSON.stringify({
+      cleaned,
+      cleanedUserCount: artifacts.userIds.size,
+      cleanedOrderCount: artifacts.orderIds.size,
+      cleanedPaymentCount: artifacts.paymentIds.size,
+      cleanedCouponId: artifacts.couponId,
+    }),
+  );
 }
 
 async function jsonFetch(url, options = {}) {
@@ -530,21 +695,22 @@ async function waitForStackReady() {
 }
 
 function ensureCatalogSeededIfEmpty() {
+  assertIsolatedPostgresTarget({ requireLiveSql: true });
   const productCount = Number(runPsqlTuple('SELECT count(*) FROM products;'));
   if (productCount === 0) {
     console.log(
       `Isolated database "${ISOLATED_DATABASE_NAME}" has 0 products; running Prisma demo seed inside migrate service...`,
     );
-    runDockerCompose(['run', '--rm', 'migrate', 'npx', 'prisma', 'db', 'seed']);
+    runDockerCompose(['run', '--rm', '--no-deps', 'migrate', 'npm', 'run', 'db:seed']);
   }
 }
 
 async function main() {
   const cliArgs = process.argv.slice(2);
-  const allowedFlags = new Set(['--up', '--down', '--keep-artifacts']);
+  const allowedFlags = new Set(['--up', '--down', '--keep-artifacts', '--cleanup-artifacts']);
   if (cliArgs.some((arg) => !allowedFlags.has(arg))) {
     console.error(
-      'Usage: node scripts/scrum92/verify_compose_e2e.mjs [--up] [--keep-artifacts] [--down]',
+      'Usage: node scripts/scrum92/verify_compose_e2e.mjs [--up] [--keep-artifacts] [--cleanup-artifacts] [--down]',
     );
     process.exit(2);
   }
@@ -552,6 +718,7 @@ async function main() {
   const shouldUp = cliArgs.includes('--up');
   const shouldDown = cliArgs.includes('--down');
   const keepArtifacts = cliArgs.includes('--keep-artifacts');
+  const shouldCleanupArtifacts = cliArgs.includes('--cleanup-artifacts');
 
   console.log('=== [0] Preflight & Isolated Test Stack Verification ===');
   checkPreflight();
@@ -559,17 +726,23 @@ async function main() {
   isolatedComposeEnv = buildIsolatedComposeEnv(envCfg, process.env);
 
   if (shouldDown) {
+    assertIsolatedDownTarget();
     console.log(`Stopping isolated test stack "${ISOLATED_PROJECT_NAME}"...`);
     runDockerCompose(['down', '--remove-orphans']);
-    console.log(`[SCRUM-92] Isolated stack "${ISOLATED_PROJECT_NAME}" stopped (volume "${ISOLATED_VOLUME_NAME}" preserved).`);
+    console.log(
+      `[SCRUM-92] Isolated stack "${ISOLATED_PROJECT_NAME}" stopped (volume "${ISOLATED_VOLUME_NAME}" preserved).`,
+    );
     return;
   }
 
-  assertDevStackNotRunning();
+  if (shouldCleanupArtifacts) {
+    await runExplicitArtifactCleanupRecovery();
+    return;
+  }
 
   if (shouldUp) {
     console.log(
-      `Starting isolated Compose stack "-p ${ISOLATED_PROJECT_NAME}" (DB="${ISOLATED_DATABASE_NAME}", volume="${ISOLATED_VOLUME_NAME}")...`,
+      `Starting isolated Compose stack "-p ${ISOLATED_PROJECT_NAME}" (DB="${ISOLATED_DATABASE_NAME}", volume="${ISOLATED_VOLUME_NAME}", ports=${ISOLATED_FRONTEND_HOST_PORT}/${ISOLATED_BACKEND_HOST_PORT}/${ISOLATED_POSTGRES_HOST_PORT})...`,
     );
     runDockerCompose(['up', '-d', '--build']);
   }
@@ -602,6 +775,8 @@ async function main() {
     paymentIds: new Set(),
     couponId: null,
   };
+
+  let primaryError = null;
 
   try {
     console.log('\n=== [2] Smoke Check: Frontend, Backend Liveness & Swagger ===');
@@ -663,6 +838,7 @@ async function main() {
       regRes.body?.id ||
       runPsqlTuple(`SELECT id FROM users WHERE email = '${email}';`);
     createdArtifacts.userIds.add(assertUuid(primaryUserId, 'primaryUserId'));
+    saveArtifactStateFile(createdArtifacts);
 
     const loginRes = await jsonFetch(`${PROXY_API}/auth/login`, {
       method: 'POST',
@@ -680,6 +856,7 @@ async function main() {
     assert.equal(meRes.body.email, email);
     assert.equal(meRes.body.loyaltyPoints, 0);
     createdArtifacts.userIds.add(assertUuid(meRes.body.id, 'meRes.body.id'));
+    saveArtifactStateFile(createdArtifacts);
     console.log(
       JSON.stringify({
         registerStatus: regRes.status,
@@ -711,6 +888,7 @@ async function main() {
     assert.equal(createOrderRes.body.status, 'PENDING');
     const orderId = assertUuid(createOrderRes.body.id, 'orderId');
     createdArtifacts.orderIds.add(orderId);
+    saveArtifactStateFile(createdArtifacts);
     console.log(
       JSON.stringify({
         status: createOrderRes.status,
@@ -763,6 +941,7 @@ async function main() {
       zeroRegRes.body?.id ||
       runPsqlTuple(`SELECT id FROM users WHERE email = '${zeroEmail}';`);
     createdArtifacts.userIds.add(assertUuid(zeroUserId, 'zeroUserId'));
+    saveArtifactStateFile(createdArtifacts);
 
     const zeroLoginRes = await jsonFetch(`${PROXY_API}/auth/login`, {
       method: 'POST',
@@ -787,6 +966,7 @@ async function main() {
     assert.equal(zeroOrderRes.body.totalVnd, 0);
     const zeroOrderId = assertUuid(zeroOrderRes.body.id, 'zeroOrderId');
     createdArtifacts.orderIds.add(zeroOrderId);
+    saveArtifactStateFile(createdArtifacts);
 
     const zeroKey = `scrum92-zero-${randomUUID()}`;
     const zeroPayRes = await jsonFetch(`${PROXY_API}/payments/zero-amount`, {
@@ -805,6 +985,7 @@ async function main() {
     assert.equal(zeroPayRes.body.amountVnd, 0);
     assert.equal(zeroPayRes.headers.get('idempotency-replayed'), 'false');
     createdArtifacts.paymentIds.add(assertUuid(zeroPayRes.body.paymentId, 'zeroPaymentId'));
+    saveArtifactStateFile(createdArtifacts);
 
     const zeroReplayRes = await jsonFetch(`${PROXY_API}/payments/zero-amount`, {
       method: 'POST',
@@ -862,6 +1043,7 @@ async function main() {
       assert.equal(vnpInitRes.body.provider, 'VNPAY');
       assert.equal(vnpInitRes.body.paymentStatus, 'PENDING');
       createdArtifacts.paymentIds.add(assertUuid(vnpInitRes.body.paymentId, 'vnpPaymentId'));
+      saveArtifactStateFile(createdArtifacts);
 
       const vnpReplayRes = await jsonFetch(`${PROXY_API}/payments/vnpay/initiate`, {
         method: 'POST',
@@ -922,6 +1104,7 @@ async function main() {
     console.log('Pre-Restart SQL Snapshot:\n' + sqlBefore);
 
     console.log('\n=== [8] Restart Isolated Stack (docker compose -p brewlite_scrum92_e2e stop -> start) ===');
+    assertIsolatedComposeTarget();
     runDockerCompose(['stop']);
     runDockerCompose(['start']);
     const postStates = await waitForStackReady();
@@ -971,11 +1154,16 @@ async function main() {
     assert.equal(sqlAfter, sqlBefore, 'PostgreSQL snapshot before and after restart must match identically');
 
     console.log('\n[SCRUM-92] ALL VERIFICATION CHECKS PASSED.');
+  } catch (err) {
+    primaryError = err;
   } finally {
     if (keepArtifacts) {
+      saveArtifactStateFile(createdArtifacts);
       console.log(
         '\n[SCRUM-92] --keep-artifacts enabled: preserving created test records in isolated database:',
         JSON.stringify({
+          stateFile: ARTIFACT_STATE_FILE,
+          recoveryCommand: 'node scripts/scrum92/verify_compose_e2e.mjs --cleanup-artifacts',
           userIds: Array.from(createdArtifacts.userIds),
           orderIds: Array.from(createdArtifacts.orderIds),
           paymentIds: Array.from(createdArtifacts.paymentIds),
@@ -984,16 +1172,35 @@ async function main() {
       );
     } else {
       console.log('\n=== [9] Scoped Exact-ID Cleanup & Stock Restoration (finally) ===');
-      cleanupExactTestArtifacts(createdArtifacts);
-      console.log(
-        'Cleaned up exact test records and restored stock:',
-        JSON.stringify({
-          cleanedUserCount: createdArtifacts.userIds.size,
-          cleanedOrderCount: createdArtifacts.orderIds.size,
-          cleanedPaymentCount: createdArtifacts.paymentIds.size,
-          cleanedCouponId: createdArtifacts.couponId,
-        }),
-      );
+      try {
+        await cleanupExactTestArtifacts(createdArtifacts);
+        console.log(
+          'Cleaned up exact test records and restored stock:',
+          JSON.stringify({
+            cleanedUserCount: createdArtifacts.userIds.size,
+            cleanedOrderCount: createdArtifacts.orderIds.size,
+            cleanedPaymentCount: createdArtifacts.paymentIds.size,
+            cleanedCouponId: createdArtifacts.couponId,
+          }),
+        );
+      } catch (cleanupErr) {
+        saveArtifactStateFile(createdArtifacts);
+        const cleanupMsg =
+          `[SCRUM-92] CRITICAL CLEANUP FAILURE in finally: ${cleanupErr.message || cleanupErr}\n` +
+          `Saved artifact IDs to ${ARTIFACT_STATE_FILE}. ` +
+          `Recover & clean up with: node scripts/scrum92/verify_compose_e2e.mjs --cleanup-artifacts`;
+        console.error(cleanupMsg);
+        if (primaryError) {
+          throw new Error(
+            `Primary failure: ${primaryError.message || primaryError}\nCleanup also failed: ${cleanupMsg}`,
+          );
+        }
+        throw new Error(cleanupMsg);
+      }
+    }
+
+    if (primaryError) {
+      throw primaryError;
     }
   }
 }

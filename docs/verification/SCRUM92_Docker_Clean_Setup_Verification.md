@@ -2,7 +2,7 @@
 
 - **Task**: `SCRUM-92` (`P2-18 – Verify Docker Clean Setup & Integration`)
 - **Branch**: `SCRUM-92-p-2-18-verify-docker-clean-setup-integration` (synced with `origin/dev` @ `ee3284d`; initial discovery run recorded at `f3a0285`)
-- **Date**: 2026-11-04 (Updated 2026-11-05)
+- **Date**: 2026-11-04 (Updated 2026-11-06)
 - **Environment**: Windows 11, Docker Engine `29.9.2`, Docker Compose `v5.6.1`, Node.js `v22+`
 - **Dependencies verified on `dev`**:
   - `P2-06` (`SCRUM-80` — Prisma migrations & guarded demo seed)
@@ -21,7 +21,7 @@
 
 Copy `compose.env.example` to `compose.env` (ignored by Git) and populate local random values for `POSTGRES_PASSWORD`, `DATABASE_URL` (`@postgres:5432/brewlite_compose`), `JWT_SECRET` ($\ge 32$ bytes), and `INTERNAL_SECRET`.
 
-Both `scripts/compose-preflight-env.sh` and `scripts/compose-preflight-env.ps1` verify all **22** Compose-interpolated environment variables (`DATABASE_URL`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `POSTGRES_HOST_PORT`, `JWT_SECRET`, `INTERNAL_SECRET`, `ORDER_EXPIRATION_ENABLED`, `ORDER_EXPIRATION_BATCH_SIZE`, `VNPAY_TMN_CODE`, `VNPAY_HASH_SECRET`, `VNPAY_PAYMENT_URL`, `VNPAY_RETURN_URL`, `VNPAY_ALLOW_HTTP_LOCAL_RETURN_URL`, `VNPAY_QUERYDR_URL`, `VNPAY_QUERYDR_TIMEOUT_MS`, `PAYMENT_RECONCILIATION_ENABLED`, `PAYMENT_RECONCILIATION_INTERVAL_MS`, `PAYMENT_RECONCILIATION_BATCH_SIZE`, `PAYMENT_RECONCILIATION_LEASE_MS`, `PAYMENT_RECONCILIATION_COOLDOWN_MS`, `PAYMENT_RECONCILIATION_IP_ADDR`, plus `COMPOSE_PROJECT_NAME`).
+Both `scripts/compose-preflight-env.sh` and `scripts/compose-preflight-env.ps1` verify all **24** Compose-interpolated environment variables (`DATABASE_URL`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `POSTGRES_HOST_PORT`, `BACKEND_HOST_PORT`, `FRONTEND_HOST_PORT`, `JWT_SECRET`, `INTERNAL_SECRET`, `ORDER_EXPIRATION_ENABLED`, `ORDER_EXPIRATION_BATCH_SIZE`, `VNPAY_TMN_CODE`, `VNPAY_HASH_SECRET`, `VNPAY_PAYMENT_URL`, `VNPAY_RETURN_URL`, `VNPAY_ALLOW_HTTP_LOCAL_RETURN_URL`, `VNPAY_QUERYDR_URL`, `VNPAY_QUERYDR_TIMEOUT_MS`, `PAYMENT_RECONCILIATION_ENABLED`, `PAYMENT_RECONCILIATION_INTERVAL_MS`, `PAYMENT_RECONCILIATION_BATCH_SIZE`, `PAYMENT_RECONCILIATION_LEASE_MS`, `PAYMENT_RECONCILIATION_COOLDOWN_MS`, `PAYMENT_RECONCILIATION_IP_ADDR`, plus `COMPOSE_PROJECT_NAME`).
 
 - **Git Bash / Linux / macOS**:
   ```bash
@@ -67,36 +67,48 @@ Compose preflight passed: no conflicting environment variables detected.
 
 ## 2. Isolated E2E Verification Architecture & Historical Runtime Evidence
 
-### 2.0. Isolation & Safety Guarantees of `scripts/scrum92/verify_compose_e2e.mjs`
+### 2.0. Isolation, Fail-Closed Revalidation & Cleanup Recovery Guarantees (`scripts/scrum92/verify_compose_e2e.mjs`)
 
-To guarantee that running automated E2E verification (which creates test records and restarts containers to verify persistence) **never** disrupts an active `brewlite_compose` dev stack or touches shared dev data:
+To guarantee that running automated E2E verification **never** disrupts an active `brewlite_compose` dev stack or touches shared dev data:
 
-1. **Mandatory Isolated Project, Volume & Database**:
+1. **Mandatory Isolated Project, Volume, Database & Host Ports**:
    - Always passes `-p brewlite_scrum92_e2e` to `docker compose`.
-   - Uses isolated named volume `brewlite_scrum92_e2e_brewlite_pgdata` and isolated database `brewlite_seed_scrum92_e2e` (accepted by `isSeedDatabaseAllowed()` in `backend/prisma/seed.ts`).
-   - `assertIsolatedComposeTarget()` inspects `com.docker.compose.project`, mounted volume name at `/var/lib/postgresql`, `POSTGRES_DB`, and `SELECT current_database()`, and **refuses to run** if `brewlite_compose` is active or if any target matches `brewlite_compose`, `brewlite_compose_brewlite_pgdata`, or `brewlite_db`.
-2. **Deterministic Persistence Snapshot (Scheduler Guard)**:
-   - Sets `ORDER_EXPIRATION_ENABLED=false` and `PAYMENT_RECONCILIATION_ENABLED=false` in the isolated stack and verifies both container env vars via `docker inspect` before running, preventing background schedulers from mutating `PENDING` orders/payments between pre-restart (`[7]`) and post-restart (`[8]`) snapshots.
-3. **Collision-Safe Coupon Fixture & Exact-ID Cleanup in `finally`**:
+   - Uses isolated named volume `brewlite_scrum92_e2e_brewlite_pgdata`, isolated database `brewlite_seed_scrum92_e2e` (accepted by `isSeedDatabaseAllowed()` in `backend/prisma/seed.ts`), and dedicated host ports (`FRONTEND_HOST_PORT=13000`, `BACKEND_HOST_PORT=13001`, `POSTGRES_HOST_PORT=15492`). Because host ports are completely separate from `brewlite_compose` (`3000`/`3001`/`15432`), you do **not** need to stop your active dev stack to run E2E verification.
+2. **Fail-Closed Revalidation Before Every Scoped / Lifecycle Action**:
+   - `assertIsolatedComposeTarget()` and `assertIsolatedPostgresTarget()` inspect `com.docker.compose.project`, mounted volume name at `/var/lib/postgresql`, `POSTGRES_DB`, and `SELECT current_database()` immediately before seeding, before `stop -> start`, after `start`, before `down`, and before `finally` cleanup.
+3. **Guaranteed Postgres Recovery Before Cleanup in `finally`**:
+   - If `stop -> start` or readiness fails mid-way in Step `[8]`, `ensureIsolatedPostgresReadyForCleanup()` in `finally` checks the isolated `postgres` container state, automatically runs `docker compose -p brewlite_scrum92_e2e start postgres`, waits for `running:healthy`, revalidates project/volume/DB metadata fail-closed, and then executes the exact-ID SQL cleanup. Cleanup errors are never swallowed.
+4. **Deterministic Persistence Snapshot (Scheduler Guard)**:
+   - Sets `ORDER_EXPIRATION_ENABLED=false` and `PAYMENT_RECONCILIATION_ENABLED=false` in the isolated stack and verifies both container env vars via `docker inspect` before running.
+5. **Collision-Safe Coupon Fixture, `--keep-artifacts` & `--cleanup-artifacts` Recovery Flow**:
    - Uses fixed coupon ID `c9200000-0000-4000-8000-000000000092` (`SCRUM92FREE`) without `ON CONFLICT DO UPDATE`. Refuses to run if `SCRUM92FREE` or `c9200000-0000-4000-8000-000000000092` already exists in the DB.
-   - Tracks exact entity UUIDs (`userIds`, `orderIds`, `paymentIds`, `couponId`) created during the run and restores reserved product stock + deletes **only** those exact IDs inside a `finally` SQL transaction by default (unless `--keep-artifacts` is explicitly passed). No `LIKE` email wildcards or broad `WHERE code = ...` deletes are used.
+   - Tracks exact entity UUIDs (`userIds`, `orderIds`, `paymentIds`, `couponId`) in a temporary state file (`os.tmpdir()/brewlite-scrum92-e2e-artifacts.json`) as records are created.
+   - By default, `finally` restores reserved product stock, deletes **only** those exact IDs, and removes the temporary state file.
+   - If you run with `--keep-artifacts` (to inspect test rows manually) and later want to re-run without hitting the coupon collision guard, run the scoped recovery cleanup command:
+     ```bash
+     node scripts/scrum92/verify_compose_e2e.mjs --cleanup-artifacts
+     ```
 
 **Commands**:
 ```bash
-# 1. Start isolated stack (-p brewlite_scrum92_e2e) and run full E2E + restart verification + finally cleanup:
+# 1. Start isolated stack (-p brewlite_scrum92_e2e on ports 13000/13001/15492) and run full E2E + restart verification + finally cleanup:
 node scripts/scrum92/verify_compose_e2e.mjs --up
 
 # 2. Re-run against already-running isolated stack:
 node scripts/scrum92/verify_compose_e2e.mjs
 
-# 3. Stop isolated stack when finished:
+# 3. Optional: preserve created test records in isolated DB, then clean them up before next run:
+node scripts/scrum92/verify_compose_e2e.mjs --keep-artifacts
+node scripts/scrum92/verify_compose_e2e.mjs --cleanup-artifacts
+
+# 4. Stop isolated stack when finished:
 node scripts/scrum92/verify_compose_e2e.mjs --down
 ```
 
 ---
 
 > [!NOTE]
-> **Historical Evidence Note**: Sections `2.1`–`2.7` below record the sanitized runtime outputs captured during the initial clean-setup verification run on `2026-11-04` (at `dev` commit `f3a0285`, before the isolated `-p brewlite_scrum92_e2e` project name override was enforced). When running `node scripts/scrum92/verify_compose_e2e.mjs --up`, container names use prefix `brewlite_scrum92_e2e-*` and `database_name` reports `brewlite_seed_scrum92_e2e`.
+> **Historical Evidence Note**: Sections `2.1`–`2.7` below record the sanitized runtime outputs captured during the initial clean-setup verification run on `2026-11-04` (at `dev` commit `f3a0285`, before the isolated `-p brewlite_scrum92_e2e` project name and dedicated ports `13000`/`13001`/`15492` were enforced). When running `node scripts/scrum92/verify_compose_e2e.mjs --up`, container names use prefix `brewlite_scrum92_e2e-*` and `database_name` reports `brewlite_seed_scrum92_e2e`.
 
 ### 2.1. Container / Service Status (Historical Evidence @ `f3a0285`)
 
@@ -175,11 +187,11 @@ Seed completed: 9 menu products, 5 toppings
 
 **Command (executed by `node scripts/scrum92/verify_compose_e2e.mjs` steps `[2]` and `[3]`)**:
 ```bash
-curl -s -o /dev/null -w "%{http_code}\n" http://localhost:3000/
-curl -s -o /dev/null -w "%{http_code}\n" http://localhost:3001/
-curl -s -o /dev/null -w "%{http_code}\n" http://localhost:3001/api-docs
-curl -s http://localhost:3000/api/backend/products
-curl -s http://localhost:3000/api/backend/products/a3000000-0000-4000-8000-000000000001
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:13000/
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:13001/
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:13001/api-docs
+curl -s http://localhost:13000/api/backend/products
+curl -s http://localhost:13000/api/backend/products/a3000000-0000-4000-8000-000000000001
 ```
 
 **Sanitized Output**:
@@ -193,9 +205,9 @@ curl -s http://localhost:3000/api/backend/products/a3000000-0000-4000-8000-00000
 ### 2.4. Auth Flow via Reverse Proxy (`POST /auth/register` → `POST /auth/login` → `GET /auth/me`)
 
 **Command (executed by `node scripts/scrum92/verify_compose_e2e.mjs` step `[4]`)**:
-- `POST http://localhost:3000/api/backend/auth/register`
-- `POST http://localhost:3000/api/backend/auth/login`
-- `GET http://localhost:3000/api/backend/auth/me` (with `Authorization: Bearer <REDACTED_JWT>`)
+- `POST http://localhost:13000/api/backend/auth/register`
+- `POST http://localhost:13000/api/backend/auth/login`
+- `GET http://localhost:13000/api/backend/auth/me` (with `Authorization: Bearer <REDACTED_JWT>`)
 
 **Sanitized Output**:
 ```json
@@ -207,7 +219,7 @@ curl -s http://localhost:3000/api/backend/products/a3000000-0000-4000-8000-00000
 ### 2.5. Create Order via Reverse Proxy (`POST /api/backend/orders`)
 
 **Command (executed by `node scripts/scrum92/verify_compose_e2e.mjs` step `[5]`)**:
-- `POST http://localhost:3000/api/backend/orders` with `{"items":[{"productId":"a3000000-0000-4000-8000-000000000001","size":"S","quantity":2,"toppingIds":["b2000000-0000-4000-8000-000000000002"]}]}`
+- `POST http://localhost:13000/api/backend/orders` with `{"items":[{"productId":"a3000000-0000-4000-8000-000000000001","size":"S","quantity":2,"toppingIds":["b2000000-0000-4000-8000-000000000002"]}]}`
 
 **Sanitized Output**:
 ```json
@@ -219,10 +231,10 @@ curl -s http://localhost:3000/api/backend/products/a3000000-0000-4000-8000-00000
 ### 2.6. Payment Flow via Reverse Proxy (`POST /payments`, `POST /payments/zero-amount` & `POST /payments/vnpay/initiate`)
 
 **Command (executed by `node scripts/scrum92/verify_compose_e2e.mjs` steps `[6]` and `[6b]`)**:
-1. `POST http://localhost:3000/api/backend/payments` (Mock) in Compose (`NODE_ENV=production`) $\rightarrow$ `403 Forbidden` (`code: "MOCK_PAYMENT_DISABLED"`, per `SCRUM-85` / `P2-11`).
-2. `POST http://localhost:3000/api/backend/payments/zero-amount` on positive order (`104000 VND`) $\rightarrow$ `409 Conflict` (`code: "ORDER_NOT_ZERO_AMOUNT"`, per `SCRUM-84` / `P2-10`).
-3. `POST http://localhost:3000/api/backend/payments/zero-amount` on a `0 VND` order $\rightarrow$ `201 Created` (`provider: "ZERO_AMOUNT"`, `paymentStatus: "SUCCESS"`, `orderStatus: "PAID"`), followed by idempotent replay with identical `Idempotency-Key` $\rightarrow$ `200 OK` (`idempotency-replayed: true`).
-4. `POST http://localhost:3000/api/backend/payments/vnpay/initiate` on the `104000 VND` `PENDING` order $\rightarrow$ `201 Created` (`provider: "VNPAY"`, `paymentStatus: "PENDING"`), followed by idempotent replay $\rightarrow$ `200 OK` (`idempotency-replayed: true`).
+1. `POST http://localhost:13000/api/backend/payments` (Mock) in Compose (`NODE_ENV=production`) $\rightarrow$ `403 Forbidden` (`code: "MOCK_PAYMENT_DISABLED"`, per `SCRUM-85` / `P2-11`).
+2. `POST http://localhost:13000/api/backend/payments/zero-amount` on positive order (`104000 VND`) $\rightarrow$ `409 Conflict` (`code: "ORDER_NOT_ZERO_AMOUNT"`, per `SCRUM-84` / `P2-10`).
+3. `POST http://localhost:13000/api/backend/payments/zero-amount` on a `0 VND` order $\rightarrow$ `201 Created` (`provider: "ZERO_AMOUNT"`, `paymentStatus: "SUCCESS"`, `orderStatus: "PAID"`), followed by idempotent replay with identical `Idempotency-Key` $\rightarrow$ `200 OK` (`idempotency-replayed: true`).
+4. `POST http://localhost:13000/api/backend/payments/vnpay/initiate` on the `104000 VND` `PENDING` order $\rightarrow$ `201 Created` (`provider: "VNPAY"`, `paymentStatus: "PENDING"`), followed by idempotent replay $\rightarrow$ `200 OK` (`idempotency-replayed: true`).
 
 **Sanitized Output**:
 ```json
@@ -232,7 +244,7 @@ curl -s http://localhost:3000/api/backend/products/a3000000-0000-4000-8000-00000
 
 ---
 
-### 2.7. Restart & Persistence Verification (`docker compose stop` → `docker compose start`)
+### 2.7. Restart & Persistence Verification (`docker compose -p brewlite_scrum92_e2e stop` → `start`)
 
 **Command (executed by `node scripts/scrum92/verify_compose_e2e.mjs` steps `[7]` and `[8]`)**:
 ```bash
@@ -282,7 +294,7 @@ Post-Restart SQL Snapshot:
 - **Nguyên nhân gốc rễ**:
   - Kiểm tra `netsh interface ipv4 show excludedportrange protocol=tcp` cho thấy Windows WinNAT/Hyper-V tự động reserve nhiều dải cổng nằm trong vùng dynamic ephemeral ports (`49152–65535`), bao gồm dải `55334–55433` (chứa cổng `55432`).
 - **Giải pháp đã áp dụng trong `SCRUM-92`**:
-  - Cập nhật `docker-compose.yml` từ `"127.0.0.1:55432:5432"` thành `"127.0.0.1:${POSTGRES_HOST_PORT:-15432}:5432"` (mặc định `15432`, nằm ngoài vùng ephemeral `49152–65535` của Windows và cho phép cấu hình qua `POSTGRES_HOST_PORT` trong `compose.env`).
+  - Cập nhật `docker-compose.yml` từ `"127.0.0.1:55432:5432"` thành `"127.0.0.1:${POSTGRES_HOST_PORT:-15432}:5432"` (mặc định `15432`, nằm ngoài vùng ephemeral `49152–65535` của Windows và cho phép cấu hình qua `POSTGRES_HOST_PORT`), đồng thời cho phép cấu hình `BACKEND_HOST_PORT` và `FRONTEND_HOST_PORT` để stack E2E cô lập (`-p brewlite_scrum92_e2e`) chạy trên bộ cổng riêng `13000`/`13001`/`15492`.
 
 ---
 
@@ -316,6 +328,6 @@ Post-Restart SQL Snapshot:
 
 - **Module / Owner**: `P2-17` (`SCRUM-91` — `README.md`, `docs/Docker_Compose.md`).
 - **Chi tiết & Giải pháp đã áp dụng**:
-  1. Bổ sung script [`scripts/compose-preflight-env.ps1`](../../scripts/compose-preflight-env.ps1) tương đương với `scripts/compose-preflight-env.sh` (kiểm tra đủ 22 biến nội suy của `docker-compose.yml`) để người dùng Windows PowerShell không gặp lỗi `WSL_E_DEFAULT_DISTRO_NOT_FOUND`.
+  1. Bổ sung script [`scripts/compose-preflight-env.ps1`](../../scripts/compose-preflight-env.ps1) tương đương với `scripts/compose-preflight-env.sh` (kiểm tra đủ 24 biến nội suy của `docker-compose.yml`) để người dùng Windows PowerShell không gặp lỗi `WSL_E_DEFAULT_DISTRO_NOT_FOUND`.
   2. Cập nhật [`README.md`](../../README.md) và [`docs/Docker_Compose.md`](../Docker_Compose.md) với hướng dẫn đầy đủ cho cả **Git Bash** và **Windows PowerShell**, kèm bước kiểm tra deterministic trạng thái container `migrate` (`exited:0`) trước khi chạy `db:seed`.
-  3. Bổ sung script kiểm thử E2E tự động [`scripts/scrum92/verify_compose_e2e.mjs`](../../scripts/scrum92/verify_compose_e2e.mjs) chạy trên project/volume/database cô lập (`-p brewlite_scrum92_e2e`, `brewlite_scrum92_e2e_brewlite_pgdata`, `brewlite_seed_scrum92_e2e`), tắt scheduler nền để tránh race condition khi test persistence, và tự động khôi phục `stock` + xóa theo exact UUIDs trong `finally`.
+  3. Bổ sung script kiểm thử E2E tự động [`scripts/scrum92/verify_compose_e2e.mjs`](../../scripts/scrum92/verify_compose_e2e.mjs) chạy trên project/volume/database/host-ports cô lập (`-p brewlite_scrum92_e2e`, `brewlite_scrum92_e2e_brewlite_pgdata`, `brewlite_seed_scrum92_e2e`, cổng `13000`/`13001`/`15492`), tự động recover `postgres` trước khi cleanup trong `finally`, và hỗ trợ `--cleanup-artifacts` để dọn dẹp an toàn sau khi dùng `--keep-artifacts`.

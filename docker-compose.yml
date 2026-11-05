@@ -61,7 +61,7 @@ services:
       PAYMENT_RECONCILIATION_COOLDOWN_MS: ${PAYMENT_RECONCILIATION_COOLDOWN_MS:-600000}
       PAYMENT_RECONCILIATION_IP_ADDR: ${PAYMENT_RECONCILIATION_IP_ADDR:-127.0.0.1}
     ports:
-      - "127.0.0.1:3001:3001"
+      - "127.0.0.1:${BACKEND_HOST_PORT:-3001}:3001"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -82,7 +82,7 @@ services:
     environment:
       BACKEND_INTERNAL_URL: http://backend:3001
     ports:
-      - "3000:3000"
+      - "${FRONTEND_HOST_PORT:-3000}:3000"
     depends_on:
       backend:
         condition: service_healthy
