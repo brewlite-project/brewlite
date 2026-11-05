@@ -324,7 +324,7 @@ describe('Orders PostgreSQL transaction integration', () => {
       ).sizePercentSnapshot,
     ).toBe(100);
   });
-  it('saves floor pricing and topping snapshots from the database', async () => {
+  it('saves half-up size pricing and topping snapshots from the database', async () => {
     await prisma.product.update({
       where: { id: productId },
       data: { basePriceVnd: 45003n },
@@ -332,7 +332,13 @@ describe('Orders PostgreSQL transaction integration', () => {
     const order = await service.create(userId, {
       items: [{ ...dto.items[0], toppingIds: [toppingId] }],
     });
-    expect(order.totalVnd).toBe(118006);
+    expect(order.totalVnd).toBe(118008);
+    expect(order.items[0]).toMatchObject({
+      unitPriceVnd: 59004,
+      lineTotalVnd: 118008,
+      basePriceVnd: 45003,
+      sizeMultiplierPercent: 120,
+    });
     expect(order.items[0].toppings).toEqual([
       { id: toppingId, name: 'Order test topping', priceVnd: 5000 },
     ]);

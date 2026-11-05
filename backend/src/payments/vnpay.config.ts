@@ -52,6 +52,10 @@ function requireHttpsUrl(value: string, name: string): URL {
     return url;
 }
 
+function allowHttpLocalReturnUrl(): boolean {
+    return process.env.VNPAY_ALLOW_HTTP_LOCAL_RETURN_URL === 'true';
+}
+
 function requireReturnUrl(value: string): string {
     let url: URL;
 
@@ -69,7 +73,11 @@ function requireReturnUrl(value: string): string {
 
     const allowedProtocol =
         url.protocol === 'https:' ||
-        (isDevelopment && isLocal && url.protocol === 'http:');
+        (
+            isLocal &&
+            url.protocol === 'http:' &&
+            (isDevelopment || allowHttpLocalReturnUrl())
+        );
 
     if (
         !allowedProtocol ||
