@@ -4,23 +4,19 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { type OpenAuthModalOptions, useAuth } from "@/context/AuthContext";
 import {
   ACTIVE_ORDER_STORAGE_KEY,
-  buildCouponPreviewPayloadFromCart,
   buildCreateOrderPayloadFromCart,
   type CartItem,
   clearStoredActiveOrder,
-  computeCartFingerprint,
   persistActiveOrderForUser,
   resolveStoredAuthenticatedUserId,
   restoreActiveOrderForUser,
   useCart,
 } from "@/context/CartContext";
 import type {
-  CouponPreviewResponseDto,
   CouponValidationStatus,
   CreateOrderRequestDto,
   CreateOrderResponseDto,
   OrderSubmissionErrorState,
-
 } from "@/mock-data";
 import { FALLBACK_DRINK_IMAGE, formatVnd } from "@/services/api.service";
 import { getDisplayCustomerName } from "@/services/auth.service";
@@ -30,7 +26,6 @@ import {
   getFriendlyOrderErrorTitle,
   previewCouponApi,
   toOrderSubmissionErrorState,
-  validateCouponPreviewResponseData,
   type OrderServiceError,
 } from "@/services/order.service";
 import {
@@ -96,255 +91,6 @@ export function proceedToCheckoutStep(deps: ProceedToCheckoutFlowDeps): boolean 
   return true;
 }
 
-export interface CouponPreviewLiveSnapshot {
-  userId: string | null;
-  accessToken: string | null;
-  isAuthenticated: boolean;
-  cartFingerprint: string;
-  normalizedCouponCode: string;
-}
-
-export interface ExecuteCouponPreviewDeps {
-  items: CartItem[];
-  couponCode: string;
-  accessToken: string | null;
-  userId?: string | null;
-  isAuthenticated: boolean;
-  applyingRef: { current: boolean };
-  requestVersionRef?: { current: number };
-  abortControllerRef?: { current: AbortController | null };
-  getLatestSnapshot?: () => CouponPreviewLiveSnapshot;
-  isSubmittingOrder: boolean;
-  verifySession: () => boolean;
-  openAuthModal: (
-    mode?: "login" | "register",
-    options?: OpenAuthModalOptions
-  ) => void;
-  setCouponStatus: (status: CouponValidationStatus) => void;
-  setAppliedCoupon: (preview: CouponPreviewResponseDto | null) => void;
-  setCouponErrorMessage: (msg: string | null) => void;
-  setCouponCode?: (code: string) => void;
-  previewCouponFn?: typeof previewCouponApi;
-}
-
-export interface ExecuteCouponPreviewResult {
-  skipped: boolean;
-  stale?: boolean;
-  status: CouponValidationStatus;
-  preview: CouponPreviewResponseDto | null;
-  errorMessage: string | null;
-  errorCode?: string | null;
-}
-
-/**
- * Điều phối gọi `POST /coupons/preview` (P2-21 & P2-22):
- * - KHÔNG tạo Order (`POST /orders`), KHÔNG xóa giỏ hàng khi lỗi.
- * - Frontend chỉ hiển thị kết quả do backend trả về, không tự quyết định coupon hợp lệ hay tự tính authoritative discount.
- * - Bảo vệ chống stale-response bằng `AbortController` + `requestVersionRef` + đối chiếu `(userId, accessToken, cartFingerprint, normalizedCouponCode)`.
- */
-export async function executeCouponPreview(
-  deps: ExecuteCouponPreviewDeps
-): Promise<ExecuteCouponPreviewResult> {
-  if (deps.isSubmittingOrder) {
-    return {
-      skipped: true,
-      status: "validating",
-      preview: null,
-      errorMessage: null,
-    };
-  }
-
-  // Hủy request preview đang pending trước đó (nếu có) trước khi xử lý yêu cầu mới
-  if (deps.abortControllerRef?.current) {
-    try {
-      deps.abortControllerRef.current.abort();
-    } catch {
-      // Bỏ qua lỗi abort
-    }
-    deps.abortControllerRef.current = null;
-  }
-  const versionRef = deps.requestVersionRef ?? { current: 0 };
-  versionRef.current += 1;
-  const requestId = versionRef.current;
-
-  if (deps.items.length === 0) {
-    deps.applyingRef.current = false;
-    const msg =
-      "Giỏ hàng đang trống. Vui lòng chọn món trước khi áp dụng mã ưu đãi.";
-    deps.setAppliedCoupon(null);
-    deps.setCouponStatus("invalid");
-    deps.setCouponErrorMessage(msg);
-    return {
-      skipped: false,
-      status: "invalid",
-      preview: null,
-      errorMessage: msg,
-      errorCode: "INVALID_CART",
-    };
-  }
-
-  const trimmedCode =
-    typeof deps.couponCode === "string" ? deps.couponCode.trim() : "";
-  if (!trimmedCode) {
-    deps.applyingRef.current = false;
-    const msg = "Vui lòng nhập mã ưu đãi trước khi bấm Áp dụng.";
-    deps.setAppliedCoupon(null);
-    deps.setCouponStatus("invalid");
-    deps.setCouponErrorMessage(msg);
-    return {
-      skipped: false,
-      status: "invalid",
-      preview: null,
-      errorMessage: msg,
-      errorCode: "VALIDATION_ERROR",
-    };
-  }
-
-  const hasSession = deps.verifySession();
-  if (!hasSession || !deps.isAuthenticated || !deps.accessToken) {
-    deps.applyingRef.current = false;
-    const msg =
-      "Vui lòng đăng nhập để kiểm tra và áp dụng mã ưu đãi. Giỏ hàng của bạn vẫn được giữ nguyên.";
-    deps.setAppliedCoupon(null);
-    deps.setCouponStatus("error");
-    deps.setCouponErrorMessage(msg);
-    deps.openAuthModal("login", {
-      resumeCheckout: false,
-      reasonMessage: msg,
-    });
-    return {
-      skipped: true,
-      status: "error",
-      preview: null,
-      errorMessage: msg,
-      errorCode: "UNAUTHORIZED",
-    };
-  }
-
-  let payload;
-  try {
-    payload = buildCouponPreviewPayloadFromCart(deps.items, trimmedCode);
-  } catch (err: unknown) {
-    deps.applyingRef.current = false;
-    const classified = classifyCouponPreviewError(err);
-    deps.setAppliedCoupon(null);
-    deps.setCouponStatus(classified.status);
-    deps.setCouponErrorMessage(classified.message);
-    return {
-      skipped: false,
-      status: classified.status,
-      preview: null,
-      errorMessage: classified.message,
-      errorCode: classified.code,
-    };
-  }
-
-  const controller = new AbortController();
-  if (deps.abortControllerRef) {
-    deps.abortControllerRef.current = controller;
-  }
-
-  const requestUserId =
-    (
-      deps.userId ??
-      resolveStoredAuthenticatedUserId(deps.accessToken) ??
-      ""
-    )
-      .trim()
-      .toLowerCase() || null;
-  const requestToken = deps.accessToken;
-  const requestCartFingerprint = computeCartFingerprint(deps.items);
-  const requestCouponCode = trimmedCode.toUpperCase();
-
-  const isRequestStillCurrent = (): boolean => {
-    if (controller.signal.aborted) return false;
-    if (versionRef.current !== requestId) return false;
-    if (deps.getLatestSnapshot) {
-      const latest = deps.getLatestSnapshot();
-      if (!latest.isAuthenticated) return false;
-      if (!requestUserId || latest.userId !== requestUserId) return false;
-      if (!requestToken || latest.accessToken !== requestToken) return false;
-      if (latest.cartFingerprint !== requestCartFingerprint) return false;
-      if (latest.normalizedCouponCode !== requestCouponCode) return false;
-    }
-    return true;
-  };
-
-  const callPreview = deps.previewCouponFn || previewCouponApi;
-  deps.applyingRef.current = true;
-  deps.setCouponStatus("validating");
-  deps.setCouponErrorMessage(null);
-
-  try {
-    const rawPreview = await callPreview(payload, deps.accessToken, {
-      signal: controller.signal,
-    });
-    if (!isRequestStillCurrent()) {
-      return {
-        skipped: true,
-        stale: true,
-        status: "idle",
-        preview: null,
-        errorMessage: null,
-      };
-    }
-    const verifiedPreview = validateCouponPreviewResponseData(rawPreview);
-    if (!isRequestStillCurrent()) {
-      return {
-        skipped: true,
-        stale: true,
-        status: "idle",
-        preview: null,
-        errorMessage: null,
-      };
-    }
-    deps.setCouponCode?.(verifiedPreview.couponCode);
-    deps.setAppliedCoupon(verifiedPreview);
-    deps.setCouponStatus("applied");
-    deps.setCouponErrorMessage(null);
-    return {
-      skipped: false,
-      status: "applied",
-      preview: verifiedPreview,
-      errorMessage: null,
-      errorCode: null,
-    };
-  } catch (err: unknown) {
-    if (!isRequestStillCurrent()) {
-      return {
-        skipped: true,
-        stale: true,
-        status: "idle",
-        preview: null,
-        errorMessage: null,
-      };
-    }
-    const classified = classifyCouponPreviewError(err);
-    deps.setAppliedCoupon(null);
-    deps.setCouponStatus(classified.status);
-    deps.setCouponErrorMessage(classified.message);
-    if (classified.statusCode === 401) {
-      deps.openAuthModal("login", {
-        resumeCheckout: false,
-        reasonMessage: classified.message,
-      });
-    }
-    return {
-      skipped: false,
-      status: classified.status,
-      preview: null,
-      errorMessage: classified.message,
-      errorCode: classified.code,
-    };
-  } finally {
-    if (versionRef.current === requestId) {
-      deps.applyingRef.current = false;
-      if (deps.abortControllerRef?.current === controller) {
-        deps.abortControllerRef.current = null;
-      }
-    }
-  }
-}
 
 export interface ExecuteZeroAmountCompletionDeps {
   order: CreateOrderResponseDto;
@@ -632,10 +378,6 @@ export interface CartDrawerProps {
   initialCheckoutStep?: CheckoutDrawerStep;
   initialIsSubmittingOrder?: boolean;
   initialOrderOutcome?: OrderCallOutcome | null;
-  initialCouponCode?: string;
-  initialAppliedCoupon?: CouponPreviewResponseDto | null;
-  initialCouponStatus?: CouponValidationStatus;
-  initialCouponErrorMessage?: string | null;
   previewCouponFn?: typeof previewCouponApi;
   submitZeroAmountFn?: typeof submitZeroAmountPaymentApi;
   onNavigateSuccess?: (url: string) => void;
@@ -645,10 +387,6 @@ export default function CartDrawer({
   initialCheckoutStep = "cart",
   initialIsSubmittingOrder = false,
   initialOrderOutcome = null,
-  initialCouponCode,
-  initialAppliedCoupon,
-  initialCouponStatus,
-  initialCouponErrorMessage,
   previewCouponFn,
   submitZeroAmountFn,
   onNavigateSuccess,
@@ -863,25 +601,6 @@ export default function CartDrawer({
     openCart,
   ]);
 
-  // Single Source of Truth cho coupon: Trực tiếp lấy từ CartContext (kèm hỗ trợ fallback initialProps khi unit test)
-  const effectiveCouponCodeInput = couponCode || initialCouponCode || "";
-  const effectiveAppliedCoupon: CouponPreviewResponseDto | null =
-    !isAuthenticated || !currentAuthUserId
-      ? null
-      : appliedCoupon !== null && appliedCoupon !== undefined
-      ? appliedCoupon
-      : initialAppliedCoupon ?? null;
-
-  const effectiveCouponStatus: CouponValidationStatus =
-    !isAuthenticated || !currentAuthUserId
-      ? "idle"
-      : couponStatus !== "idle" && couponStatus !== undefined
-      ? couponStatus
-      : initialCouponStatus ?? (initialAppliedCoupon ? "applied" : "idle");
-
-  const effectiveCouponErrorMessage: string | null =
-    couponErrorMessage ?? initialCouponErrorMessage ?? null;
-
   // Sau khi Create Order (POST /orders) thành công, UI bắt buộc dùng snapshot từ backend trả về làm source of truth
   const authoritativeOrderSnapshot: CreateOrderResponseDto | null =
     orderCallOutcome?.type === "success"
@@ -890,26 +609,26 @@ export default function CartDrawer({
 
   const displaySubtotalVnd: number = authoritativeOrderSnapshot
     ? authoritativeOrderSnapshot.subtotalVnd
-    : effectiveCouponStatus === "applied" && effectiveAppliedCoupon
-    ? effectiveAppliedCoupon.subtotalVnd
+    : couponStatus === "applied" && appliedCoupon
+    ? appliedCoupon.subtotalVnd
     : subtotalVnd;
 
   const displayDiscountVnd: number = authoritativeOrderSnapshot
     ? authoritativeOrderSnapshot.discountVnd
-    : effectiveCouponStatus === "applied" && effectiveAppliedCoupon
-    ? effectiveAppliedCoupon.discountVnd
+    : couponStatus === "applied" && appliedCoupon
+    ? appliedCoupon.discountVnd
     : 0;
 
   const displayTotalVnd: number = authoritativeOrderSnapshot
     ? authoritativeOrderSnapshot.totalVnd
-    : effectiveCouponStatus === "applied" && effectiveAppliedCoupon
-    ? effectiveAppliedCoupon.totalVnd
+    : couponStatus === "applied" && appliedCoupon
+    ? appliedCoupon.totalVnd
     : subtotalVnd;
 
   const displayCouponCode: string | null = authoritativeOrderSnapshot
     ? authoritativeOrderSnapshot.couponCode
-    : effectiveCouponStatus === "applied" && effectiveAppliedCoupon
-    ? effectiveAppliedCoupon.couponCode
+    : couponStatus === "applied" && appliedCoupon
+    ? appliedCoupon.couponCode
     : null;
 
   const handleCouponCodeChange = (nextRawCode: string) => {
@@ -921,16 +640,16 @@ export default function CartDrawer({
   const handleRemoveCoupon = () => {
     if (isSubmittingOrder) return;
     setVoucherNoticeVisible(false);
-    removeCoupon?.();
+    removeCoupon();
   };
 
   const handleApplyCoupon = async () => {
     if (isSubmittingOrder) return;
     setVoucherNoticeVisible(false);
-    await applyCoupon?.({
-      couponCodeOverride: effectiveCouponCodeInput,
-      previewCouponFn,
+    await applyCoupon({
+      couponCodeOverride: couponCode.trim(),
       accessToken,
+      previewCouponFn,
     });
   };
 
@@ -982,8 +701,8 @@ export default function CartDrawer({
       handleUnauthorizedCheckout,
       mapToCreateOrderPayload: () => {
         const couponToSend =
-          effectiveCouponStatus === "applied" && effectiveAppliedCoupon
-            ? effectiveAppliedCoupon.couponCode
+          couponStatus === "applied" && appliedCoupon
+            ? appliedCoupon.couponCode
             : undefined;
         return buildCreateOrderPayloadFromCart(items, couponToSend);
       },
@@ -1002,7 +721,7 @@ export default function CartDrawer({
       setIsSubmitting: setIsCompletingZeroAmount,
       clearCart: () => {
         clearCart();
-        removeCoupon?.();
+        removeCoupon();
       },
       setActiveOrder: setContextActiveOrder,
       setZeroAmountPaidResult,
@@ -1040,18 +759,17 @@ export default function CartDrawer({
     statusBannerId: string;
     showTitleLabel?: boolean;
   }) => {
-    const isValidating = effectiveCouponStatus === "validating";
-    const isApplied =
-      effectiveCouponStatus === "applied" && Boolean(effectiveAppliedCoupon);
+    const isValidating = couponStatus === "validating";
+    const isApplied = couponStatus === "applied" && Boolean(appliedCoupon);
     const isErrorState =
-      effectiveCouponStatus === "invalid" ||
-      effectiveCouponStatus === "expired" ||
-      effectiveCouponStatus === "not_eligible" ||
-      effectiveCouponStatus === "usage_limit_exceeded" ||
-      effectiveCouponStatus === "error";
+      couponStatus === "invalid" ||
+      couponStatus === "expired" ||
+      couponStatus === "not_eligible" ||
+      couponStatus === "usage_limit_exceeded" ||
+      couponStatus === "error";
 
     return (
-      <div className="space-y-2" data-coupon-status={effectiveCouponStatus}>
+      <div className="space-y-2" data-coupon-status={couponStatus}>
         {options.showTitleLabel && (
           <div className="flex items-center justify-between gap-2">
             <label
@@ -1060,12 +778,12 @@ export default function CartDrawer({
             >
               Mã ưu đãi / Voucher
             </label>
-            {isApplied && effectiveAppliedCoupon && (
+            {isApplied && appliedCoupon && (
               <span
                 id="appliedCouponCodeBadge"
                 className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-secondary-container text-on-secondary-container font-mono text-[11px] font-bold"
               >
-                Voucher {effectiveAppliedCoupon.couponCode}
+                Voucher {appliedCoupon.couponCode}
               </span>
             )}
           </div>
@@ -1081,7 +799,7 @@ export default function CartDrawer({
               type="text"
               maxLength={30}
               disabled={isSubmittingOrder}
-              value={effectiveCouponCodeInput}
+              value={couponCode}
               onChange={(e) => handleCouponCodeChange(e.target.value)}
               onInput={(e) =>
                 handleCouponCodeChange(
@@ -1121,7 +839,7 @@ export default function CartDrawer({
 
           {(isApplied ||
             isErrorState ||
-            effectiveCouponCodeInput.trim().length > 0) && (
+            couponCode.trim().length > 0) && (
             <button
               id={options.removeButtonId}
               type="button"
@@ -1136,7 +854,7 @@ export default function CartDrawer({
         </div>
 
         {/* Trạng thái kiểm tra / áp dụng Coupon (idle | validating | applied | invalid | expired | not_eligible | usage_limit_exceeded | error) */}
-        {effectiveCouponStatus === "idle" && (
+        {couponStatus === "idle" && (
           <div
             id={options.statusBannerId}
             data-coupon-status="idle"
@@ -1161,7 +879,7 @@ export default function CartDrawer({
           </div>
         )}
 
-        {isApplied && effectiveAppliedCoupon && (
+        {isApplied && appliedCoupon && (
           <div
             id={options.statusBannerId}
             data-coupon-status="applied"
@@ -1176,7 +894,7 @@ export default function CartDrawer({
               <span className="truncate">
                 Đã áp dụng{" "}
                 <strong className="font-mono">
-                  Voucher {effectiveAppliedCoupon.couponCode}
+                  Voucher {appliedCoupon.couponCode}
                 </strong>
                 :{" "}
                 <strong className="text-primary">
@@ -1198,7 +916,7 @@ export default function CartDrawer({
         {isErrorState && (
           <div
             id={options.statusBannerId}
-            data-coupon-status={effectiveCouponStatus}
+            data-coupon-status={couponStatus}
             role="alert"
             aria-live="assertive"
             className="p-2.5 rounded-lg bg-error/10 border border-error/30 text-error text-[11px] space-y-0.5"
@@ -1208,15 +926,15 @@ export default function CartDrawer({
                 <span className="material-symbols-outlined text-[15px]">
                   error
                 </span>
-                <span>{getCouponStatusTitle(effectiveCouponStatus)}</span>
+                <span>{getCouponStatusTitle(couponStatus)}</span>
               </span>
               <span className="font-mono text-[10px] uppercase px-1.5 py-0.5 rounded bg-error/15">
-                {effectiveCouponStatus}
+                {couponStatus}
               </span>
             </div>
-            {effectiveCouponErrorMessage && (
+            {couponErrorMessage && (
               <div className="text-on-surface leading-relaxed">
-                {effectiveCouponErrorMessage}
+                {couponErrorMessage}
               </div>
             )}
           </div>

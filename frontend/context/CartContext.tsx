@@ -407,21 +407,21 @@ export interface CartContextValue {
     ) => Promise<CreateOrderResponseDto>;
   }) => Promise<SubmitOrderFromCartResult>;
   /** Kết quả preview coupon hợp lệ mới nhất từ POST /coupons/preview (P2-22) */
-  appliedCoupon?: CouponPreviewResponseDto | null;
+  appliedCoupon: CouponPreviewResponseDto | null;
   /** Trạng thái kiểm tra coupon hiện tại trên UI (P2-22) */
-  couponStatus?: CouponValidationStatus;
+  couponStatus: CouponValidationStatus;
   /** Thông báo lỗi khi kiểm tra coupon thất bại (P2-22) */
-  couponErrorMessage?: string | null;
+  couponErrorMessage: string | null;
   /** Mã lỗi khi kiểm tra coupon thất bại (P2-22) */
-  couponErrorCode?: string | null;
+  couponErrorCode: string | null;
   /** Gọi POST /coupons/preview để kiểm tra và áp dụng mã ưu đãi (P2-22) */
-  applyCoupon?: (options?: {
+  applyCoupon: (options?: {
     couponCodeOverride?: string;
     accessToken?: string | null;
     previewCouponFn?: typeof previewCouponApi;
   }) => Promise<CouponPreviewResponseDto | null>;
   /** Bỏ mã ưu đãi đã áp dụng hoặc đang nhập (P2-22) */
-  removeCoupon?: () => void;
+  removeCoupon: () => void;
   /** Cập nhật đồng bộ trạng thái coupon (dùng khi đồng bộ với CartDrawer / Order rejection) (P2-22) */
   setCouponApplicationState?: (next: {
     appliedCoupon?: CouponPreviewResponseDto | null;
@@ -794,6 +794,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   // Cập nhật đồng bộ ngay tại nguồn render khi authenticatedUserId thay đổi (A -> B hoặc logout)
   authSessionStore.syncUser(authenticatedUserId);
 
+  const currentAuthIdentity = authenticatedUserId ?? null;
+  const currentAuthGeneration = authSessionStore.getGeneration();
+
   const [items, setItems] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState<boolean>(false);
   const [isHydrated, setIsHydrated] = useState<boolean>(false);
@@ -808,7 +811,31 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const [couponErrorCode, setCouponErrorCodeState] = useState<string | null>(
     null
   );
+  const [couponOwnerUserId, setCouponOwnerUserId] = useState<string | null>(
+    currentAuthIdentity
+  );
+  const [couponAuthGeneration, setCouponAuthGeneration] = useState<number>(
+    currentAuthGeneration
+  );
   const isApplyingCouponRef = useRef<boolean>(false);
+
+  // Identity and Generation matching check:
+  // Nếu user vừa đổi (A -> B) hoặc logout, authSessionStore.syncUser() đã tăng generation và đổi currentUserId ngay trong render phase.
+  // Nếu coupon state bên trong vẫn còn gắn với owner cũ hoặc generation cũ,
+  // CartContext phải expose NGAY LẬP TỨC state rỗng trong render phase TRƯỚC KHI BẤT KỲ EFFECT NÀO CHẠY!
+  const isCouponIdentityMatch =
+    couponOwnerUserId === currentAuthIdentity &&
+    couponAuthGeneration === currentAuthGeneration;
+
+  const exposedCouponCode = isCouponIdentityMatch ? couponCode : "";
+  const exposedCouponStatus: CouponValidationStatus = isCouponIdentityMatch
+    ? couponStatus
+    : "idle";
+  const exposedAppliedCoupon = isCouponIdentityMatch ? appliedCoupon : null;
+  const exposedCouponErrorMessage = isCouponIdentityMatch
+    ? couponErrorMessage
+    : null;
+  const exposedCouponErrorCode = isCouponIdentityMatch ? couponErrorCode : null;
 
   const latestItemsRef = useRef<CartItem[]>(items);
   const latestCouponCodeRef = useRef<string>(couponCode);
@@ -847,7 +874,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     setCouponStatusState("idle");
     setCouponErrorMessageState(null);
     setCouponErrorCodeState(null);
-  }, [cancelPendingCouponPreview]);
+    setCouponOwnerUserId(currentAuthIdentity);
+    setCouponAuthGeneration(authSessionStore.getGeneration());
+  }, [cancelPendingCouponPreview, currentAuthIdentity]);
 
   const setCouponApplicationState = useCallback(
     (next: {
@@ -856,6 +885,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       errorMessage?: string | null;
       errorCode?: string | null;
     }) => {
+      setCouponOwnerUserId(currentAuthIdentity);
+      setCouponAuthGeneration(authSessionStore.getGeneration());
       if (next.appliedCoupon !== undefined) {
         setAppliedCouponState(next.appliedCoupon);
       }
@@ -869,7 +900,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         setCouponErrorCodeState(next.errorCode);
       }
     },
-    []
+    [currentAuthIdentity]
   );
 
   const setCouponCode = useCallback(
@@ -877,6 +908,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       const normalizedPrev = latestCouponCodeRef.current.trim().toUpperCase();
       const normalizedNext = code.trim().toUpperCase();
       latestCouponCodeRef.current = code;
+      setCouponOwnerUserId(currentAuthIdentity);
+      setCouponAuthGeneration(authSessionStore.getGeneration());
       setCouponCodeState(code);
 
       if (normalizedPrev !== normalizedNext) {
@@ -898,7 +931,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         return prevApplied;
       });
     },
-    [cancelPendingCouponPreview]
+    [cancelPendingCouponPreview, currentAuthIdentity]
   );
 
   const removeCoupon = useCallback(() => {
@@ -1585,6 +1618,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
           return null;
         }
         latestCouponCodeRef.current = verifiedPreview.couponCode;
+        setCouponOwnerUserId(requestUserId);
+        setCouponAuthGeneration(requestAuthGeneration);
         setCouponCodeState(verifiedPreview.couponCode);
         setAppliedCouponState(verifiedPreview);
         setCouponStatusState("applied");
@@ -1596,6 +1631,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
           return null;
         }
         const classified = classifyCouponPreviewError(err);
+        setCouponOwnerUserId(requestUserId);
+        setCouponAuthGeneration(requestAuthGeneration);
         setAppliedCouponState(null);
         setCouponStatusState(classified.status);
         setCouponErrorMessageState(classified.message);
@@ -1624,10 +1661,10 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       const rawCoupon =
         couponCodeOverride !== undefined
           ? couponCodeOverride
-          : appliedCoupon?.couponCode ?? "";
+          : exposedAppliedCoupon?.couponCode ?? "";
       return buildCreateOrderPayloadFromCart(items, rawCoupon);
     },
-    [appliedCoupon, items]
+    [exposedAppliedCoupon, items]
   );
 
   // Gửi yêu cầu POST /orders trực tiếp từ CartContext và đồng bộ trạng thái loading / error / activeOrder theo user (SCRUM-44)
@@ -1741,7 +1778,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     subtotalVnd,
     formattedSubtotal,
     isCartOpen,
-    couponCode,
+    couponCode: exposedCouponCode,
     setCouponCode,
     feedbackMessage,
     feedbackType,
@@ -1764,10 +1801,10 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     setOrderError,
     clearOrderFlowState,
     submitOrderFromCart,
-    appliedCoupon,
-    couponStatus,
-    couponErrorMessage,
-    couponErrorCode,
+    appliedCoupon: exposedAppliedCoupon,
+    couponStatus: exposedCouponStatus,
+    couponErrorMessage: exposedCouponErrorMessage,
+    couponErrorCode: exposedCouponErrorCode,
     applyCoupon,
     removeCoupon,
     setCouponApplicationState,

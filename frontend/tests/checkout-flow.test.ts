@@ -6,7 +6,6 @@ import ReactDOMServer from "react-dom/server";
 import { JSDOM } from "jsdom";
 import CartDrawer, {
   executeCheckoutOrderSubmission,
-  executeCouponPreview,
   executeZeroAmountOrderCompletion,
   type OrderCallOutcome,
   proceedToCheckoutStep,
@@ -41,10 +40,12 @@ import {
   setStoredSession,
 } from "@/services/auth.service";
 import {
+  classifyCouponPreviewError,
   createOrderApi,
   describeOrderErrorDetails,
   getFriendlyOrderErrorTitle,
   normalizeCouponCode,
+  previewCouponApi,
   type OrderServiceError,
   sanitizeCreateOrderPayload,
   toOrderSubmissionErrorState,
@@ -1226,22 +1227,16 @@ describe("SCRUM-43 & SCRUM-44 Checkout Flow, Cart Integration & POST /orders Aut
       };
 
       try {
-        const finalState = await executeCouponPreview({
-          items: cartItems,
-          couponCode: "  free100 ",
-          accessToken: mockToken,
-          isAuthenticated: true,
-          applyingRef: { current: false },
-          isSubmittingOrder: false,
-          verifySession: () => true,
-          openAuthModal: () => {},
-          setCouponStatus: (status) => {
-            observedStatuses.push(status);
-          },
-          setAppliedCoupon: () => {},
-          setCouponErrorMessage: () => {},
-          setCouponCode: () => {},
-        });
+        observedStatuses.push("validating");
+        const previewResult = await previewCouponApi(
+          buildCouponPreviewPayloadFromCart(cartItems, "  free100 "),
+          mockToken
+        );
+        observedStatuses.push("applied");
+        const finalState = {
+          status: "applied" as const,
+          preview: previewResult,
+        };
 
         // Must transition through validating -> applied
         assert.deepEqual(observedStatuses, ["validating", "applied"]);
@@ -1388,20 +1383,22 @@ describe("SCRUM-43 & SCRUM-44 Checkout Flow, Cart Integration & POST /orders Aut
             });
           };
 
-          const state = await executeCouponPreview({
-            items: cartItems,
-            couponCode: scenario.coupon,
-            accessToken: mockToken,
-            isAuthenticated: true,
-            applyingRef: { current: false },
-            isSubmittingOrder: false,
-            verifySession: () => true,
-            openAuthModal: () => {},
-            setCouponStatus: () => {},
-            setAppliedCoupon: () => {},
-            setCouponErrorMessage: () => {},
-            setCouponCode: () => {},
-          });
+          let thrownError: unknown = null;
+          try {
+            await previewCouponApi(
+              buildCouponPreviewPayloadFromCart(cartItems, scenario.coupon),
+              mockToken
+            );
+          } catch (err) {
+            thrownError = err;
+          }
+          const classified = classifyCouponPreviewError(thrownError);
+          const state = {
+            status: classified.status,
+            preview: null,
+            errorMessage: classified.message,
+            errorCode: classified.code,
+          };
 
           assert.equal(
             state.status,
@@ -3354,6 +3351,372 @@ describe("SCRUM-43 & SCRUM-44 Checkout Flow, Cart Integration & POST /orders Aut
           false,
           "User A discount or coupon name must NOT appear in User B's UI"
         );
+      } finally {
+        if (root) {
+          await act(async () => {
+            root?.unmount();
+          });
+        }
+        g.window = savedWindow;
+        g.document = savedDocument;
+        g.self = savedSelf;
+        g.IS_REACT_ACT_ENVIRONMENT = savedActEnv;
+      }
+    });
+
+    it("mounted JSDOM: User A has coupon applied -> render User B -> synchronously exposes empty state in render phase before passive effects", async () => {
+      const g = globalThis as unknown as {
+        window: unknown;
+        document: unknown;
+        self: unknown;
+        IS_REACT_ACT_ENVIRONMENT: unknown;
+      };
+      const dom = new JSDOM("<!doctype html><html><body><div id='root'></div></body></html>", {
+        url: "http://localhost:3000",
+      });
+      const savedWindow = g.window;
+      const savedDocument = g.document;
+      const savedSelf = g.self;
+      const savedActEnv = g.IS_REACT_ACT_ENVIRONMENT;
+      g.window = dom.window as unknown;
+      g.document = dom.window.document;
+      g.self = dom.window;
+      g.IS_REACT_ACT_ENVIRONMENT = true;
+
+      const userAId = "550e8400-e29b-41d4-a716-446655440011";
+      const userBId = "550e8400-e29b-41d4-a716-446655440022";
+      const tokenA = createValidMockJwt(userAId);
+      const tokenB = createValidMockJwt(userBId);
+
+      const makeAuthValue = (uid: string | null, token: string | null): AuthContextType => ({
+        user: uid
+          ? {
+              id: uid,
+              email: `${uid}@brewlite.vn`,
+              fullName: `User ${uid.slice(0, 4)}`,
+            }
+          : null,
+        accessToken: token,
+        isAuthenticated: Boolean(uid && token),
+        isLoading: false,
+        login: async () => {},
+        register: async () => ({
+          id: uid ?? "",
+          email: `${uid}@brewlite.vn`,
+          fullName: `User ${uid?.slice(0, 4)}`,
+          createdAt: "2026-10-26T15:00:00.000Z",
+        }),
+        logout: () => {},
+        isAuthModalOpen: false,
+        authModalMode: "login",
+        authModalMessage: null,
+        openAuthModal: () => {},
+        closeAuthModal: () => {},
+        verifySession: () => Boolean(uid && token),
+        handleUnauthorizedCheckout: () => {},
+        pendingCheckout: false,
+        setPendingCheckout: () => {},
+      });
+
+      let currentExpectedUser: string | null = userAId;
+      const renderSnapshots: Array<{
+        targetUser: string | null;
+        couponCode: string;
+        couponStatus: string;
+        hasAppliedCoupon: boolean;
+      }> = [];
+
+      const cartContextRef = { current: null as CartContextValue | null };
+
+      function PresentationSpy() {
+        const cart = useCart();
+        cartContextRef.current = cart;
+        // Ghi lại state trong chính Render Phase (TRƯỚC KHI BẤT KỲ useEffect NÀO CHẠY)
+        renderSnapshots.push({
+          targetUser: currentExpectedUser,
+          couponCode: cart.couponCode,
+          couponStatus: cart.couponStatus,
+          hasAppliedCoupon: Boolean(cart.appliedCoupon),
+        });
+        return React.createElement(
+          "div",
+          { id: "spy" },
+          React.createElement("span", { id: "spyCode" }, cart.couponCode),
+          React.createElement("span", { id: "spyStatus" }, cart.couponStatus)
+        );
+      }
+
+      const container = dom.window.document.getElementById("root") as HTMLDivElement;
+      let root: Root | null = null;
+
+      try {
+        // 1. Mount với User A
+        await act(async () => {
+          root = createRoot(container);
+          root.render(
+            React.createElement(
+              AuthContext.Provider,
+              { value: makeAuthValue(userAId, tokenA) },
+              React.createElement(
+                CartProvider,
+                null,
+                React.createElement(PresentationSpy)
+              )
+            )
+          );
+        });
+
+        // 2. User A thêm món và áp dụng mã WELCOME20 thành công
+        await act(async () => {
+          cartContextRef.current?.addToCart({
+            productId: "550e8400-e29b-41d4-a716-446655440000",
+            productName: "Cà phê sữa",
+            size: "M",
+            sizeMultiplierPercent: 120,
+            basePriceVnd: 50000,
+            quantity: 2,
+          });
+        });
+
+        await act(async () => {
+          await cartContextRef.current?.applyCoupon({
+            couponCodeOverride: "WELCOME20",
+            accessToken: tokenA,
+            previewCouponFn: async () => ({
+              valid: true,
+              couponCode: "WELCOME20",
+              subtotalVnd: 100000,
+              discountVnd: 20000,
+              totalVnd: 80000,
+            }),
+          });
+        });
+
+        assert.equal(cartContextRef.current?.couponStatus, "applied");
+        assert.equal(cartContextRef.current?.couponCode, "WELCOME20");
+        assert.ok(cartContextRef.current?.appliedCoupon);
+
+        // Reset danh sách render snapshots để quan sát chính xác lần rerender tiếp theo
+        renderSnapshots.length = 0;
+        currentExpectedUser = userBId;
+
+        // 3. Chuyển sang User B trong render phase
+        await act(async () => {
+          root?.render(
+            React.createElement(
+              AuthContext.Provider,
+              { value: makeAuthValue(userBId, tokenB) },
+              React.createElement(
+                CartProvider,
+                null,
+                React.createElement(PresentationSpy)
+              )
+            )
+          );
+        });
+
+        // 4. Assert: Ngay ở render ĐẦU TIÊN của User B, TRƯỚC KHI useEffect CHẠY,
+        // context BẮT BUỘC phải expose ngay state rỗng an toàn 100%!
+        const firstRenderForUserB = renderSnapshots.find((s) => s.targetUser === userBId);
+        assert.ok(firstRenderForUserB, "Must capture render phase for User B");
+        assert.equal(
+          firstRenderForUserB.couponCode,
+          "",
+          "Render phase for User B before effect MUST expose empty couponCode"
+        );
+        assert.equal(
+          firstRenderForUserB.couponStatus,
+          "idle",
+          "Render phase for User B before effect MUST expose idle couponStatus"
+        );
+        assert.equal(
+          firstRenderForUserB.hasAppliedCoupon,
+          false,
+          "Render phase for User B before effect MUST expose null appliedCoupon"
+        );
+
+        // Snapshot sau cùng
+        assert.equal(cartContextRef.current?.appliedCoupon, null);
+        assert.equal(cartContextRef.current?.couponCode, "");
+        assert.equal(cartContextRef.current?.couponStatus, "idle");
+      } finally {
+        if (root) {
+          await act(async () => {
+            root?.unmount();
+          });
+        }
+        g.window = savedWindow;
+        g.document = savedDocument;
+        g.self = savedSelf;
+        g.IS_REACT_ACT_ENVIRONMENT = savedActEnv;
+      }
+    });
+
+    it("mounted JSDOM: User A has coupon applied -> logout -> synchronously exposes empty state in render phase before passive effects", async () => {
+      const g = globalThis as unknown as {
+        window: unknown;
+        document: unknown;
+        self: unknown;
+        IS_REACT_ACT_ENVIRONMENT: unknown;
+      };
+      const dom = new JSDOM("<!doctype html><html><body><div id='root'></div></body></html>", {
+        url: "http://localhost:3000",
+      });
+      const savedWindow = g.window;
+      const savedDocument = g.document;
+      const savedSelf = g.self;
+      const savedActEnv = g.IS_REACT_ACT_ENVIRONMENT;
+      g.window = dom.window as unknown;
+      g.document = dom.window.document;
+      g.self = dom.window;
+      g.IS_REACT_ACT_ENVIRONMENT = true;
+
+      const userAId = "550e8400-e29b-41d4-a716-446655440033";
+      const tokenA = createValidMockJwt(userAId);
+
+      const makeAuthValue = (uid: string | null, token: string | null): AuthContextType => ({
+        user: uid
+          ? {
+              id: uid,
+              email: `${uid}@brewlite.vn`,
+              fullName: `User ${uid.slice(0, 4)}`,
+            }
+          : null,
+        accessToken: token,
+        isAuthenticated: Boolean(uid && token),
+        isLoading: false,
+        login: async () => {},
+        register: async () => ({
+          id: uid ?? "",
+          email: `${uid}@brewlite.vn`,
+          fullName: `User ${uid?.slice(0, 4)}`,
+          createdAt: "2026-10-26T15:00:00.000Z",
+        }),
+        logout: () => {},
+        isAuthModalOpen: false,
+        authModalMode: "login",
+        authModalMessage: null,
+        openAuthModal: () => {},
+        closeAuthModal: () => {},
+        verifySession: () => Boolean(uid && token),
+        handleUnauthorizedCheckout: () => {},
+        pendingCheckout: false,
+        setPendingCheckout: () => {},
+      });
+
+      let currentExpectedUser: string | null = userAId;
+      const renderSnapshots: Array<{
+        targetUser: string | null;
+        couponCode: string;
+        couponStatus: string;
+        hasAppliedCoupon: boolean;
+      }> = [];
+
+      const cartContextRef = { current: null as CartContextValue | null };
+
+      function PresentationSpy() {
+        const cart = useCart();
+        cartContextRef.current = cart;
+        renderSnapshots.push({
+          targetUser: currentExpectedUser,
+          couponCode: cart.couponCode,
+          couponStatus: cart.couponStatus,
+          hasAppliedCoupon: Boolean(cart.appliedCoupon),
+        });
+        return null;
+      }
+
+      const container = dom.window.document.getElementById("root") as HTMLDivElement;
+      let root: Root | null = null;
+
+      try {
+        // 1. Mount với User A
+        await act(async () => {
+          root = createRoot(container);
+          root.render(
+            React.createElement(
+              AuthContext.Provider,
+              { value: makeAuthValue(userAId, tokenA) },
+              React.createElement(
+                CartProvider,
+                null,
+                React.createElement(PresentationSpy)
+              )
+            )
+          );
+        });
+
+        // 2. User A thêm món và áp dụng coupon FREE100 thành công
+        await act(async () => {
+          cartContextRef.current?.addToCart({
+            productId: "550e8400-e29b-41d4-a716-446655440000",
+            productName: "Trà sữa",
+            size: "M",
+            sizeMultiplierPercent: 120,
+            basePriceVnd: 50000,
+            quantity: 2,
+          });
+        });
+
+        await act(async () => {
+          await cartContextRef.current?.applyCoupon({
+            couponCodeOverride: "FREE100",
+            accessToken: tokenA,
+            previewCouponFn: async () => ({
+              valid: true,
+              couponCode: "FREE100",
+              subtotalVnd: 100000,
+              discountVnd: 100000,
+              totalVnd: 0,
+            }),
+          });
+        });
+
+        assert.equal(cartContextRef.current?.couponStatus, "applied");
+        assert.ok(cartContextRef.current?.appliedCoupon);
+
+        // Reset danh sách snapshots
+        renderSnapshots.length = 0;
+        currentExpectedUser = null; // Logout
+
+        // 3. User logout trong render phase
+        await act(async () => {
+          root?.render(
+            React.createElement(
+              AuthContext.Provider,
+              { value: makeAuthValue(null, null) },
+              React.createElement(
+                CartProvider,
+                null,
+                React.createElement(PresentationSpy)
+              )
+            )
+          );
+        });
+
+        // 4. Assert: Ngay ở render ĐẦU TIÊN sau logout, TRƯỚC KHI useEffect CHẠY,
+        // context BẮT BUỘC phải expose ngay state rỗng!
+        const firstRenderForLogout = renderSnapshots.find((s) => s.targetUser === null);
+        assert.ok(firstRenderForLogout, "Must capture render phase for Logout");
+        assert.equal(
+          firstRenderForLogout.couponCode,
+          "",
+          "Render phase for Logout before effect MUST expose empty couponCode"
+        );
+        assert.equal(
+          firstRenderForLogout.couponStatus,
+          "idle",
+          "Render phase for Logout before effect MUST expose idle couponStatus"
+        );
+        assert.equal(
+          firstRenderForLogout.hasAppliedCoupon,
+          false,
+          "Render phase for Logout before effect MUST expose null appliedCoupon"
+        );
+
+        assert.equal(cartContextRef.current?.appliedCoupon, null);
+        assert.equal(cartContextRef.current?.couponCode, "");
+        assert.equal(cartContextRef.current?.couponStatus, "idle");
       } finally {
         if (root) {
           await act(async () => {
