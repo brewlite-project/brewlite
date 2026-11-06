@@ -43,6 +43,7 @@ services:
       target: runtime
     restart: unless-stopped
     environment:
+      NODE_ENV: ${NODE_ENV:-production}
       DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL with host postgres in compose.env}
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in compose.env}
       INTERNAL_SECRET: ${INTERNAL_SECRET:?Set INTERNAL_SECRET in compose.env}

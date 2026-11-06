@@ -6,6 +6,7 @@
 set -u
 
 readonly compose_variables=(
+  NODE_ENV
   DATABASE_URL
   POSTGRES_USER
   POSTGRES_PASSWORD

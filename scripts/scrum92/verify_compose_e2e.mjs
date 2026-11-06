@@ -36,8 +36,8 @@ export const ISOLATED_POSTGRES_HOST_PORT = '15492';
 export const ISOLATED_BACKEND_HOST_PORT = '13001';
 export const ISOLATED_FRONTEND_HOST_PORT = '13000';
 
-const FE_URL = `http://localhost:${ISOLATED_FRONTEND_HOST_PORT}`;
-const BE_URL = `http://localhost:${ISOLATED_BACKEND_HOST_PORT}`;
+const FE_URL = `http://127.0.0.1:${ISOLATED_FRONTEND_HOST_PORT}`;
+const BE_URL = `http://127.0.0.1:${ISOLATED_BACKEND_HOST_PORT}`;
 const PROXY_API = `${FE_URL}/api/backend`;
 
 export const TEST_COUPON_ID = 'c9200000-0000-4000-8000-000000000092';
@@ -48,6 +48,7 @@ const FORBIDDEN_VOLUMES = new Set(['brewlite_compose_brewlite_pgdata', 'brewlite
 const FORBIDDEN_DATABASES = new Set(['brewlite_compose', 'brewlite_db', 'postgres']);
 
 export const COMPOSE_VARIABLES = [
+  'NODE_ENV',
   'DATABASE_URL',
   'POSTGRES_USER',
   'POSTGRES_PASSWORD',
@@ -128,6 +129,7 @@ export function buildIsolatedComposeEnv(baseEnvCfg, hostEnv = process.env) {
     ...hostEnv,
     ...baseEnvCfg,
     COMPOSE_PROJECT_NAME: ISOLATED_PROJECT_NAME,
+    NODE_ENV: 'test',
     POSTGRES_DB: ISOLATED_DATABASE_NAME,
     POSTGRES_HOST_PORT: ISOLATED_POSTGRES_HOST_PORT,
     BACKEND_HOST_PORT: ISOLATED_BACKEND_HOST_PORT,
@@ -135,7 +137,12 @@ export function buildIsolatedComposeEnv(baseEnvCfg, hostEnv = process.env) {
     DATABASE_URL: dbUrl.toString(),
     ORDER_EXPIRATION_ENABLED: 'false',
     PAYMENT_RECONCILIATION_ENABLED: 'false',
-    VNPAY_ALLOW_HTTP_LOCAL_RETURN_URL: baseEnvCfg.VNPAY_ALLOW_HTTP_LOCAL_RETURN_URL || 'true',
+    VNPAY_TMN_CODE: 'SCRUM92_TEST_TMN',
+    VNPAY_HASH_SECRET: 'scrum92-isolated-e2e-synthetic-hmac-secret-0000',
+    VNPAY_PAYMENT_URL: 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html',
+    VNPAY_QUERYDR_URL: 'https://sandbox.vnpayment.vn/merchant_webapi/api/transaction',
+    VNPAY_QUERYDR_TIMEOUT_MS: '10000',
+    VNPAY_ALLOW_HTTP_LOCAL_RETURN_URL: 'true',
     VNPAY_RETURN_URL: `http://localhost:${ISOLATED_FRONTEND_HOST_PORT}/order-confirmation`,
   };
 }
@@ -232,12 +239,13 @@ export function validateIsolatedTargetMetadata({
   }
 
   if (
+    beEnvMap.NODE_ENV !== 'test' ||
     beEnvMap.PAYMENT_RECONCILIATION_ENABLED !== 'false' ||
     beEnvMap.ORDER_EXPIRATION_ENABLED !== 'false'
   ) {
     throw new Error(
-      `Safety Guard (Fail-Closed): Background schedulers must be disabled in the isolated E2E stack to prevent snapshot races ` +
-        `(got PAYMENT_RECONCILIATION_ENABLED="${beEnvMap.PAYMENT_RECONCILIATION_ENABLED}", ` +
+      `Safety Guard (Fail-Closed): Isolated E2E backend must run with NODE_ENV="test" and background schedulers disabled to prevent snapshot races ` +
+        `(got NODE_ENV="${beEnvMap.NODE_ENV}", PAYMENT_RECONCILIATION_ENABLED="${beEnvMap.PAYMENT_RECONCILIATION_ENABLED}", ` +
         `ORDER_EXPIRATION_ENABLED="${beEnvMap.ORDER_EXPIRATION_ENABLED}"). ` +
         `Start the isolated stack using: node scripts/scrum92/verify_compose_e2e.mjs --up`,
     );
@@ -314,6 +322,7 @@ function assertIsolatedComposeTarget() {
     project: pgProject,
     volume: pgVolume,
     database: actualDb,
+    nodeEnv: beEnvMap.NODE_ENV,
     ports: {
       frontend: ISOLATED_FRONTEND_HOST_PORT,
       backend: ISOLATED_BACKEND_HOST_PORT,
@@ -634,8 +643,23 @@ async function runExplicitArtifactCleanupRecovery() {
   );
 }
 
+async function fetchWithRetry(url, options = {}, retries = 4, delayMs = 400) {
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fetch(url, options);
+    } catch (err) {
+      lastErr = err;
+      if (attempt < retries) {
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
+    }
+  }
+  throw lastErr;
+}
+
 async function jsonFetch(url, options = {}) {
-  const res = await fetch(url, options);
+  const res = await fetchWithRetry(url, options);
   const text = await res.text();
   let body = null;
   try {
@@ -780,10 +804,10 @@ async function main() {
 
   try {
     console.log('\n=== [2] Smoke Check: Frontend, Backend Liveness & Swagger ===');
-    const feHome = await fetch(`${FE_URL}/`);
-    const beHome = await fetch(`${BE_URL}/`);
-    const swaggerRes = await fetch(`${BE_URL}/api-docs`);
-    const imgRes = await fetch(`${FE_URL}/images/bac-xiu-kem-beo-phin.jpg`);
+    const feHome = await fetchWithRetry(`${FE_URL}/`);
+    const beHome = await fetchWithRetry(`${BE_URL}/`);
+    const swaggerRes = await fetchWithRetry(`${BE_URL}/api-docs`);
+    const imgRes = await fetchWithRetry(`${FE_URL}/images/bac-xiu-kem-beo-phin.jpg`);
     assert.equal(feHome.status, 200);
     assert.equal(beHome.status, 200);
     assert.equal(swaggerRes.status, 200);
@@ -1027,7 +1051,11 @@ async function main() {
       }),
     );
 
-    if (envCfg.VNPAY_TMN_CODE && envCfg.VNPAY_HASH_SECRET && envCfg.VNPAY_RETURN_URL) {
+    if (
+      isolatedComposeEnv.VNPAY_TMN_CODE &&
+      isolatedComposeEnv.VNPAY_HASH_SECRET &&
+      isolatedComposeEnv.VNPAY_RETURN_URL
+    ) {
       console.log('\n=== [6b] VNPay Sandbox Initiation & Replay (/api/backend/payments/vnpay/initiate) ===');
       const vnpKey = `scrum92-vnp-${randomUUID()}`;
       const vnpInitRes = await jsonFetch(`${PROXY_API}/payments/vnpay/initiate`, {

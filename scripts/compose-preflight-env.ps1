@@ -5,6 +5,7 @@
 $ErrorActionPreference = 'Stop'
 
 $composeVariables = @(
+  'NODE_ENV',
   'DATABASE_URL',
   'POSTGRES_USER',
   'POSTGRES_PASSWORD',
