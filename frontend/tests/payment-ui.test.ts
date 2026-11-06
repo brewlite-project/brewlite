@@ -289,6 +289,12 @@ function renderPaymentMarkup(
     toggleCart: () => {},
     dismissFeedback: () => {},
     mapToCreateOrderPayload: () => ({ items: [] }),
+    appliedCoupon: null,
+    couponStatus: "idle",
+    couponErrorMessage: null,
+    couponErrorCode: null,
+    applyCoupon: async () => null,
+    removeCoupon: () => {},
     activeOrder: order,
   };
 

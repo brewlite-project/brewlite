@@ -378,18 +378,63 @@ function getStitchStatusBadgeConfig(status: OrderStatus): {
   }
 }
 
+export function formatPaymentMethodDisplay(
+  payment: OrderHistoryItemDto["payment"] | null | undefined
+): string {
+  if (!payment) return "Chưa chọn";
+  if (payment.provider === "VNPAY" || payment.method === "VNPAY") {
+    return "VNPay";
+  }
+  if (payment.provider === "ZERO_AMOUNT" || payment.method === "ZERO_AMOUNT") {
+    return "Quyết toán 0đ (ZERO_AMOUNT)";
+  }
+  if (payment.method === "CARD") {
+    return `CARD${payment.methodLast4 ? ` •••• ${payment.methodLast4}` : ""}`;
+  }
+  if (payment.method === "WALLET") {
+    return `WALLET${payment.methodLast4 ? ` •••• ${payment.methodLast4}` : ""}`;
+  }
+  return payment.provider || "CARD / WALLET";
+}
+
 /**
- * Kiểm tra xem đơn hàng có thể thanh toán tiếp hay không (SCRUM-65):
+ * Kiểm tra xem đơn hàng có thể thanh toán tiếp hay không (SCRUM-65 & Phase 2 BR-05 / RD-01):
  * - Trạng thái phải là PENDING hoặc PAYMENT_FAILED.
  * - expiresAt phải là mốc ISO hợp lệ và lớn hơn thời điểm tham chiếu referenceTimestampMs.
+ * - Khóa thanh toán nếu đơn có ngoại lệ tài chính (hasFinancialException / requiresReview),
+ *   đang có giao dịch PENDING chờ đối soát (PROCESSING / RECONCILING), hoặc canRetry === false từ Backend.
  */
 export function isOrderPayable(
-  order: Pick<OrderHistoryItemDto, "status" | "expiresAt"> | null | undefined,
+  order:
+    | (Pick<OrderHistoryItemDto, "status" | "expiresAt"> &
+        Partial<Pick<OrderHistoryItemDto, "hasFinancialException" | "payment">>)
+    | null
+    | undefined,
   referenceTimestampMs?: number
 ): boolean {
   if (!order) return false;
   if (order.status !== "PENDING" && order.status !== "PAYMENT_FAILED") {
     return false;
+  }
+  if (order.hasFinancialException === true) {
+    return false;
+  }
+  const payment = order.payment;
+  if (payment) {
+    if (
+      payment.status === "PENDING" ||
+      payment.status === "SUCCESS" ||
+      payment.requiresReview === true ||
+      payment.resolution === "PROCESSING" ||
+      payment.resolution === "RECONCILING" ||
+      payment.resolution === "FINANCIAL_EXCEPTION" ||
+      payment.resolution === "REQUIRES_REVIEW" ||
+      payment.provider === "ZERO_AMOUNT" ||
+      payment.method === "ZERO_AMOUNT" ||
+      payment.canRetry === false
+    ) {
+      return false;
+    }
   }
   const expiresMs = Number.isFinite(Date.parse(order.expiresAt))
     ? new Date(order.expiresAt).getTime()
@@ -607,13 +652,7 @@ export function OrderSnapshotModal({
               <div>
                 <span className="text-on-surface-variant">Phương thức: </span>
                 <strong className="text-on-surface">
-                  {order.payment.method === "CARD"
-                    ? `CARD${
-                        order.payment.methodLast4
-                          ? ` •••• ${order.payment.methodLast4}`
-                          : ""
-                      }`
-                    : "WALLET"}
+                  {formatPaymentMethodDisplay(order.payment)}
                 </strong>
               </div>
               <div>
@@ -622,10 +661,15 @@ export function OrderSnapshotModal({
                   className={
                     order.payment.status === "SUCCESS"
                       ? "text-[#16A34A]"
+                      : order.payment.status === "PENDING"
+                      ? "text-[#D97706]"
                       : "text-error"
                   }
                 >
                   {order.payment.status}
+                  {order.payment.resolution
+                    ? ` (${order.payment.resolution})`
+                    : ""}
                 </strong>
               </div>
               {order.payment.mockReference && (
@@ -646,6 +690,14 @@ export function OrderSnapshotModal({
                   <code className="font-mono text-error font-semibold">
                     {order.payment.failureReason}
                   </code>
+                </div>
+              )}
+              {(order.hasFinancialException ||
+                order.payment.requiresReview ||
+                order.payment.resolution === "FINANCIAL_EXCEPTION" ||
+                order.payment.resolution === "REQUIRES_REVIEW") && (
+                <div className="sm:col-span-2 p-2 rounded-lg bg-error-container/30 text-error text-xs font-semibold">
+                  Cảnh báo đối soát tài chính (FINANCIAL_EXCEPTION / REQUIRES_REVIEW): Đơn hàng đang chờ bộ phận vận hành kiểm tra thủ công.
                 </div>
               )}
             </div>
@@ -1683,16 +1735,14 @@ export default function OrderHistoryView() {
                                 failureReason:{" "}
                                 {order.payment.failureReason ||
                                   "PAYMENT_DECLINED"}{" "}
-                                ({order.payment.method}
-                                {order.payment.methodLast4
-                                  ? ` •••• ${order.payment.methodLast4}`
-                                  : ""}
-                                )
+                                ({formatPaymentMethodDisplay(order.payment)})
                               </p>
                             ) : order.status === "CANCELLED" ? (
                               <p className="font-body-sm text-body-sm text-on-surface-variant mt-1">
-                                Đã hủy đơn &amp; hoàn trả tồn kho, giải phóng mã
-                                giảm giá (RELEASED)
+                                {order.payment?.resolution === "RECONCILING" ||
+                                order.payment?.status === "PENDING"
+                                  ? "Đơn hàng đã hủy do quá hạn • Đang đối soát kết quả thanh toán VNPay (RECONCILING)"
+                                  : "Đã hủy đơn & hoàn trả tồn kho, giải phóng mã giảm giá (RELEASED)"}
                               </p>
                             ) : (
                               <p className="font-body-sm text-body-sm text-on-surface-variant mt-1">
@@ -1714,11 +1764,23 @@ export default function OrderHistoryView() {
                               {order.payment ? (
                                 <>
                                   <span className="px-2 py-0.5 rounded bg-surface-container text-on-surface-variant font-label-md text-[11px]">
-                                    Phương thức: {order.payment.method}
-                                    {order.payment.methodLast4
-                                      ? ` •••• ${order.payment.methodLast4}`
-                                      : ""}
+                                    Phương thức: {formatPaymentMethodDisplay(order.payment)}
                                   </span>
+                                  {order.payment.status === "PENDING" && (
+                                    <span className="px-2 py-0.5 rounded bg-[#FEF3C7] text-[#D97706] font-label-md text-[11px] font-semibold">
+                                      {order.payment.resolution === "RECONCILING"
+                                        ? "Đang đối soát (RECONCILING)"
+                                        : "Đang xử lý (PENDING)"}
+                                    </span>
+                                  )}
+                                  {(order.hasFinancialException ||
+                                    order.payment.requiresReview ||
+                                    order.payment.resolution === "FINANCIAL_EXCEPTION" ||
+                                    order.payment.resolution === "REQUIRES_REVIEW") && (
+                                    <span className="px-2 py-0.5 rounded bg-error-container text-on-error-container font-label-md text-[11px] font-semibold">
+                                      Cần đối soát (REQUIRES_REVIEW)
+                                    </span>
+                                  )}
                                   {order.payment.mockReference && (
                                     <span className="text-on-surface-variant font-body-sm text-[12px] font-mono">
                                       Mã GD: {order.payment.mockReference}

@@ -68,6 +68,8 @@ export interface AuthContextType {
     options?: OpenAuthModalOptions
   ) => void;
   closeAuthModal: () => void;
+  /** Generation số phiên xác thực, tăng đồng bộ tại thời điểm auth transition thực sự (login/logout/verifySession) */
+  authGeneration?: number;
 }
 
 export const AuthContext = createContext<AuthContextType | undefined>(
@@ -78,6 +80,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [authGeneration, setAuthGeneration] = useState<number>(0);
 
   // Điều khiển popup Modal nếu người dùng click từ Header hoặc Checkout
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
@@ -147,6 +150,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         clearStoredSession();
         setAccessToken(null);
         setUser(null);
+        setAuthGeneration((g) => g + 1);
         return false;
       }
       setAccessToken(currentToken);
@@ -156,6 +160,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       clearStoredSession();
       setAccessToken(null);
       setUser(null);
+      setAuthGeneration((g) => g + 1);
       return false;
     }
   }, []);
@@ -170,6 +175,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(resolvedUser);
     setStoredSession(res.accessToken, resolvedUser);
     setAuthModalMessage(null);
+    setAuthGeneration((g) => g + 1);
   }, []);
 
   const register = useCallback(
@@ -187,6 +193,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     setPendingCheckout(false);
     setAuthModalMessage(null);
+    setAuthGeneration((g) => g + 1);
   }, [setPendingCheckout]);
 
   const openAuthModal = useCallback(
@@ -221,6 +228,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           "Phiên đăng nhập đã hết hạn hoặc bạn chưa đăng nhập. Vui lòng đăng nhập để tiếp tục đặt hàng (giỏ hàng của bạn được giữ nguyên)."
       );
       setIsAuthModalOpen(true);
+      setAuthGeneration((g) => g + 1);
     },
     [setPendingCheckout]
   );
@@ -245,6 +253,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       authModalMessage,
       openAuthModal,
       closeAuthModal,
+      authGeneration,
     }),
     [
       user,
@@ -262,6 +271,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       authModalMessage,
       openAuthModal,
       closeAuthModal,
+      authGeneration,
     ]
   );
 

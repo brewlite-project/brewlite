@@ -47,11 +47,14 @@ class PaymentSummaryDto {
   @ApiProperty({ format: 'uuid' })
   id!: string;
 
-  @ApiProperty({ enum: ['SUCCESS', 'FAILED'] })
+  @ApiProperty({ enum: ['PENDING', 'SUCCESS', 'FAILED'] })
   status!: string;
 
-  @ApiProperty({ enum: ['CARD', 'WALLET'] })
-  method!: string;
+  @ApiProperty({ enum: ['MOCK', 'VNPAY', 'ZERO_AMOUNT'] })
+  provider!: string;
+
+  @ApiProperty({ type: String, nullable: true, enum: ['CARD', 'WALLET'] })
+  method!: string | null;
 
   @ApiProperty({ type: String, nullable: true, pattern: '^[0-9]{4}$' })
   methodLast4!: string | null;
@@ -59,11 +62,29 @@ class PaymentSummaryDto {
   @ApiProperty({ minimum: 0 })
   amountVnd!: number;
 
-  @ApiProperty({ nullable: true })
+  @ApiProperty({ type: String, nullable: true })
   mockReference!: string | null;
 
-  @ApiProperty({ nullable: true, enum: ['PAYMENT_DECLINED'] })
+  @ApiProperty({ type: String, nullable: true })
   failureReason!: string | null;
+
+  @ApiProperty({
+    enum: [
+      'PROCESSING',
+      'RECONCILING',
+      'PAYMENT_ACCEPTED',
+      'FAILED',
+      'FINANCIAL_EXCEPTION',
+      'REQUIRES_REVIEW',
+    ],
+  })
+  resolution!: string;
+
+  @ApiProperty()
+  requiresReview!: boolean;
+
+  @ApiProperty()
+  canRetry!: boolean;
 
   @ApiProperty({ format: 'date-time' })
   createdAt!: string;
@@ -109,6 +130,9 @@ class MyOrderDto {
 
   @ApiProperty({ type: [OrderItemSummaryDto] })
   items!: OrderItemSummaryDto[];
+
+  @ApiProperty()
+  hasFinancialException!: boolean;
 
   @ApiProperty({ type: PaymentSummaryDto, nullable: true })
   payment!: PaymentSummaryDto | null;
