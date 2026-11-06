@@ -440,6 +440,12 @@ describe("SCRUM-64: Order History UI & GET /orders/me Contract Tests", () => {
       setIsSubmittingOrder: () => {},
       setOrderError: () => {},
       clearOrderFlowState: () => {},
+      appliedCoupon: null,
+      couponStatus: "idle",
+      couponErrorMessage: null,
+      couponErrorCode: null,
+      applyCoupon: async () => null,
+      removeCoupon: () => {},
     };
 
     const html = ReactDOMServer.renderToStaticMarkup(
@@ -905,6 +911,12 @@ describe("SCRUM-64: Order History UI & GET /orders/me Contract Tests", () => {
         setIsSubmittingOrder: () => {},
         setOrderError: () => {},
         clearOrderFlowState: () => {},
+      appliedCoupon: null,
+      couponStatus: "idle",
+      couponErrorMessage: null,
+      couponErrorCode: null,
+      applyCoupon: async () => null,
+      removeCoupon: () => {},
       };
 
       const html = ReactDOMServer.renderToStaticMarkup(

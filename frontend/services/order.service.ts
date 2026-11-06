@@ -1,5 +1,8 @@
 import {
   MOCK_MY_ORDERS_RESPONSE,
+  type CouponPreviewRequestDto,
+  type CouponPreviewResponseDto,
+  type CouponValidationStatus,
   type CreateOrderItemDto,
   type CreateOrderRequestDto,
   type CreateOrderResponseDto,
@@ -56,6 +59,8 @@ import {
 
 export const MAX_ORDER_ITEMS = 20;
 export const MAX_COUPON_CODE_LENGTH = 30;
+export const MIN_COUPON_LENGTH = 1;
+export const MAX_COUPON_LENGTH = MAX_COUPON_CODE_LENGTH;
 
 const VALID_DRINK_SIZES: readonly DrinkSize[] = [
   "S",
@@ -1107,6 +1112,456 @@ export async function createOrderApi(
     resolvedCode,
     errorData?.details,
     !isDeterministic4xx
+  );
+}
+
+// ============================================================================
+// COUPON PREVIEW & VALIDATION SERVICE (`POST /coupons/preview` — P2-21 & P2-22)
+// Đối chiếu chuẩn 100% với:
+// - docs/api/SCRUM96_Coupon_Preview_Addendum.md
+// - backend/src/coupons/coupons.controller.ts & coupons.service.ts
+// - backend/src/promotions/promotion-policy.ts
+//
+// Nguyên tắc bắt buộc:
+// 1. Frontend KHÔNG tự quyết định coupon hợp lệ hay tự tính authoritative discount.
+// 2. Chỉ gửi `{ couponCode, items: [{ productId, size, toppingIds, quantity }] }`.
+// 3. Không gửi discountVnd, subtotalVnd, totalVnd hay userId từ client.
+// 4. Kiểm tra chặt chẽ toàn bộ trường trả về của `CouponPreviewResponseDto`:
+//    `valid === true`, `couponCode`, `subtotalVnd >= 0`, `discountVnd >= 0`,
+//    `discountVnd <= subtotalVnd`, `totalVnd === subtotalVnd - discountVnd`.
+// ============================================================================
+
+/**
+ * Kiểm tra chặt chẽ phản hồi `CouponPreviewResponseDto` từ `POST /coupons/preview` (HTTP 200 OK).
+ * Vì `POST /coupons/preview` là truy vấn chỉ đọc (stateless, không tạo Order hay giữ chỗ),
+ * mọi lỗi phát sinh tại đây đều mang `isOutcomeUncertain = false`.
+ */
+export function validateCouponPreviewResponseData(
+  data: unknown
+): CouponPreviewResponseDto {
+  if (!data || typeof data !== "object") {
+    throw createOrderError(
+      "Phản hồi kiểm tra mã ưu đãi từ máy chủ không hợp lệ.",
+      502,
+      "SERVER_ERROR",
+      undefined,
+      false
+    );
+  }
+
+  const record = data as Record<string, unknown>;
+
+  if (record.valid !== true) {
+    throw createOrderError(
+      "Trường valid trong phản hồi kiểm tra mã ưu đãi phải là true.",
+      502,
+      "SERVER_ERROR",
+      undefined,
+      false
+    );
+  }
+
+  if (
+    typeof record.couponCode !== "string" ||
+    record.couponCode.trim().length < MIN_COUPON_LENGTH ||
+    record.couponCode.trim().length > MAX_COUPON_LENGTH
+  ) {
+    throw createOrderError(
+      "Mã ưu đãi (couponCode) trả về từ máy chủ không hợp lệ.",
+      502,
+      "SERVER_ERROR",
+      undefined,
+      false
+    );
+  }
+
+  if (
+    typeof record.subtotalVnd !== "number" ||
+    !Number.isSafeInteger(record.subtotalVnd) ||
+    record.subtotalVnd < 0 ||
+    typeof record.discountVnd !== "number" ||
+    !Number.isSafeInteger(record.discountVnd) ||
+    record.discountVnd < 0 ||
+    typeof record.totalVnd !== "number" ||
+    !Number.isSafeInteger(record.totalVnd) ||
+    record.totalVnd < 0 ||
+    record.discountVnd > record.subtotalVnd ||
+    record.totalVnd !== record.subtotalVnd - record.discountVnd
+  ) {
+    throw createOrderError(
+      "Dữ liệu giảm giá (subtotalVnd, discountVnd, totalVnd) từ máy chủ không hợp lệ hoặc vi phạm bất biến totalVnd = subtotalVnd - discountVnd.",
+      502,
+      "SERVER_ERROR",
+      undefined,
+      false
+    );
+  }
+
+  return {
+    couponCode: record.couponCode.trim().toUpperCase(),
+    subtotalVnd: record.subtotalVnd,
+    discountVnd: record.discountVnd,
+    totalVnd: record.totalVnd,
+    valid: true,
+  };
+}
+
+/**
+ * Phân loại lỗi từ `POST /coupons/preview` (hoặc `POST /orders` khi từ chối coupon)
+ * sang trạng thái UI tường minh theo yêu cầu P2-22:
+ * - `invalid` (`400 INVALID_COUPON` "Coupon does not exist" / `400 VALIDATION_ERROR`)
+ * - `expired` (`400 INVALID_COUPON` "Coupon has expired")
+ * - `not_eligible` (`400 INVALID_COUPON` "Order subtotal does not meet coupon minimum" / "Coupon is not active yet")
+ * - `usage_limit_exceeded` (`409 COUPON_UNAVAILABLE` "Coupon usage limit reached")
+ * - `error` (Lỗi mạng, `500 INTERNAL_ERROR`, `401 UNAUTHORIZED`, `400 INVALID_CART`)
+ */
+export function extractCouponErrorSubcode(err: unknown): string | null {
+  if (!err || typeof err !== "object") return null;
+  const record = err as Record<string, unknown>;
+  if (typeof record.subcode === "string" && record.subcode.trim()) {
+    return record.subcode.trim().toUpperCase();
+  }
+  if (typeof record.reason === "string" && record.reason.trim()) {
+    return record.reason.trim().toUpperCase();
+  }
+  const details = record.details;
+  if (Array.isArray(details) && details.length > 0) {
+    const first = details[0] as Record<string, unknown> | null;
+    if (first && typeof first === "object") {
+      if (typeof first.subcode === "string" && first.subcode.trim()) {
+        return first.subcode.trim().toUpperCase();
+      }
+      if (typeof first.reason === "string" && first.reason.trim()) {
+        return first.reason.trim().toUpperCase();
+      }
+    }
+  } else if (details && typeof details === "object") {
+    const detRecord = details as Record<string, unknown>;
+    if (typeof detRecord.subcode === "string" && detRecord.subcode.trim()) {
+      return detRecord.subcode.trim().toUpperCase();
+    }
+    if (typeof detRecord.reason === "string" && detRecord.reason.trim()) {
+      return detRecord.reason.trim().toUpperCase();
+    }
+  }
+  return null;
+}
+
+export function classifyCouponPreviewError(err: unknown): {
+  status: Exclude<CouponValidationStatus, "idle" | "validating" | "applied">;
+  message: string;
+  code: string;
+  statusCode: number;
+} {
+  const candidate = err as Partial<OrderServiceError> | null;
+  const statusCode =
+    typeof candidate?.statusCode === "number" ? candidate.statusCode : 500;
+  const code =
+    typeof candidate?.code === "string" && candidate.code.trim()
+      ? candidate.code.trim().toUpperCase()
+      : statusCode === 409
+      ? "COUPON_UNAVAILABLE"
+      : statusCode === 400
+      ? "INVALID_COUPON"
+      : "SERVER_ERROR";
+  const subcode = extractCouponErrorSubcode(err);
+
+  if (statusCode === 401 || code === "UNAUTHORIZED") {
+    return {
+      status: "error",
+      code: "UNAUTHORIZED",
+      statusCode: 401,
+      message:
+        "Phiên đăng nhập đã hết hạn (401 UNAUTHORIZED). Vui lòng đăng nhập lại để áp dụng mã ưu đãi.",
+    };
+  }
+
+  if (
+    code === "COUPON_UNAVAILABLE" ||
+    statusCode === 409 ||
+    subcode === "COUPON_UNAVAILABLE" ||
+    subcode === "USAGE_LIMIT_EXCEEDED"
+  ) {
+    return {
+      status: "usage_limit_exceeded",
+      code: "COUPON_UNAVAILABLE",
+      statusCode: statusCode || 409,
+      message:
+        "Mã ưu đãi đã hết lượt sử dụng hoặc bạn đã dùng hết số lượt cho phép.",
+    };
+  }
+
+  if (
+    code === "COUPON_EXPIRED" ||
+    subcode === "EXPIRED" ||
+    subcode === "COUPON_EXPIRED"
+  ) {
+    return {
+      status: "expired",
+      code: "INVALID_COUPON",
+      statusCode: statusCode || 400,
+      message: "Mã ưu đãi đã hết hạn sử dụng.",
+    };
+  }
+
+  if (
+    code === "COUPON_NOT_ELIGIBLE" ||
+    subcode === "NOT_ELIGIBLE" ||
+    subcode === "COUPON_NOT_ELIGIBLE" ||
+    subcode === "MIN_SUBTOTAL_NOT_MET" ||
+    subcode === "COUPON_NOT_ACTIVE"
+  ) {
+    return {
+      status: "not_eligible",
+      code: "INVALID_COUPON",
+      statusCode: statusCode || 400,
+      message:
+        "Đơn hàng chưa đủ điều kiện áp dụng hoặc mã ưu đãi chưa đến thời gian có hiệu lực.",
+    };
+  }
+
+  if (code === "INVALID_COUPON") {
+    // Fallback generic INVALID_COUPON khi backend chỉ trả về code = INVALID_COUPON mà không có subcode/reason cấu trúc ổn định
+    return {
+      status: "invalid",
+      code: "INVALID_COUPON",
+      statusCode: statusCode || 400,
+      message:
+        "Mã ưu đãi không hợp lệ, đã hết hạn hoặc đơn hàng chưa đủ điều kiện áp dụng.",
+    };
+  }
+
+  if (code === "VALIDATION_ERROR") {
+    return {
+      status: "invalid",
+      code: "VALIDATION_ERROR",
+      statusCode: statusCode || 400,
+      message: "Mã ưu đãi không hợp lệ (tối đa 30 ký tự, không để trống).",
+    };
+  }
+
+  if (code === "INVALID_CART") {
+    return {
+      status: "error",
+      code: "INVALID_CART",
+      statusCode: statusCode || 400,
+      message:
+        "Giỏ hàng có sản phẩm hoặc topping không còn hợp lệ. Vui lòng kiểm tra lại giỏ hàng.",
+    };
+  }
+
+  return {
+    status: "error",
+    code: code || "NETWORK_ERROR",
+    statusCode: statusCode || 503,
+    message:
+      "Không thể kết nối tới máy chủ để kiểm tra mã ưu đãi. Giỏ hàng của bạn vẫn được giữ nguyên, vui lòng thử lại.",
+  };
+}
+
+/**
+ * Gọi API `POST /coupons/preview` tới Backend thật để kiểm tra tính hợp lệ của Coupon
+ * và nhận giá trị giảm giá chính thức (`subtotalVnd`, `discountVnd`, `totalVnd`) từ Server (P2-21 & P2-22).
+ * - KHÔNG tạo Order, KHÔNG giữ chỗ tồn kho, KHÔNG xóa giỏ hàng khi lỗi.
+ * - Hỗ trợ `AbortSignal` để hủy request đang pending khi giỏ hàng/coupon/user thay đổi.
+ */
+export async function previewCouponApi(
+  rawPayload: CouponPreviewRequestDto,
+  tokenOverride?: string | null,
+  options?: { signal?: AbortSignal }
+): Promise<CouponPreviewResponseDto> {
+  if (options?.signal?.aborted) {
+    throw createOrderError(
+      "Yêu cầu kiểm tra mã ưu đãi đã bị hủy.",
+      499,
+      "ABORTED",
+      undefined,
+      false
+    );
+  }
+
+  const candidateToken = tokenOverride || getStoredToken();
+  if (!candidateToken) {
+    clearStoredSession();
+    throw createOrderError(
+      "Vui lòng đăng nhập để kiểm tra và áp dụng mã ưu đãi.",
+      401,
+      "UNAUTHORIZED",
+      undefined,
+      false
+    );
+  }
+
+  try {
+    validateJwtToken(candidateToken);
+  } catch {
+    clearStoredSession();
+    throw createOrderError(
+      "Phiên đăng nhập đã hết hạn hoặc không hợp lệ. Vui lòng đăng nhập lại.",
+      401,
+      "UNAUTHORIZED",
+      undefined,
+      false
+    );
+  }
+
+  if (!rawPayload || typeof rawPayload !== "object") {
+    throw createOrderError(
+      "Dữ liệu kiểm tra mã ưu đãi không hợp lệ.",
+      400,
+      "VALIDATION_ERROR",
+      undefined,
+      false
+    );
+  }
+
+  const rawCode =
+    typeof rawPayload.couponCode === "string"
+      ? rawPayload.couponCode.trim().toUpperCase()
+      : "";
+
+  if (
+    rawCode.length < MIN_COUPON_LENGTH ||
+    rawCode.length > MAX_COUPON_LENGTH
+  ) {
+    throw createOrderError(
+      `Mã ưu đãi phải từ ${MIN_COUPON_LENGTH} đến ${MAX_COUPON_LENGTH} ký tự.`,
+      400,
+      "VALIDATION_ERROR",
+      undefined,
+      false
+    );
+  }
+
+  const orderValidation = validateCreateOrderPayload({
+    items: rawPayload.items,
+    couponCode: rawCode,
+  });
+  if (!orderValidation.isValid || !orderValidation.payload) {
+    throw (
+      orderValidation.error ||
+      createOrderError(
+        "Dữ liệu giỏ hàng hoặc mã ưu đãi không hợp lệ.",
+        400,
+        "VALIDATION_ERROR",
+        undefined,
+        false
+      )
+    );
+  }
+
+  const sanitizedPreviewPayload: CouponPreviewRequestDto = {
+    couponCode: rawCode,
+    items: orderValidation.payload.items,
+  };
+
+  const endpoint =
+    typeof window !== "undefined"
+      ? "/api/backend/coupons/preview"
+      : `${API_BASE_URL}/coupons/preview`;
+
+  let response: Response;
+  try {
+    response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        Authorization: `Bearer ${candidateToken.trim()}`,
+      },
+      body: JSON.stringify(sanitizedPreviewPayload),
+      cache: "no-store",
+      ...(options?.signal ? { signal: options.signal } : {}),
+    });
+  } catch (err: unknown) {
+    if (
+      options?.signal?.aborted ||
+      (err instanceof Error && err.name === "AbortError")
+    ) {
+      throw createOrderError(
+        "Yêu cầu kiểm tra mã ưu đãi đã bị hủy.",
+        499,
+        "ABORTED",
+        undefined,
+        false
+      );
+    }
+    throw createOrderError(
+      "Lỗi kết nối mạng khi kiểm tra mã ưu đãi. Vui lòng thử lại.",
+      503,
+      "NETWORK_ERROR",
+      undefined,
+      false
+    );
+  }
+
+  if (options?.signal?.aborted) {
+    throw createOrderError(
+      "Yêu cầu kiểm tra mã ưu đãi đã bị hủy.",
+      499,
+      "ABORTED",
+      undefined,
+      false
+    );
+  }
+
+  if (response.status === 200) {
+    let rawData: unknown;
+    try {
+      rawData = await response.json();
+    } catch {
+      throw createOrderError(
+        "Phản hồi từ máy chủ không đúng định dạng JSON.",
+        502,
+        "SERVER_ERROR",
+        undefined,
+        false
+      );
+    }
+    return validateCouponPreviewResponseData(rawData);
+  }
+
+  const errorData = await response.json().catch(() => null);
+
+  if (response.status === 401 || errorData?.code === "UNAUTHORIZED") {
+    clearStoredSession();
+    throw createOrderError(
+      "Phiên đăng nhập đã hết hạn hoặc không hợp lệ. Vui lòng đăng nhập lại.",
+      401,
+      "UNAUTHORIZED",
+      errorData?.details,
+      false
+    );
+  }
+
+  const resolvedCode: OrderErrorCode | string =
+    typeof errorData?.code === "string" && errorData.code.trim()
+      ? errorData.code.trim()
+      : response.status === 409
+      ? "COUPON_UNAVAILABLE"
+      : response.status === 400
+      ? "INVALID_COUPON"
+      : "SERVER_ERROR";
+
+  const rawMessage = Array.isArray(errorData?.message)
+    ? errorData.message.join(", ")
+    : typeof errorData?.message === "string" && errorData.message.trim()
+    ? errorData.message.trim()
+    : `Không thể áp dụng mã ưu đãi (HTTP ${response.status}).`;
+
+  const structuredDetails =
+    errorData?.details !== undefined
+      ? errorData.details
+      : errorData?.reason || errorData?.subcode
+      ? { reason: errorData.reason, subcode: errorData.subcode }
+      : undefined;
+
+  throw createOrderError(
+    rawMessage,
+    response.status,
+    resolvedCode,
+    structuredDetails,
+    false
   );
 }
 

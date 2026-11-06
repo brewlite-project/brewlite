@@ -472,6 +472,12 @@ describe("VNPay Phase 2 UI & Flow Deep Test Suite", () => {
         ({ items: [] } as unknown as CreateOrderRequestDto),
       activeOrder: null,
       setActiveOrder: () => {},
+      appliedCoupon: null,
+      couponStatus: "idle",
+      couponErrorMessage: null,
+      couponErrorCode: null,
+      applyCoupon: async () => null,
+      removeCoupon: () => {},
     };
 
     it("7.1 verifies main btnSubmitPayment initiates VNPay and redirects directly to backend paymentUrl on success", async () => {
@@ -886,6 +892,12 @@ describe("VNPay Phase 2 UI & Flow Deep Test Suite", () => {
         ({ items: [] } as unknown as CreateOrderRequestDto),
       activeOrder: null,
       setActiveOrder: () => {},
+      appliedCoupon: null,
+      couponStatus: "idle",
+      couponErrorMessage: null,
+      couponErrorCode: null,
+      applyCoupon: async () => null,
+      removeCoupon: () => {},
     };
 
     it("defaults to VNPay Sandbox as selected method and renders CARD/WALLET as disabled under development", async () => {
@@ -1556,6 +1568,12 @@ describe("VNPay Phase 2 UI & Flow Deep Test Suite", () => {
           ({ items: [] } as unknown as CreateOrderRequestDto),
         activeOrder: null,
         setActiveOrder: () => {},
+      appliedCoupon: null,
+      couponStatus: "idle",
+      couponErrorMessage: null,
+      couponErrorCode: null,
+      applyCoupon: async () => null,
+      removeCoupon: () => {},
       };
 
       const order = createSampleOrder({ status: "PENDING", totalVnd: 98000 });
@@ -1737,6 +1755,12 @@ describe("VNPay Phase 2 UI & Flow Deep Test Suite", () => {
         ({ items: [] } as unknown as CreateOrderRequestDto),
       activeOrder: null,
       setActiveOrder: () => {},
+      appliedCoupon: null,
+      couponStatus: "idle",
+      couponErrorMessage: null,
+      couponErrorCode: null,
+      applyCoupon: async () => null,
+      removeCoupon: () => {},
     };
 
     it("renders zero payment bypass and executes without redirecting to VNPay when totalVnd is 0", async () => {
@@ -2117,6 +2141,12 @@ describe("VNPay Phase 2 UI & Flow Deep Test Suite", () => {
             }
             setActiveOrderState(next);
           },
+          appliedCoupon: null,
+          couponStatus: "idle",
+          couponErrorMessage: null,
+          couponErrorCode: null,
+          applyCoupon: async () => null,
+          removeCoupon: () => {},
         };
 
         return React.createElement(
@@ -2351,6 +2381,12 @@ describe("VNPay Phase 2 UI & Flow Deep Test Suite", () => {
           ({ items: [] } as unknown as CreateOrderRequestDto),
         activeOrder: null,
         setActiveOrder: () => {},
+          appliedCoupon: null,
+          couponStatus: "idle",
+          couponErrorMessage: null,
+          couponErrorCode: null,
+          applyCoupon: async () => null,
+          removeCoupon: () => {},
       };
 
       await act(async () => {
@@ -2605,6 +2641,12 @@ describe("VNPay Phase 2 UI & Flow Deep Test Suite", () => {
           ({ items: [] } as unknown as CreateOrderRequestDto),
         activeOrder: null,
         setActiveOrder: () => {},
+          appliedCoupon: null,
+          couponStatus: "idle",
+          couponErrorMessage: null,
+          couponErrorCode: null,
+          applyCoupon: async () => null,
+          removeCoupon: () => {},
       };
 
       for (const scenario of serverScenarios) {

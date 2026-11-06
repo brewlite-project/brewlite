@@ -254,6 +254,51 @@ export interface CreateOrderRequestDto {
 }
 
 /**
+ * Payload gửi lên `POST /coupons/preview` (SCRUM-96 / P2-21 & P2-22)
+ * TUYỆT ĐỐI KHÔNG chứa userId, discountVnd, subtotalVnd, totalVnd.
+ */
+export interface CouponPreviewRequestDto {
+  couponCode: string;
+  items: CreateOrderItemDto[];
+}
+
+/**
+ * Response 200 OK trả về từ `POST /coupons/preview` (SCRUM-96 / P2-21 & P2-22)
+ */
+export interface CouponPreviewResponseDto {
+  couponCode: string;
+  subtotalVnd: number;
+  discountVnd: number;
+  totalVnd: number;
+  valid: true;
+}
+
+/**
+ * Các trạng thái hiển thị của luồng kiểm tra & áp dụng Coupon/Voucher trên UI (P2-22)
+ */
+export type CouponValidationStatus =
+  | "idle"
+  | "validating"
+  | "applied"
+  | "invalid"
+  | "expired"
+  | "not_eligible"
+  | "usage_limit_exceeded"
+  | "error";
+
+/**
+ * Trạng thái tổng hợp của Coupon/Voucher trên màn hình Checkout (P2-22)
+ */
+export interface CouponApplicationState {
+  status: CouponValidationStatus;
+  inputCode: string;
+  appliedPreview: CouponPreviewResponseDto | null;
+  errorMessage: string | null;
+  errorCode: string | null;
+  statusCode: number | null;
+}
+
+/**
  * Snapshot Topping trong OrderItem trả về từ `POST /orders` (API Contract v2.1 Mục 8.6)
  */
 export interface OrderToppingSnapshotDto {
