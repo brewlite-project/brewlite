@@ -5,6 +5,7 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -790,12 +791,19 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     return resolveStoredAuthenticatedUserId();
   }, [authContext]);
 
-  // Synchronous identity version / generation tracking:
-  // Cập nhật đồng bộ ngay tại nguồn render khi authenticatedUserId thay đổi (A -> B hoặc logout)
-  authSessionStore.syncUser(authenticatedUserId);
+  // Per-CartProvider preview request state and AbortController (isolated per provider instance)
+  const previewRequestIdRef = useRef<number>(0);
+  const previewAbortControllerRef = useRef<AbortController | null>(null);
 
+  // Per-CartProvider auth transition generation & identity tracking:
+  // Generation thay đổi tại auth transition thực sự (từ AuthContext hoặc auth transition effect).
+  // Render CHỈ ĐỌC identity/generation để mask presentation, tuyệt đối KHÔNG mutate singleton/abort request trong render.
+  const authContextGeneration = authContext?.authGeneration ?? 0;
+  const [providerAuthGeneration, setProviderAuthGeneration] = useState<number>(0);
   const currentAuthIdentity = authenticatedUserId ?? null;
-  const currentAuthGeneration = authSessionStore.getGeneration();
+  const currentAuthGeneration = authContextGeneration + providerAuthGeneration;
+  const currentAuthGenerationRef = useRef<number>(currentAuthGeneration);
+  currentAuthGenerationRef.current = currentAuthGeneration;
 
   const [items, setItems] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState<boolean>(false);
@@ -819,10 +827,10 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   );
   const isApplyingCouponRef = useRef<boolean>(false);
 
-  // Identity and Generation matching check:
-  // Nếu user vừa đổi (A -> B) hoặc logout, authSessionStore.syncUser() đã tăng generation và đổi currentUserId ngay trong render phase.
-  // Nếu coupon state bên trong vẫn còn gắn với owner cũ hoặc generation cũ,
-  // CartContext phải expose NGAY LẬP TỨC state rỗng trong render phase TRƯỚC KHI BẤT KỲ EFFECT NÀO CHẠY!
+  // Presentation Masking:
+  // Render CHỈ ĐỌC identity và generation để mask presentation.
+  // Nếu coupon state bên trong còn gắn với owner cũ hoặc generation cũ,
+  // CartContext expose NGAY LẬP TỨC state rỗng / idle trong render phase mà KHÔNG gây side-effect nào!
   const isCouponIdentityMatch =
     couponOwnerUserId === currentAuthIdentity &&
     couponAuthGeneration === currentAuthGeneration;
@@ -840,15 +848,42 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const latestItemsRef = useRef<CartItem[]>(items);
   const latestCouponCodeRef = useRef<string>(couponCode);
   const latestAuthUserIdRef = useRef<string | null>(authenticatedUserId);
+  const prevAuthenticatedUserIdRef = useRef<string | null | undefined>(
+    undefined
+  );
 
-  useEffect(() => {
+  const cancelPendingCouponPreview = useCallback(() => {
+    previewRequestIdRef.current += 1;
+    if (previewAbortControllerRef.current) {
+      try {
+        previewAbortControllerRef.current.abort();
+      } catch {
+        // Ignore abort error
+      }
+      previewAbortControllerRef.current = null;
+    }
+    isApplyingCouponRef.current = false;
+  }, []);
+
+  const useIsomorphicLayoutEffect =
+    typeof window !== "undefined" ? useLayoutEffect : useEffect;
+
+  useIsomorphicLayoutEffect(() => {
     latestItemsRef.current = items;
     latestCouponCodeRef.current = couponCode;
     latestAuthUserIdRef.current = authenticatedUserId;
   }, [items, couponCode, authenticatedUserId]);
-  const prevAuthenticatedUserIdRef = useRef<string | null | undefined>(
-    undefined
-  );
+
+  useIsomorphicLayoutEffect(() => {
+    if (
+      prevAuthenticatedUserIdRef.current !== undefined &&
+      prevAuthenticatedUserIdRef.current !== authenticatedUserId
+    ) {
+      cancelPendingCouponPreview();
+      setProviderAuthGeneration((g) => g + 1);
+      latestAuthUserIdRef.current = authenticatedUserId;
+    }
+  }, [authenticatedUserId, cancelPendingCouponPreview]);
 
   const [activeOrderRecord, setActiveOrderRecordState] =
     useState<StoredActiveOrderRecord | null>(null);
@@ -863,11 +898,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     "success" | "warning" | "error" | null
   >(null);
 
-  const cancelPendingCouponPreview = useCallback(() => {
-    authSessionStore.cancelPending();
-    isApplyingCouponRef.current = false;
-  }, []);
-
   const clearAppliedCouponPreview = useCallback(() => {
     cancelPendingCouponPreview();
     setAppliedCouponState(null);
@@ -875,7 +905,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     setCouponErrorMessageState(null);
     setCouponErrorCodeState(null);
     setCouponOwnerUserId(currentAuthIdentity);
-    setCouponAuthGeneration(authSessionStore.getGeneration());
+    setCouponAuthGeneration(currentAuthGenerationRef.current);
   }, [cancelPendingCouponPreview, currentAuthIdentity]);
 
   const setCouponApplicationState = useCallback(
@@ -886,7 +916,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       errorCode?: string | null;
     }) => {
       setCouponOwnerUserId(currentAuthIdentity);
-      setCouponAuthGeneration(authSessionStore.getGeneration());
+      setCouponAuthGeneration(currentAuthGenerationRef.current);
       if (next.appliedCoupon !== undefined) {
         setAppliedCouponState(next.appliedCoupon);
       }
@@ -909,7 +939,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       const normalizedNext = code.trim().toUpperCase();
       latestCouponCodeRef.current = code;
       setCouponOwnerUserId(currentAuthIdentity);
-      setCouponAuthGeneration(authSessionStore.getGeneration());
+      setCouponAuthGeneration(currentAuthGenerationRef.current);
       setCouponCodeState(code);
 
       if (normalizedPrev !== normalizedNext) {
@@ -1564,12 +1594,13 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         return null;
       }
 
-      // Hủy request preview cũ (nếu có) và khởi tạo requestId + AbortController mới
+      // Hủy request preview cũ (nếu có) và khởi tạo requestId + AbortController mới scoped cho provider này
       clearAppliedCouponPreview();
-      const requestId = authSessionStore.nextRequestId();
-      const requestAuthGeneration = authSessionStore.getGeneration();
+      previewRequestIdRef.current += 1;
+      const requestId = previewRequestIdRef.current;
+      const requestAuthGeneration = currentAuthGenerationRef.current;
       const controller = new AbortController();
-      authSessionStore.setAbortController(controller);
+      previewAbortControllerRef.current = controller;
 
       const requestCartFingerprint = computeCartFingerprint(currentItems);
       const requestCouponCode = normalizedCode;
@@ -1583,15 +1614,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
       const isStillCurrent = (): boolean => {
         if (controller.signal.aborted) return false;
-        if (
-          !authSessionStore.isCurrent(
-            requestId,
-            requestAuthGeneration,
-            requestUserId
-          )
-        ) {
-          return false;
-        }
+        if (previewRequestIdRef.current !== requestId) return false;
+        if (currentAuthGenerationRef.current !== requestAuthGeneration) return false;
+        if (latestAuthUserIdRef.current !== requestUserId) return false;
         if (
           computeCartFingerprint(latestItemsRef.current) !==
           requestCartFingerprint
@@ -1645,9 +1670,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         }
         return null;
       } finally {
-        if (authSessionStore.getCurrentRequestId() === requestId) {
+        if (previewRequestIdRef.current === requestId) {
           isApplyingCouponRef.current = false;
-          authSessionStore.setAbortController(null);
+          previewAbortControllerRef.current = null;
         }
       }
     },
