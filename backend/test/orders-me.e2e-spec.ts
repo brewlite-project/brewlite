@@ -198,4 +198,310 @@ describe('GET /orders/me', () => {
     await get(`?userId=${otherUserId}`).expect(200);
     expect(prisma.order.count).toHaveBeenCalledWith({ where: { userId } });
   });
+
+  it('maps Phase 2 VNPay PENDING payment without calling readPaymentSnapshot and blocks retry', async () => {
+    const vnpayPendingPaymentId = '550e8400-e29b-41d4-a716-446655440030';
+    const futureExpiry = new Date(Date.now() + 10 * 60_000);
+    prisma.order.count.mockResolvedValue(1);
+    prisma.order.findMany.mockResolvedValue([
+      {
+        ...order,
+        status: 'PENDING',
+        pointsEarned: 0,
+        expiresAt: futureExpiry,
+        payments: [
+          {
+            id: vnpayPendingPaymentId,
+            status: 'PENDING',
+            provider: 'VNPAY',
+            method: null,
+            methodLast4: null,
+            amountVnd: 98000n,
+            mockReference: null,
+            responseSnapshot: null,
+            finalOutcomeSnapshot: null,
+            reconciliationState: 'SCHEDULED',
+            hasFinancialException: false,
+            createdAt: paymentAt,
+            updatedAt: paymentAt,
+            gatewayEvents: [],
+          },
+          {
+            id: failedPaymentId,
+            status: 'FAILED',
+            provider: 'VNPAY',
+            method: null,
+            methodLast4: null,
+            amountVnd: 98000n,
+            mockReference: null,
+            responseSnapshot: null,
+            finalOutcomeSnapshot: {
+              provider: 'VNPAY',
+              outcome: 'FAILED',
+              responseCode: '24',
+              transactionStatus: '02',
+            },
+            reconciliationState: 'RESOLVED',
+            hasFinancialException: false,
+            createdAt: new Date(paymentAt.getTime() - 60_000),
+            updatedAt: new Date(paymentAt.getTime() - 60_000),
+            gatewayEvents: [],
+          },
+        ],
+      },
+    ]);
+
+    const { body } = await get().expect(200);
+    expect(body.items[0]).toMatchObject({
+      id: orderId,
+      status: 'PENDING',
+      hasFinancialException: false,
+      payment: {
+        id: vnpayPendingPaymentId,
+        status: 'PENDING',
+        provider: 'VNPAY',
+        method: null,
+        methodLast4: null,
+        amountVnd: 98000,
+        mockReference: null,
+        failureReason: null,
+        resolution: 'PROCESSING',
+        requiresReview: false,
+        canRetry: false,
+        createdAt: paymentAt.toISOString(),
+      },
+    });
+  });
+
+  it('maps VNPay SUCCESS, VNPay FAILED (with canRetry), ZERO_AMOUNT SUCCESS, and CANCELLED + PENDING (RECONCILING)', async () => {
+    const vnpaySuccessOrder = {
+      ...order,
+      id: '550e8400-e29b-41d4-a716-446655440041',
+      status: 'PAID',
+      expiresAt: new Date(Date.now() + 10 * 60_000),
+      payments: [
+        {
+          id: '550e8400-e29b-41d4-a716-446655440051',
+          status: 'SUCCESS',
+          provider: 'VNPAY',
+          method: null,
+          methodLast4: null,
+          amountVnd: 98000n,
+          mockReference: null,
+          responseSnapshot: null,
+          finalOutcomeSnapshot: {
+            provider: 'VNPAY',
+            outcome: 'SUCCESS',
+            responseCode: '00',
+            transactionStatus: '00',
+          },
+          reconciliationState: 'RESOLVED',
+          hasFinancialException: false,
+          createdAt: paymentAt,
+          gatewayEvents: [],
+        },
+      ],
+    };
+
+    const vnpayFailedOrder = {
+      ...order,
+      id: '550e8400-e29b-41d4-a716-446655440042',
+      status: 'PAYMENT_FAILED',
+      pointsEarned: 0,
+      expiresAt: new Date(Date.now() + 10 * 60_000),
+      payments: [
+        {
+          id: '550e8400-e29b-41d4-a716-446655440052',
+          status: 'FAILED',
+          provider: 'VNPAY',
+          method: null,
+          methodLast4: null,
+          amountVnd: 98000n,
+          mockReference: null,
+          responseSnapshot: null,
+          finalOutcomeSnapshot: {
+            provider: 'VNPAY',
+            outcome: 'FAILED',
+            responseCode: '24',
+            transactionStatus: '02',
+          },
+          reconciliationState: 'RESOLVED',
+          hasFinancialException: false,
+          createdAt: paymentAt,
+          gatewayEvents: [],
+        },
+      ],
+    };
+
+    const zeroAmountOrder = {
+      ...order,
+      id: '550e8400-e29b-41d4-a716-446655440043',
+      status: 'PAID',
+      subtotalVnd: 20000n,
+      discountVnd: 20000n,
+      totalVnd: 0n,
+      pointsEarned: 0,
+      expiresAt: new Date(Date.now() + 10 * 60_000),
+      payments: [
+        {
+          id: '550e8400-e29b-41d4-a716-446655440053',
+          status: 'SUCCESS',
+          provider: 'ZERO_AMOUNT',
+          method: null,
+          methodLast4: null,
+          amountVnd: 0n,
+          mockReference: null,
+          responseSnapshot: {
+            paymentId: '550e8400-e29b-41d4-a716-446655440053',
+            orderId: '550e8400-e29b-41d4-a716-446655440043',
+            provider: 'ZERO_AMOUNT',
+            paymentStatus: 'SUCCESS',
+            orderStatus: 'PAID',
+            amountVnd: 0,
+            pointsEarned: 0,
+            createdAt: paymentAt.toISOString(),
+          },
+          finalOutcomeSnapshot: null,
+          reconciliationState: 'NONE',
+          hasFinancialException: false,
+          createdAt: paymentAt,
+          gatewayEvents: [],
+        },
+      ],
+    };
+
+    const cancelledReconcilingOrder = {
+      ...order,
+      id: '550e8400-e29b-41d4-a716-446655440044',
+      status: 'CANCELLED',
+      pointsEarned: 0,
+      expiresAt: new Date(Date.now() - 10 * 60_000),
+      payments: [
+        {
+          id: '550e8400-e29b-41d4-a716-446655440054',
+          status: 'PENDING',
+          provider: 'VNPAY',
+          method: null,
+          methodLast4: null,
+          amountVnd: 98000n,
+          mockReference: null,
+          responseSnapshot: null,
+          finalOutcomeSnapshot: null,
+          reconciliationState: 'SCHEDULED',
+          hasFinancialException: false,
+          createdAt: paymentAt,
+          gatewayEvents: [],
+        },
+      ],
+    };
+
+    prisma.order.count.mockResolvedValue(4);
+    prisma.order.findMany.mockResolvedValue([
+      vnpaySuccessOrder,
+      vnpayFailedOrder,
+      zeroAmountOrder,
+      cancelledReconcilingOrder,
+    ]);
+
+    const { body } = await get().expect(200);
+    expect(body.items[0].payment).toMatchObject({
+      provider: 'VNPAY',
+      status: 'SUCCESS',
+      method: null,
+      methodLast4: null,
+      mockReference: null,
+      failureReason: null,
+      resolution: 'PAYMENT_ACCEPTED',
+      requiresReview: false,
+      canRetry: false,
+    });
+    expect(body.items[1].payment).toMatchObject({
+      provider: 'VNPAY',
+      status: 'FAILED',
+      method: null,
+      failureReason: 'VNPAY_RESPONSE_24',
+      resolution: 'FAILED',
+      requiresReview: false,
+      canRetry: true,
+    });
+    expect(body.items[2].payment).toMatchObject({
+      provider: 'ZERO_AMOUNT',
+      status: 'SUCCESS',
+      method: null,
+      amountVnd: 0,
+      failureReason: null,
+      resolution: 'PAYMENT_ACCEPTED',
+      requiresReview: false,
+      canRetry: false,
+    });
+    expect(body.items[3].payment).toMatchObject({
+      provider: 'VNPAY',
+      status: 'PENDING',
+      resolution: 'RECONCILING',
+      requiresReview: false,
+      canRetry: false,
+    });
+  });
+
+  it('surfaces Order-level hasFinancialException and FINANCIAL_EXCEPTION resolution even when representative payment is SUCCESS', async () => {
+    prisma.order.count.mockResolvedValue(1);
+    prisma.order.findMany.mockResolvedValue([
+      {
+        ...order,
+        status: 'PAID',
+        expiresAt: new Date(Date.now() + 10 * 60_000),
+        payments: [
+          {
+            id: successPaymentId,
+            status: 'SUCCESS',
+            provider: 'MOCK',
+            method: 'CARD',
+            methodLast4: '1234',
+            amountVnd: 98000n,
+            mockReference: `MOCK-${successPaymentId}`,
+            responseSnapshot: paymentSnapshot(successPaymentId, 'SUCCESS'),
+            reconciliationState: 'NONE',
+            hasFinancialException: false,
+            createdAt: paymentAt,
+            gatewayEvents: [],
+          },
+          {
+            id: failedPaymentId,
+            status: 'PENDING',
+            provider: 'VNPAY',
+            method: null,
+            methodLast4: null,
+            amountVnd: 98000n,
+            mockReference: null,
+            responseSnapshot: null,
+            reconciliationState: 'REQUIRES_REVIEW',
+            hasFinancialException: true,
+            createdAt: new Date(paymentAt.getTime() - 60_000),
+            gatewayEvents: [
+              {
+                outcome: 'SUCCESS',
+                disposition: 'FINANCIAL_EXCEPTION',
+                exceptionReason: 'ANOTHER_PAYMENT_ALREADY_SUCCEEDED',
+              },
+            ],
+          },
+        ],
+      },
+    ]);
+
+    const { body } = await get().expect(200);
+    expect(body.items[0]).toMatchObject({
+      id: orderId,
+      status: 'PAID',
+      hasFinancialException: true,
+      payment: {
+        id: successPaymentId,
+        status: 'SUCCESS',
+        provider: 'MOCK',
+        resolution: 'FINANCIAL_EXCEPTION',
+        requiresReview: true,
+        canRetry: false,
+      },
+    });
+  });
 });

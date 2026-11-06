@@ -440,6 +440,12 @@ describe("SCRUM-64: Order History UI & GET /orders/me Contract Tests", () => {
       setIsSubmittingOrder: () => {},
       setOrderError: () => {},
       clearOrderFlowState: () => {},
+      appliedCoupon: null,
+      couponStatus: "idle",
+      couponErrorMessage: null,
+      couponErrorCode: null,
+      applyCoupon: async () => null,
+      removeCoupon: () => {},
     };
 
     const html = ReactDOMServer.renderToStaticMarkup(
@@ -905,6 +911,12 @@ describe("SCRUM-64: Order History UI & GET /orders/me Contract Tests", () => {
         setIsSubmittingOrder: () => {},
         setOrderError: () => {},
         clearOrderFlowState: () => {},
+      appliedCoupon: null,
+      couponStatus: "idle",
+      couponErrorMessage: null,
+      couponErrorCode: null,
+      applyCoupon: async () => null,
+      removeCoupon: () => {},
       };
 
       const html = ReactDOMServer.renderToStaticMarkup(
@@ -1962,6 +1974,113 @@ describe("SCRUM-64: Order History UI & GET /orders/me Contract Tests", () => {
         crossUserAccess,
         null,
         "Snapshot modal của User A tuyệt đối không được phép mở hoặc giữ lại trong phiên User B"
+      );
+    });
+
+    it("14d. Hỗ trợ Phase 2 Payment Status (VNPAY PENDING/SUCCESS/FAILED, ZERO_AMOUNT, RECONCILING, hasFinancialException) trong GET /orders/me & isOrderPayable (SCRUM-88)", () => {
+      const now = Date.parse("2026-10-29T10:05:00.000Z");
+      const baseSubtotal = MOCK_MY_ORDERS_RESPONSE.items[0].subtotalVnd;
+      const phase2Response = validateMyOrdersResponseData({
+        items: [
+          {
+            id: "550e8400-e29b-41d4-a716-446655440081",
+            status: "PENDING",
+            createdAt: "2026-10-29T10:00:00.000Z",
+            expiresAt: "2026-10-29T10:15:00.000Z",
+            subtotalVnd: baseSubtotal,
+            discountVnd: 0,
+            totalVnd: baseSubtotal,
+            couponCode: null,
+            pointsEarned: 0,
+            hasFinancialException: false,
+            items: MOCK_MY_ORDERS_RESPONSE.items[0].items,
+            payment: {
+              id: "550e8400-e29b-41d4-a716-446655440082",
+              status: "PENDING",
+              provider: "VNPAY",
+              method: null,
+              methodLast4: null,
+              amountVnd: baseSubtotal,
+              mockReference: null,
+              failureReason: null,
+              resolution: "PROCESSING",
+              requiresReview: false,
+              canRetry: false,
+              createdAt: "2026-10-29T10:01:00.000Z",
+            },
+          },
+          {
+            id: "550e8400-e29b-41d4-a716-446655440083",
+            status: "PAID",
+            createdAt: "2026-10-29T10:00:00.000Z",
+            expiresAt: "2026-10-29T10:15:00.000Z",
+            subtotalVnd: baseSubtotal,
+            discountVnd: baseSubtotal,
+            totalVnd: 0,
+            couponCode: "FREE100",
+            pointsEarned: 0,
+            hasFinancialException: false,
+            items: MOCK_MY_ORDERS_RESPONSE.items[0].items,
+            payment: {
+              id: "550e8400-e29b-41d4-a716-446655440084",
+              status: "SUCCESS",
+              provider: "ZERO_AMOUNT",
+              method: null,
+              methodLast4: null,
+              amountVnd: 0,
+              mockReference: null,
+              failureReason: null,
+              resolution: "PAYMENT_ACCEPTED",
+              requiresReview: false,
+              canRetry: false,
+              createdAt: "2026-10-29T10:00:05.000Z",
+            },
+          },
+          {
+            id: "550e8400-e29b-41d4-a716-446655440085",
+            status: "PAYMENT_FAILED",
+            createdAt: "2026-10-29T10:00:00.000Z",
+            expiresAt: "2026-10-29T10:15:00.000Z",
+            subtotalVnd: baseSubtotal,
+            discountVnd: 0,
+            totalVnd: baseSubtotal,
+            couponCode: null,
+            pointsEarned: 0,
+            hasFinancialException: false,
+            items: MOCK_MY_ORDERS_RESPONSE.items[0].items,
+            payment: {
+              id: "550e8400-e29b-41d4-a716-446655440086",
+              status: "FAILED",
+              provider: "VNPAY",
+              method: null,
+              methodLast4: null,
+              amountVnd: baseSubtotal,
+              mockReference: null,
+              failureReason: "24",
+              resolution: "FAILED",
+              requiresReview: false,
+              canRetry: true,
+              createdAt: "2026-10-29T10:02:00.000Z",
+            },
+          },
+        ],
+        meta: { page: null, limit: null, total: 3, totalPages: null },
+      });
+
+      assert.equal(phase2Response.items.length, 3);
+      // Đơn có payment PENDING không cho phép bấm Thanh toán lại để tránh tạo duplicate payment
+      assert.equal(isOrderPayable(phase2Response.items[0], now), false);
+      // Đơn ZERO_AMOUNT đã PAID -> không payable
+      assert.equal(isOrderPayable(phase2Response.items[1], now), false);
+      // Đơn VNPAY FAILED còn hạn -> cho phép Thanh toán lại
+      assert.equal(isOrderPayable(phase2Response.items[2], now), true);
+      // Nếu đơn có hasFinancialException = true -> khóa Thanh toán lại
+      assert.equal(
+        isOrderPayable(
+          { ...phase2Response.items[2], hasFinancialException: true },
+          now
+        ),
+        false
       );
     });
   });

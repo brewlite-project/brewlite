@@ -77,8 +77,19 @@ export function PaymentFailedRetryView({
     setIsExpiredState(isOrderExpired(activeOrder));
   }
 
-  // Terminal state: Quá hạn 15 phút hoặc đơn hàng đã bị CANCELLED từ máy chủ
-  const isTerminal = isExpiredState || isCancelled;
+  // Terminal state: Quá hạn 15 phút, đơn hàng đã bị CANCELLED từ máy chủ, hoặc có ngoại lệ tài chính / đang đối soát
+  const isReviewOrException =
+    activeOrder.hasFinancialException === true ||
+    activeOrder.payment?.requiresReview === true ||
+    activeOrder.payment?.resolution === "FINANCIAL_EXCEPTION" ||
+    activeOrder.payment?.resolution === "REQUIRES_REVIEW";
+  const isReconcilingOrBlocked =
+    activeOrder.payment?.status === "PENDING" ||
+    activeOrder.payment?.resolution === "RECONCILING" ||
+    activeOrder.payment?.resolution === "PROCESSING" ||
+    activeOrder.payment?.canRetry === false;
+  const isTerminal =
+    isExpiredState || isCancelled || isReviewOrException || isReconcilingOrBlocked;
 
   // Trạng thái mất đồng bộ Server Truth: Khóa retry form khi refetch GET /orders/me thất bại
   const [isServerSyncFailed, setIsServerSyncFailed] = useState<boolean>(false);
@@ -417,7 +428,11 @@ export function PaymentFailedRetryView({
                       }`}
                     ></span>
                     {/* Hiển thị chính xác trạng thái từ server, không tự ý gán ép CANCELLED/EXPIRED */}
-                    {isCancelled
+                    {isReviewOrException
+                      ? "FINANCIAL_EXCEPTION / REQUIRES_REVIEW"
+                      : isCancelled && activeOrder.payment?.resolution === "RECONCILING"
+                      ? "CANCELLED • RECONCILING (ĐANG ĐỐI SOÁT)"
+                      : isCancelled
                       ? "CANCELLED (ĐÃ HỦY)"
                       : isExpiredState
                       ? `${activeOrder.status} (QUÁ HẠN 15 PHÚT)`
@@ -668,10 +683,20 @@ export function PaymentFailedRetryView({
                     </span>
                   </div>
                   <h3 className="text-base font-bold text-on-surface">
-                    {isCancelled ? "Đơn hàng đã bị hủy" : "Không thể thử lại cho đơn hàng này"}
+                    {isReviewOrException
+                      ? "Đơn hàng cần đối soát tài chính (REQUIRES_REVIEW)"
+                      : isCancelled && activeOrder.payment?.resolution === "RECONCILING"
+                      ? "Đơn hàng đã hủy — Đang đối soát giao dịch VNPay"
+                      : isCancelled
+                      ? "Đơn hàng đã bị hủy"
+                      : "Không thể thử lại cho đơn hàng này"}
                   </h3>
                   <p className="text-xs text-on-surface-variant max-w-md mx-auto leading-relaxed">
-                    {isCancelled
+                    {isReviewOrException
+                      ? "Hệ thống ghi nhận dấu hiệu bất thường hoặc giao dịch thành công trễ hạn cần bộ phận vận hành kiểm tra thủ công. Đã khóa tạo giao dịch mới để bảo vệ quyền lợi của bạn."
+                      : isCancelled && activeOrder.payment?.resolution === "RECONCILING"
+                      ? "Đơn hàng đã quá thời gian giữ chỗ và bị hủy tự động, tuy nhiên giao dịch VNPay của bạn vẫn đang được hệ thống đối soát với ngân hàng."
+                      : isCancelled
                       ? "Đơn hàng này đã bị hủy trên hệ thống. Tồn kho và ưu đãi đã được hoàn trả để đảm bảo công bằng cho các khách hàng khác."
                       : "Thời gian giữ chỗ đơn hàng đã kết thúc (15 phút). Bạn không thể tiếp tục thử lại thanh toán cho đơn hàng này nữa."}
                   </p>

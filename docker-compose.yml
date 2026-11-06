@@ -29,6 +29,7 @@ services:
     restart: "no"
     command: ["npm", "run", "db:migrate"]
     environment:
+      NODE_ENV: ${NODE_ENV:-development}
       DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL with host postgres in compose.env}
     depends_on:
       postgres:

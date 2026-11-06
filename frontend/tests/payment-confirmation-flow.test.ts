@@ -245,24 +245,34 @@ describe("SCRUM-69: End-to-End Payment & Confirmation Flow Integration Tests", (
         );
         if (exists.rowCount === 0) {
           await adminClient.query(`CREATE DATABASE ${testDbName}`);
-          const { execSync } = backendRequire("node:child_process") as typeof import("node:child_process");
-          const tempUrl = new URL(rawBaseUrl);
-          tempUrl.pathname = `/${testDbName}`;
-          execSync("npx prisma migrate deploy --config prisma7.config.ts", {
-            cwd: backendDir,
-            env: { ...process.env, DATABASE_URL: tempUrl.toString() },
-            stdio: "ignore",
-          });
         }
       } finally {
         await adminClient.end();
       }
 
       dbUrlObj.pathname = `/${testDbName}`;
-      process.env.DATABASE_URL = dbUrlObj.toString();
+      assert.equal(
+        dbUrlObj.pathname,
+        `/${testDbName}`,
+        `Test database pathname must strictly target /${testDbName}`
+      );
+      const testDatabaseUrl = dbUrlObj.toString();
+
+      // Luôn chạy prisma migrate deploy trên brewlite_scrum69_test_db để đảm bảo
+      // test DB tái sử dụng giữa các lần chạy luôn có đầy đủ migrations mới nhất (SCRUM-76, v.v.).
+      const { execSync } = backendRequire("node:child_process") as typeof import("node:child_process");
+      execSync("npx prisma migrate deploy --config prisma7.config.ts", {
+        cwd: backendDir,
+        env: { ...process.env, DATABASE_URL: testDatabaseUrl },
+        stdio: "ignore",
+      });
+
+      process.env.DATABASE_URL = testDatabaseUrl;
       process.env.JWT_SECRET =
         process.env.JWT_SECRET || "brewlite-test-only-secret-at-least-32-bytes";
       process.env.ORDER_EXPIRATION_ENABLED = "false";
+      process.env.PAYMENT_RECONCILIATION_ENABLED = "false";
+      process.env.MOCK_PAYMENT_ENABLED = "true";
 
       const { NestFactory } = backendRequire("@nestjs/core") as {
         NestFactory: {
@@ -477,7 +487,13 @@ describe("SCRUM-69: End-to-End Payment & Confirmation Flow Integration Tests", (
       const submissionResult = await executePaymentSubmission(paymentDeps);
       assert.equal(submissionResult.skipped, false);
       assert.ok(submissionResult.outcome);
-      assert.equal(submissionResult.outcome.type, "success");
+      assert.equal(
+        submissionResult.outcome.type,
+        "success",
+        submissionResult.outcome.type === "error"
+          ? `Expected payment submission success, got error: statusCode=${String(submissionResult.outcome.error.statusCode)} code=${String(submissionResult.outcome.error.code)} message=${submissionResult.outcome.error.message}`
+          : `Expected payment submission success, got outcome=${JSON.stringify(submissionResult.outcome)}`
+      );
       assert.ok(paymentResultDto !== null);
 
       const verifiedPayment = paymentResultDto as PaymentResponseDto;
@@ -614,7 +630,13 @@ describe("SCRUM-69: End-to-End Payment & Confirmation Flow Integration Tests", (
 
       const firstAttempt = await executePaymentSubmission(firstDeps);
       assert.ok(firstAttempt.outcome);
-      assert.equal(firstAttempt.outcome.type, "failed");
+      assert.equal(
+        firstAttempt.outcome.type,
+        "failed",
+        firstAttempt.outcome.type === "error"
+          ? `Expected first payment attempt failed (DECLINED), got error: statusCode=${String(firstAttempt.outcome.error.statusCode)} code=${String(firstAttempt.outcome.error.code)} message=${firstAttempt.outcome.error.message}`
+          : `Expected first payment attempt failed (DECLINED), got outcome=${JSON.stringify(firstAttempt.outcome)}`
+      );
       assert.equal(firstAttempt.outcome.response.paymentStatus, "FAILED");
       assert.equal(firstAttempt.outcome.response.orderStatus, "PAYMENT_FAILED");
       assert.equal(firstAttempt.outcome.response.failureReason, "PAYMENT_DECLINED");
