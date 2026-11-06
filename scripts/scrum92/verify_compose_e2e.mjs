@@ -112,8 +112,13 @@ export function parseEnvFile(filePath) {
     if (!line || line.startsWith('#')) continue;
     const eqIdx = line.indexOf('=');
     if (eqIdx === -1) continue;
-    const key = line.slice(0, eqIdx).trim();
-    const val = line.slice(eqIdx + 1).trim();
+    // Accept dotenv-style `export KEY=value` lines.
+    const key = line.slice(0, eqIdx).trim().replace(/^export\s+/, '');
+    let val = line.slice(eqIdx + 1).trim();
+    // Strip one pair of matching surrounding quotes ("..." or '...') like dotenv / Docker Compose do.
+    if (val.length >= 2 && (val[0] === '"' || val[0] === "'") && val[val.length - 1] === val[0]) {
+      val = val.slice(1, -1);
+    }
     result[key] = val;
   }
   return result;
@@ -345,8 +350,31 @@ function assertIsolatedDownTarget() {
   }
 }
 
+function volumeExists(volumeName) {
+  const res = spawnSync('docker', ['volume', 'inspect', volumeName], {
+    cwd: ROOT,
+    encoding: 'utf8',
+    windowsHide: true,
+  });
+  return !res.error && res.status === 0;
+}
+
 async function ensureIsolatedPostgresReadyForCleanup() {
-  // 1. Validate container metadata fail-closed BEFORE starting postgres
+  // 0. After `--down` the postgres container no longer exists but the isolated named volume is preserved.
+  //    Re-create ONLY the isolated postgres service against that exact volume so cleanup can still run.
+  if (!runDockerCompose(['ps', '-a', '-q', 'postgres'])) {
+    if (!volumeExists(ISOLATED_VOLUME_NAME)) {
+      throw new Error(
+        `Safety Guard (Fail-Closed): No postgres container and no isolated volume "${ISOLATED_VOLUME_NAME}" exist for project "${ISOLATED_PROJECT_NAME}"; there is nothing to clean up.`,
+      );
+    }
+    console.log(
+      `[SCRUM-92] Isolated postgres container not found (stack was brought down); re-creating it on preserved volume "${ISOLATED_VOLUME_NAME}" before cleanup...`,
+    );
+    runDockerCompose(['up', '-d', '--no-deps', 'postgres']);
+  }
+
+  // 1. Validate container metadata fail-closed BEFORE using postgres
   const pgId = assertIsolatedPostgresTarget({ requireLiveSql: false });
   const initialState = inspectContainer(pgId, '{{.State.Status}}:{{.State.Health.Status}}');
 
@@ -429,6 +457,45 @@ function loadArtifactStateFile() {
   for (const id of raw.paymentIds || []) artifacts.paymentIds.add(assertUuid(id, 'saved paymentId'));
   if (raw.couponId) artifacts.couponId = assertUuid(raw.couponId, 'saved couponId');
   return artifacts;
+}
+
+function hasTrackedArtifacts(artifacts) {
+  return (
+    artifacts.userIds.size > 0 ||
+    artifacts.orderIds.size > 0 ||
+    artifacts.paymentIds.size > 0 ||
+    Boolean(artifacts.couponId)
+  );
+}
+
+/**
+ * Fail fast (before any assertion on stock or any new write) when a previous run left test data behind
+ * (`--keep-artifacts` or an interrupted run). This guarantees tracked UUIDs are never overwritten/lost.
+ */
+function assertNoStaleArtifacts() {
+  let saved;
+  try {
+    saved = loadArtifactStateFile();
+  } catch (err) {
+    throw new Error(
+      `Safety Guard: cannot read artifact state file ${ARTIFACT_STATE_FILE} (${err.message || err}). ` +
+        `Inspect/remove it manually, then run: node scripts/scrum92/verify_compose_e2e.mjs --cleanup-artifacts`,
+    );
+  }
+  assertUuid(TEST_COUPON_ID, 'TEST_COUPON_ID');
+  const couponCount = Number(
+    runPsqlTuple(
+      `SELECT count(*) FROM coupons WHERE id = '${TEST_COUPON_ID}' OR code = '${TEST_COUPON_CODE}';`,
+    ),
+  );
+  const staleInState = hasTrackedArtifacts(saved);
+  if (staleInState || couponCount > 0) {
+    throw new Error(
+      `Stale SCRUM-92 test data from a previous run detected (${staleInState ? `tracked IDs in ${ARTIFACT_STATE_FILE}` : 'no tracked IDs'}` +
+        `${couponCount > 0 ? `; fixture coupon "${TEST_COUPON_CODE}" still exists in the isolated database` : ''}). ` +
+        `Run this first, then re-run the verification: node scripts/scrum92/verify_compose_e2e.mjs --cleanup-artifacts`,
+    );
+  }
 }
 
 function seedIsolatedZeroCoupon(createdArtifacts) {
@@ -781,6 +848,17 @@ async function main() {
     runDockerCompose(['up', '-d', '--build']);
   }
 
+  if (!shouldUp) {
+    // Fail fast instead of polling for 120s when the isolated stack was never started.
+    const missing = ['postgres', 'backend', 'frontend'].filter((svc) => !runDockerCompose(['ps', '-q', svc]));
+    if (missing.length > 0) {
+      throw new Error(
+        `Isolated stack "${ISOLATED_PROJECT_NAME}" is not running (missing running service(s): ${missing.join(', ')}). ` +
+          `Start it with: node scripts/scrum92/verify_compose_e2e.mjs --up`,
+      );
+    }
+  }
+
   const states = await waitForStackReady();
   const targetMeta = assertIsolatedComposeTarget();
   console.log('Isolated Target Verified:', JSON.stringify(targetMeta));
@@ -789,6 +867,7 @@ async function main() {
 
   console.log('\n=== [1] Database Migration & Seed Verification (psql) ===');
   ensureCatalogSeededIfEmpty();
+  assertNoStaleArtifacts();
   const dbCheckOut = runPsql(
     `SELECT current_database() AS database_name,
             (SELECT count(*) FROM "_prisma_migrations" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL) AS completed_migrations,
@@ -803,12 +882,8 @@ async function main() {
     new RegExp(`${ISOLATED_DATABASE_NAME}\\s+\\|\\s+9\\s+\\|\\s+4\\s+\\|\\s+9\\s+\\|\\s+5\\s+\\|\\s+25`),
   );
 
-  const createdArtifacts = {
-    userIds: new Set(),
-    orderIds: new Set(),
-    paymentIds: new Set(),
-    couponId: null,
-  };
+  // Inherit anything tracked on disk (empty after assertNoStaleArtifacts) so tracked UUIDs can never be lost.
+  const createdArtifacts = loadArtifactStateFile();
 
   let primaryError = null;
 

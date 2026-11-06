@@ -84,6 +84,9 @@ To guarantee that running automated E2E verification **never** disrupts an activ
    - Uses fixed coupon ID `c9200000-0000-4000-8000-000000000092` (`SCRUM92FREE`) without `ON CONFLICT DO UPDATE`. Refuses to run if `SCRUM92FREE` or `c9200000-0000-4000-8000-000000000092` already exists in the DB.
    - Tracks exact entity UUIDs (`userIds`, `orderIds`, `paymentIds`, `couponId`) in a temporary state file (`os.tmpdir()/brewlite-scrum92-e2e-artifacts.json`) as records are created.
    - By default, `finally` restores reserved product stock, deletes **only** those exact IDs, and removes the temporary state file.
+   - On every run, right after the seed check (before any stock assertion), the verifier stops immediately with an explicit message if tracked IDs remain in the state file or the fixture coupon still exists in the isolated database; the in-memory artifact set is initialised from the state file, so tracked UUIDs are never overwritten.
+   - `--cleanup-artifacts` also works after `--down`: if the isolated postgres container is gone it re-creates only that service on the preserved isolated volume (fail-closed metadata validation still runs before any SQL).
+   - Running without `--up` while the isolated stack is not running fails immediately with a hint to add `--up` (no 120s wait).
    - If you run with `--keep-artifacts` (to inspect test rows manually) and later want to re-run without hitting the coupon collision guard, run the scoped recovery cleanup command:
      ```bash
      node scripts/scrum92/verify_compose_e2e.mjs --cleanup-artifacts
@@ -231,7 +234,7 @@ curl -s http://localhost:13000/api/backend/products/a3000000-0000-4000-8000-0000
 ### 2.6. Payment Flow via Reverse Proxy (`POST /payments`, `POST /payments/zero-amount` & `POST /payments/vnpay/initiate`)
 
 **Command (executed by `node scripts/scrum92/verify_compose_e2e.mjs` steps `[6]` and `[6b]`)**:
-1. `POST http://localhost:13000/api/backend/payments` (Mock) in Compose (`NODE_ENV=production`) $\rightarrow$ `403 Forbidden` (`code: "MOCK_PAYMENT_DISABLED"`, per `SCRUM-85` / `P2-11`).
+1. `POST http://localhost:13000/api/backend/payments` (Mock) in the isolated E2E stack (`NODE_ENV=test`, `MOCK_PAYMENT_ENABLED` not enabled) $\rightarrow$ `403 Forbidden` (`code: "MOCK_PAYMENT_DISABLED"`, per `SCRUM-85` / `P2-11`).
 2. `POST http://localhost:13000/api/backend/payments/zero-amount` on positive order (`104000 VND`) $\rightarrow$ `409 Conflict` (`code: "ORDER_NOT_ZERO_AMOUNT"`, per `SCRUM-84` / `P2-10`).
 3. `POST http://localhost:13000/api/backend/payments/zero-amount` on a `0 VND` order $\rightarrow$ `201 Created` (`provider: "ZERO_AMOUNT"`, `paymentStatus: "SUCCESS"`, `orderStatus: "PAID"`), followed by idempotent replay with identical `Idempotency-Key` $\rightarrow$ `200 OK` (`idempotency-replayed: true`).
 4. `POST http://localhost:13000/api/backend/payments/vnpay/initiate` on the `104000 VND` `PENDING` order $\rightarrow$ `201 Created` (`provider: "VNPAY"`, `paymentStatus: "PENDING"`), followed by idempotent replay $\rightarrow$ `200 OK` (`idempotency-replayed: true`).
@@ -328,6 +331,6 @@ Post-Restart SQL Snapshot:
 
 - **Module / Owner**: `P2-17` (`SCRUM-91` — `README.md`, `docs/Docker_Compose.md`).
 - **Chi tiết & Giải pháp đã áp dụng**:
-  1. Bổ sung script [`scripts/compose-preflight-env.ps1`](../../scripts/compose-preflight-env.ps1) tương đương với `scripts/compose-preflight-env.sh` (kiểm tra đủ 24 biến nội suy của `docker-compose.yml`) để người dùng Windows PowerShell không gặp lỗi `WSL_E_DEFAULT_DISTRO_NOT_FOUND`.
+  1. Bổ sung script [`scripts/compose-preflight-env.ps1`](../../scripts/compose-preflight-env.ps1) tương đương với `scripts/compose-preflight-env.sh` (kiểm tra đủ 25 biến nội suy của `docker-compose.yml`, cùng `COMPOSE_PROJECT_NAME`) để người dùng Windows PowerShell không gặp lỗi `WSL_E_DEFAULT_DISTRO_NOT_FOUND`.
   2. Cập nhật [`README.md`](../../README.md) và [`docs/Docker_Compose.md`](../Docker_Compose.md) với hướng dẫn đầy đủ cho cả **Git Bash** và **Windows PowerShell**, kèm bước kiểm tra deterministic trạng thái container `migrate` (`exited:0`) trước khi chạy `db:seed`.
   3. Bổ sung script kiểm thử E2E tự động [`scripts/scrum92/verify_compose_e2e.mjs`](../../scripts/scrum92/verify_compose_e2e.mjs) chạy trên project/volume/database/host-ports cô lập (`-p brewlite_scrum92_e2e`, `brewlite_scrum92_e2e_brewlite_pgdata`, `brewlite_seed_scrum92_e2e`, cổng `13000`/`13001`/`15492`), tự động recover `postgres` trước khi cleanup trong `finally`, và hỗ trợ `--cleanup-artifacts` để dọn dẹp an toàn sau khi dùng `--keep-artifacts`.
