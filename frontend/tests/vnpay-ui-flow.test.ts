@@ -1988,10 +1988,13 @@ describe("VNPay Phase 2 UI & Flow Deep Test Suite", () => {
         ],
       };
 
+      const sessionExpiresAt = new Date(Date.now() + 780000).toISOString();
+
       // Older PENDING order also in history + Target order already finalized as PAID + Payment SUCCESS
       const olderPendingOrder = {
         ...staleSessionOrder,
         id: olderPendingOrderId,
+        expiresAt: sessionExpiresAt,
         status: "PENDING",
         pointsEarned: 0,
         hasFinancialException: false,
@@ -2001,6 +2004,7 @@ describe("VNPay Phase 2 UI & Flow Deep Test Suite", () => {
       const finalizedPaidOrder = {
         ...staleSessionOrder,
         id: targetOrderId,
+        expiresAt: sessionExpiresAt,
         status: "PAID",
         pointsEarned: 9,
         hasFinancialException: false,
