@@ -7,9 +7,35 @@
 
 import { isValidUuid } from "./api.service";
 import { isTokenExpired } from "./auth.service";
-import { isValidIsoUtcString, validateMyOrdersResponse, validatePaymentResponseData } from "./payment.service";
+import {
+  buildVnPayOrderConfirmationUrl,
+  extractOrderIdFromVnPayOrderInfo,
+  extractVnPayReturnContext,
+  fetchPaymentStatusApi,
+  isValidIsoUtcString,
+  validateMyOrdersResponse,
+  validatePaymentResponseData,
+  validatePaymentStatusResponseData,
+  type VnPayReturnContext,
+} from "./payment.service";
+import type {
+  PaymentProvider,
+  PaymentResolution,
+  PaymentStatusResponseDto,
+} from "@/mock-data";
 
-export { isValidIsoUtcString };
+export {
+  buildVnPayOrderConfirmationUrl,
+  extractOrderIdFromVnPayOrderInfo,
+  extractVnPayReturnContext,
+  fetchPaymentStatusApi,
+  isValidIsoUtcString,
+  validatePaymentStatusResponseData,
+  type PaymentProvider,
+  type PaymentResolution,
+  type PaymentStatusResponseDto,
+  type VnPayReturnContext,
+};
 
 export type OrderStatus =
   | "PENDING"
@@ -42,11 +68,15 @@ export interface OrderItemSummary {
 export interface PaymentSummary {
   id: string;
   status: "SUCCESS" | "FAILED" | "PENDING";
-  method: PaymentMethodType;
+  provider?: PaymentProvider;
+  method: PaymentMethodType | null;
   methodLast4: string | null;
   amountVnd: number;
   mockReference: string | null;
   failureReason: string | null;
+  resolution?: PaymentResolution;
+  requiresReview?: boolean;
+  canRetry?: boolean;
   createdAt: string;
 }
 
@@ -60,6 +90,7 @@ export interface OrderConfirmationData {
   totalVnd: number;
   couponCode: string | null;
   pointsEarned: number;
+  hasFinancialException?: boolean;
   items: OrderItemSummary[];
   payment: PaymentSummary | null;
 }
@@ -87,7 +118,6 @@ export interface PaymentApiResponse {
   failureReason: "PAYMENT_DECLINED" | null;
   createdAt: string;
 }
-
 
 /**
  * Định tuyến endpoint: sử dụng Next.js proxy rewrite `/api/backend/...` trên trình duyệt
@@ -152,6 +182,139 @@ export function isOrderExpired(
 }
 
 /**
+ * Kiểm tra đơn hàng trên trang xác nhận có được phép thực hiện Retry thanh toán hay không (BR-03, BR-05 & RD-01).
+ * Tuyệt đối khóa Retry khi:
+ * - Order đã hết hạn hoặc không ở trạng thái PENDING / PAYMENT_FAILED.
+ * - Order hoặc Payment có cờ hasFinancialException / requiresReview / resolution === FINANCIAL_EXCEPTION / REQUIRES_REVIEW.
+ * - Payment đang ở trạng thái PENDING (đang chờ đối soát VNPay IPN/QueryDR) hoặc canRetry === false từ Backend.
+ */
+export function canOrderRetryPayment(
+  order: OrderConfirmationData | null | undefined,
+  referenceNowMs: number = Date.now()
+): boolean {
+  if (!order) return false;
+  if (order.status !== "PENDING" && order.status !== "PAYMENT_FAILED") {
+    return false;
+  }
+  if (isOrderExpired(order, referenceNowMs)) {
+    return false;
+  }
+  if (order.hasFinancialException === true) {
+    return false;
+  }
+  const payment = order.payment;
+  if (!payment) {
+    return true;
+  }
+  if (
+    payment.status === "PENDING" ||
+    payment.status === "SUCCESS" ||
+    payment.requiresReview === true ||
+    payment.resolution === "FINANCIAL_EXCEPTION" ||
+    payment.resolution === "REQUIRES_REVIEW" ||
+    payment.resolution === "PROCESSING" ||
+    payment.resolution === "RECONCILING" ||
+    payment.provider === "ZERO_AMOUNT" ||
+    payment.method === "ZERO_AMOUNT"
+  ) {
+    return false;
+  }
+  if (payment.canRetry === false) {
+    return false;
+  }
+  return true;
+}
+
+export interface OrderConfirmationPollingConfig {
+  intervalMs: number;
+  maxAttempts: number;
+}
+
+const DEFAULT_ORDER_CONFIRMATION_POLLING_CONFIG: OrderConfirmationPollingConfig = {
+  intervalMs: 3000,
+  maxAttempts: 10,
+};
+
+let currentOrderConfirmationPollingConfig: OrderConfirmationPollingConfig = {
+  ...DEFAULT_ORDER_CONFIRMATION_POLLING_CONFIG,
+};
+
+export function getOrderConfirmationPollingConfig(): OrderConfirmationPollingConfig {
+  return { ...currentOrderConfirmationPollingConfig };
+}
+
+export function setOrderConfirmationPollingConfig(
+  overrides: Partial<OrderConfirmationPollingConfig>
+): void {
+  currentOrderConfirmationPollingConfig = {
+    ...currentOrderConfirmationPollingConfig,
+    ...overrides,
+  };
+}
+
+export function resetOrderConfirmationPollingConfig(): void {
+  currentOrderConfirmationPollingConfig = {
+    ...DEFAULT_ORDER_CONFIRMATION_POLLING_CONFIG,
+  };
+}
+
+/**
+ * Xác định xem đơn hàng trên trang Order Confirmation có cần thực hiện bounded polling hay không.
+ * - Chỉ poll khi trạng thái đang PENDING, PROCESSING hoặc RECONCILING.
+ * - Dừng ngay lập tức khi gặp bất kỳ trạng thái kết thúc (terminal state) nào:
+ *   SUCCESS/PAID, FAILED terminal, CANCELLED, hoặc Financial Exception / Requires Review.
+ */
+export function shouldPollOrderConfirmation(
+  order: OrderConfirmationData | null | undefined
+): boolean {
+  if (!order) return false;
+
+  // 1. Dừng khi gặp terminal state: SUCCESS / PAID
+  if (
+    order.status === "PAID" ||
+    order.status === "PREPARING" ||
+    order.status === "READY" ||
+    order.status === "COMPLETED" ||
+    order.payment?.status === "SUCCESS" ||
+    order.payment?.resolution === "PAYMENT_ACCEPTED"
+  ) {
+    return false;
+  }
+
+  // 2. Dừng khi gặp terminal state: CANCELLED
+  if (order.status === "CANCELLED") {
+    return false;
+  }
+
+  // 3. Dừng khi gặp terminal state: Financial Exception / Requires Review
+  if (
+    order.hasFinancialException === true ||
+    order.payment?.requiresReview === true ||
+    order.payment?.resolution === "FINANCIAL_EXCEPTION" ||
+    order.payment?.resolution === "REQUIRES_REVIEW"
+  ) {
+    return false;
+  }
+
+  // 4. Dừng khi gặp terminal state: FAILED terminal
+  if (
+    order.status === "PAYMENT_FAILED" ||
+    order.payment?.status === "FAILED" ||
+    order.payment?.resolution === "FAILED"
+  ) {
+    return false;
+  }
+
+  // 5. Chỉ poll khi đang ở trạng thái chờ kết quả / đối soát: PENDING, PROCESSING, RECONCILING
+  return (
+    order.status === "PENDING" ||
+    order.payment?.status === "PENDING" ||
+    order.payment?.resolution === "PROCESSING" ||
+    order.payment?.resolution === "RECONCILING"
+  );
+}
+
+/**
  * Format thời gian còn lại mm:ss cho countdown timer.
  */
 export function formatRemainingTime(remainingSeconds: number): string {
@@ -192,27 +355,48 @@ export async function fetchMyOrdersApi(token: string): Promise<OrderConfirmation
 }
 
 /**
- * Tìm kiếm đơn hàng theo orderId từ danh sách đơn của user.
- * Nếu không truyền orderId, trả về đơn hàng mới nhất của người dùng.
+ * Tìm kiếm đơn hàng theo orderId (hoặc vnpTxnRef khi quay về từ VNPay Return URL) từ danh sách đơn của user.
+ * Khi thiếu cả orderId và vnpTxnRef hợp lệ, TUYỆT ĐỐI KHÔNG tự ý chọn order mới nhất!
  */
 export function findOrderForConfirmation(
   orders: OrderConfirmationData[],
-  targetOrderId?: string | null
+  targetOrderId?: string | null,
+  vnpTxnRef?: string | null
 ): OrderConfirmationData | null {
   if (!orders || orders.length === 0) return null;
 
-  // Khi URL thiếu orderId (undefined, null, hoặc chuỗi rỗng):
-  // TUYỆT ĐỐI KHÔNG tự ý chọn order mới nhất! Phải trả về null để giao diện yêu cầu cung cấp mã đơn.
-  if (!targetOrderId || typeof targetOrderId !== "string" || targetOrderId.trim() === "") {
-    return null;
+  const cleanId =
+    typeof targetOrderId === "string" ? targetOrderId.trim() : "";
+  if (cleanId && isValidUuid(cleanId)) {
+    const match = orders.find(
+      (o) => o.id && o.id.trim().toLowerCase() === cleanId.toLowerCase()
+    );
+    if (match) return match;
   }
 
-  const cleanId = targetOrderId.trim();
-  if (!isValidUuid(cleanId)) return null;
+  const cleanTxnRef =
+    typeof vnpTxnRef === "string"
+      ? vnpTxnRef.trim().replace(/-/g, "").toLowerCase()
+      : "";
+  if (cleanTxnRef.length >= 8) {
+    const matchByTxnRef = orders.find((o) => {
+      const paymentId = o.payment?.id;
+      if (typeof paymentId !== "string" || !paymentId.trim()) return false;
+      const normalizedPaymentId = paymentId
+        .trim()
+        .replace(/-/g, "")
+        .toLowerCase();
+      return (
+        normalizedPaymentId === cleanTxnRef ||
+        paymentId.trim().toLowerCase() === vnpTxnRef!.trim().toLowerCase()
+      );
+    });
+    if (matchByTxnRef) return matchByTxnRef;
+  }
 
-  // Tìm chính xác đơn hàng theo UUID: nếu không thấy, trả về null, KHÔNG mở nhầm đơn khác
-  const match = orders.find((o) => o.id === cleanId);
-  return match || null;
+  // Khi không khớp UUID và không có vnpTxnRef hợp lệ:
+  // TUYỆT ĐỐI KHÔNG tự ý chọn order mới nhất! Phải trả về null để giao diện yêu cầu cung cấp mã đơn.
+  return null;
 }
 
 /**

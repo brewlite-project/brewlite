@@ -17,6 +17,8 @@ import {
   type OrderSubmissionErrorState,
   type OrderToppingSnapshotDto,
   type PaymentMethod,
+  type PaymentProvider,
+  type PaymentResolution,
   type PaymentStatus,
 } from "@/mock-data";
 import { isValidIsoUtcString } from "./payment.service";
@@ -1134,11 +1136,29 @@ export const VALID_ORDER_STATUSES: readonly OrderStatus[] = [
 export const VALID_PAYMENT_STATUSES: readonly PaymentStatus[] = [
   "SUCCESS",
   "FAILED",
+  "PENDING",
 ] as const;
 
 export const VALID_PAYMENT_METHODS: readonly PaymentMethod[] = [
   "CARD",
   "WALLET",
+  "VNPAY",
+  "ZERO_AMOUNT",
+] as const;
+
+export const VALID_PAYMENT_PROVIDERS: readonly PaymentProvider[] = [
+  "MOCK",
+  "VNPAY",
+  "ZERO_AMOUNT",
+] as const;
+
+export const VALID_PAYMENT_RESOLUTIONS: readonly PaymentResolution[] = [
+  "PROCESSING",
+  "RECONCILING",
+  "PAYMENT_ACCEPTED",
+  "FAILED",
+  "FINANCIAL_EXCEPTION",
+  "REQUIRES_REVIEW",
 ] as const;
 
 /**
@@ -1290,17 +1310,60 @@ export function validateOrderPaymentSummaryData(
     );
   }
 
-  if (
-    typeof payment.method !== "string" ||
-    !VALID_PAYMENT_METHODS.includes(payment.method as PaymentMethod)
-  ) {
+  let provider: PaymentProvider | undefined = undefined;
+  if ("provider" in payment && payment.provider !== undefined) {
+    if (
+      typeof payment.provider !== "string" ||
+      !VALID_PAYMENT_PROVIDERS.includes(payment.provider as PaymentProvider)
+    ) {
+      throw createOrderError(
+        `Trường payment.provider của đơn hàng thứ ${orderIdx + 1} không hợp lệ.`,
+        500,
+        "INTERNAL_ERROR",
+        undefined,
+        false
+      );
+    }
+    provider = payment.provider as PaymentProvider;
+  }
+
+  if (!("method" in payment) || payment.method === undefined) {
     throw createOrderError(
-      `Phương thức thanh toán (payment.method) của đơn hàng thứ ${orderIdx + 1} không hợp lệ.`,
+      `Thiếu trường payment.method của đơn hàng thứ ${orderIdx + 1}.`,
       500,
       "INTERNAL_ERROR",
       undefined,
       false
     );
+  }
+
+  if (provider === "VNPAY" || provider === "ZERO_AMOUNT") {
+    if (
+      payment.method !== null &&
+      (typeof payment.method !== "string" ||
+        !VALID_PAYMENT_METHODS.includes(payment.method as PaymentMethod))
+    ) {
+      throw createOrderError(
+        `Phương thức thanh toán (payment.method) của đơn hàng thứ ${orderIdx + 1} không hợp lệ.`,
+        500,
+        "INTERNAL_ERROR",
+        undefined,
+        false
+      );
+    }
+  } else {
+    if (
+      typeof payment.method !== "string" ||
+      !VALID_PAYMENT_METHODS.includes(payment.method as PaymentMethod)
+    ) {
+      throw createOrderError(
+        `Phương thức thanh toán (payment.method) của đơn hàng thứ ${orderIdx + 1} không hợp lệ.`,
+        500,
+        "INTERNAL_ERROR",
+        undefined,
+        false
+      );
+    }
   }
 
   if (
@@ -1357,6 +1420,51 @@ export function validateOrderPaymentSummaryData(
     );
   }
 
+  let resolution: PaymentResolution | undefined = undefined;
+  if ("resolution" in payment && payment.resolution !== undefined) {
+    if (
+      typeof payment.resolution !== "string" ||
+      !VALID_PAYMENT_RESOLUTIONS.includes(payment.resolution as PaymentResolution)
+    ) {
+      throw createOrderError(
+        `Trường payment.resolution của đơn hàng thứ ${orderIdx + 1} không hợp lệ.`,
+        500,
+        "INTERNAL_ERROR",
+        undefined,
+        false
+      );
+    }
+    resolution = payment.resolution as PaymentResolution;
+  }
+
+  let requiresReview: boolean | undefined = undefined;
+  if ("requiresReview" in payment && payment.requiresReview !== undefined) {
+    if (typeof payment.requiresReview !== "boolean") {
+      throw createOrderError(
+        `Trường payment.requiresReview của đơn hàng thứ ${orderIdx + 1} phải là boolean.`,
+        500,
+        "INTERNAL_ERROR",
+        undefined,
+        false
+      );
+    }
+    requiresReview = payment.requiresReview;
+  }
+
+  let canRetry: boolean | undefined = undefined;
+  if ("canRetry" in payment && payment.canRetry !== undefined) {
+    if (typeof payment.canRetry !== "boolean") {
+      throw createOrderError(
+        `Trường payment.canRetry của đơn hàng thứ ${orderIdx + 1} phải là boolean.`,
+        500,
+        "INTERNAL_ERROR",
+        undefined,
+        false
+      );
+    }
+    canRetry = payment.canRetry;
+  }
+
   if (
     typeof payment.createdAt !== "string" ||
     !isValidIsoUtcString(payment.createdAt)
@@ -1373,7 +1481,8 @@ export function validateOrderPaymentSummaryData(
   return {
     id: payment.id.trim(),
     status: payment.status as PaymentStatus,
-    method: payment.method as PaymentMethod,
+    ...(provider !== undefined ? { provider } : {}),
+    method: (payment.method as PaymentMethod | null),
     methodLast4:
       typeof payment.methodLast4 === "string"
         ? payment.methodLast4.trim()
@@ -1387,6 +1496,9 @@ export function validateOrderPaymentSummaryData(
       typeof payment.failureReason === "string"
         ? payment.failureReason.trim()
         : null,
+    ...(resolution !== undefined ? { resolution } : {}),
+    ...(requiresReview !== undefined ? { requiresReview } : {}),
+    ...(canRetry !== undefined ? { canRetry } : {}),
     createdAt: payment.createdAt.trim(),
   };
 }
@@ -1734,6 +1846,20 @@ export function validateOrderHistoryItemData(
     );
   }
 
+  let hasFinancialException: boolean | undefined = undefined;
+  if ("hasFinancialException" in record && record.hasFinancialException !== undefined) {
+    if (typeof record.hasFinancialException !== "boolean") {
+      throw createOrderError(
+        `Trường hasFinancialException ở đơn hàng thứ ${orderIdx + 1} phải là boolean.`,
+        500,
+        "INTERNAL_ERROR",
+        undefined,
+        false
+      );
+    }
+    hasFinancialException = record.hasFinancialException;
+  }
+
   const validatedPayment = validateOrderPaymentSummaryData(
     record.payment,
     orderIdx
@@ -1763,6 +1889,7 @@ export function validateOrderHistoryItemData(
     couponCode:
       typeof record.couponCode === "string" ? record.couponCode.trim() : null,
     pointsEarned: record.pointsEarned,
+    ...(hasFinancialException !== undefined ? { hasFinancialException } : {}),
     items: validatedItems,
     payment: validatedPayment,
   };

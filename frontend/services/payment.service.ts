@@ -10,7 +10,10 @@ import type {
   OrderStatus,
   PaymentErrorCode,
   PaymentMethod,
+  PaymentProvider,
+  PaymentResolution,
   PaymentResponseDto,
+  PaymentStatusResponseDto,
   PaymentSubmissionErrorState,
 } from "@/mock-data";
 import { API_BASE_URL, isValidUuid } from "./api.service";
@@ -1037,17 +1040,64 @@ function validateOrderItemSnapshot(raw: unknown): OrderItemSnapshotDto | null {
   };
 }
 
+const VALID_PAYMENT_PROVIDERS: readonly PaymentProvider[] = [
+  "MOCK",
+  "VNPAY",
+  "ZERO_AMOUNT",
+] as const;
+
+const VALID_PAYMENT_RESOLUTIONS: readonly PaymentResolution[] = [
+  "PROCESSING",
+  "RECONCILING",
+  "PAYMENT_ACCEPTED",
+  "FAILED",
+  "FINANCIAL_EXCEPTION",
+  "REQUIRES_REVIEW",
+] as const;
+
 /**
  * Runtime validation cho PaymentSnapshot từ `GET /orders/me`:
  * - Không bao giờ tự mặc định/coerce trường sai sang `"CARD"`, `null` hoặc giá trị khác.
- * - Mọi trường bắt buộc phải tồn tại, đúng kiểu, đúng enum và đúng quy tắc nullable của API Contract v3.0 §4.2.
+ * - Mọi trường bắt buộc phải tồn tại, đúng kiểu, đúng enum và đúng quy tắc nullable của API Contract v3.0 §4.2 & v4.0 §8.
  */
 export function validatePaymentSnapshot(raw: unknown): MyOrderPaymentSummaryDto | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const p = raw as Record<string, unknown>;
   if (typeof p.id !== "string" || !isValidUuid(p.id.trim())) return null;
-  if (p.status !== "SUCCESS" && p.status !== "FAILED") return null;
-  if (p.method !== "CARD" && p.method !== "WALLET" && p.method !== "VNPAY" && p.method !== "ZERO_AMOUNT") return null;
+  if (p.status !== "SUCCESS" && p.status !== "FAILED" && p.status !== "PENDING") return null;
+
+  let provider: PaymentProvider | undefined = undefined;
+  if ("provider" in p && p.provider !== undefined) {
+    if (
+      typeof p.provider !== "string" ||
+      !VALID_PAYMENT_PROVIDERS.includes(p.provider as PaymentProvider)
+    ) {
+      return null;
+    }
+    provider = p.provider as PaymentProvider;
+  }
+
+  if (!("method" in p) || p.method === undefined) return null;
+  if (provider === "VNPAY" || provider === "ZERO_AMOUNT") {
+    if (
+      p.method !== null &&
+      p.method !== "VNPAY" &&
+      p.method !== "ZERO_AMOUNT" &&
+      p.method !== "CARD" &&
+      p.method !== "WALLET"
+    ) {
+      return null;
+    }
+  } else {
+    if (
+      p.method !== "CARD" &&
+      p.method !== "WALLET" &&
+      p.method !== "VNPAY" &&
+      p.method !== "ZERO_AMOUNT"
+    ) {
+      return null;
+    }
+  }
 
   if (!("methodLast4" in p) || p.methodLast4 === undefined) return null;
   if (
@@ -1060,6 +1110,7 @@ export function validatePaymentSnapshot(raw: unknown): MyOrderPaymentSummaryDto 
   if (
     typeof p.amountVnd !== "number" ||
     !Number.isSafeInteger(p.amountVnd) ||
+    ((provider === "ZERO_AMOUNT" || p.method === "ZERO_AMOUNT") && p.amountVnd !== 0) ||
     p.amountVnd < 0
   ) {
     return null;
@@ -1074,8 +1125,40 @@ export function validatePaymentSnapshot(raw: unknown): MyOrderPaymentSummaryDto 
   }
 
   if (!("failureReason" in p) || p.failureReason === undefined) return null;
-  if (p.failureReason !== null && p.failureReason !== "PAYMENT_DECLINED") {
-    return null;
+  if (provider === "VNPAY" || provider === "ZERO_AMOUNT" || p.method === "VNPAY" || p.method === "ZERO_AMOUNT") {
+    if (
+      p.failureReason !== null &&
+      (typeof p.failureReason !== "string" || !p.failureReason.trim())
+    ) {
+      return null;
+    }
+  } else {
+    if (p.failureReason !== null && p.failureReason !== "PAYMENT_DECLINED") {
+      return null;
+    }
+  }
+
+  let resolution: PaymentResolution | undefined = undefined;
+  if ("resolution" in p && p.resolution !== undefined) {
+    if (
+      typeof p.resolution !== "string" ||
+      !VALID_PAYMENT_RESOLUTIONS.includes(p.resolution as PaymentResolution)
+    ) {
+      return null;
+    }
+    resolution = p.resolution as PaymentResolution;
+  }
+
+  let requiresReview: boolean | undefined = undefined;
+  if ("requiresReview" in p && p.requiresReview !== undefined) {
+    if (typeof p.requiresReview !== "boolean") return null;
+    requiresReview = p.requiresReview;
+  }
+
+  let canRetry: boolean | undefined = undefined;
+  if ("canRetry" in p && p.canRetry !== undefined) {
+    if (typeof p.canRetry !== "boolean") return null;
+    canRetry = p.canRetry;
   }
 
   if (typeof p.createdAt !== "string" || !isValidIsoUtcString(p.createdAt)) return null;
@@ -1084,11 +1167,15 @@ export function validatePaymentSnapshot(raw: unknown): MyOrderPaymentSummaryDto 
   return {
     id: p.id.trim(),
     status: p.status,
-    method: p.method,
+    ...(provider !== undefined ? { provider } : {}),
+    method: (p.method as PaymentMethod | null),
     methodLast4: p.methodLast4,
     amountVnd: p.amountVnd,
     mockReference: typeof p.mockReference === "string" ? p.mockReference.trim() : null,
-    failureReason: p.failureReason,
+    failureReason: typeof p.failureReason === "string" ? p.failureReason.trim() : null,
+    ...(resolution !== undefined ? { resolution } : {}),
+    ...(requiresReview !== undefined ? { requiresReview } : {}),
+    ...(canRetry !== undefined ? { canRetry } : {}),
     createdAt: new Date(createdAtMs).toISOString(),
   };
 }
@@ -1134,6 +1221,12 @@ export function validateMyOrderSnapshot(raw: unknown): MyOrderDto | null {
     return null;
   }
 
+  let hasFinancialException: boolean | undefined = undefined;
+  if ("hasFinancialException" in o && o.hasFinancialException !== undefined) {
+    if (typeof o.hasFinancialException !== "boolean") return null;
+    hasFinancialException = o.hasFinancialException;
+  }
+
   if (!Array.isArray(o.items)) return null;
   const validItems: OrderItemSnapshotDto[] = [];
   for (const it of o.items) {
@@ -1162,6 +1255,7 @@ export function validateMyOrderSnapshot(raw: unknown): MyOrderDto | null {
     totalVnd: o.totalVnd,
     couponCode: typeof o.couponCode === "string" && o.couponCode.trim() ? o.couponCode.trim() : null,
     pointsEarned: typeof o.pointsEarned === "number" && o.pointsEarned >= 0 ? o.pointsEarned : 0,
+    ...(hasFinancialException !== undefined ? { hasFinancialException } : {}),
     items: validItems,
     payment,
   };
@@ -1308,14 +1402,140 @@ export async function fetchMyOrdersApi(
   return validateMyOrdersResponse(rawData);
 }
 
+export interface VnPayReturnContext {
+  hasVnPayReturnParams: boolean;
+  orderIdFromParams: string | null;
+  vnpTxnRef: string | null;
+  vnpResponseCode: string | null;
+  vnpTransactionStatus: string | null;
+  vnpBankCode: string | null;
+  vnpPayDate: string | null;
+  vnpTransactionNo: string | null;
+  vnpOrderInfo: string | null;
+}
+
+/**
+ * Trích xuất UUID của đơn hàng từ trường `vnp_OrderInfo` (VD: "Thanh toan don hang 809cdca3-8ba3-428f-b64c-84f5196e7dc0").
+ * Chỉ dùng làm gợi ý điều hướng/tra cứu đơn hàng; trạng thái thanh toán luôn lấy từ Server Truth (`GET /orders/me`).
+ */
+export function extractOrderIdFromVnPayOrderInfo(
+  orderInfo?: string | null
+): string | null {
+  if (typeof orderInfo !== "string" || !orderInfo.trim()) return null;
+  const uuidMatch = orderInfo.match(
+    /[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i
+  );
+  return uuidMatch ? uuidMatch[0].toLowerCase() : null;
+}
+
+/**
+ * Trích xuất ngữ cảnh VNPay Return URL từ query parameters.
+ * Lưu ý bảo mật (BR-04): `vnp_ResponseCode=00` hoặc các tham số `vnp_*` tuyệt đối KHÔNG bao giờ được dùng
+ * để đánh dấu giao dịch thành công; chúng chỉ dùng làm gợi ý định tuyến/tra cứu đơn hàng từ `GET /orders/me`.
+ */
+export function extractVnPayReturnContext(
+  searchParams?: { get: (key: string) => string | null } | URLSearchParams | null
+): VnPayReturnContext {
+  const readParam = (key: string): string | null => {
+    if (!searchParams || typeof searchParams.get !== "function") return null;
+    const raw = searchParams.get(key);
+    if (typeof raw !== "string") return null;
+    const trimmed = raw.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  };
+
+  const explicitOrderId = readParam("orderId");
+  const vnpOrderInfo = readParam("vnp_OrderInfo");
+  const vnpTxnRef = readParam("vnp_TxnRef");
+  const vnpResponseCode = readParam("vnp_ResponseCode");
+  const vnpTransactionStatus = readParam("vnp_TransactionStatus");
+  const vnpBankCode = readParam("vnp_BankCode");
+  const vnpPayDate = readParam("vnp_PayDate");
+  const vnpTransactionNo = readParam("vnp_TransactionNo");
+  const vnpSecureHash = readParam("vnp_SecureHash");
+  const vnpAmount = readParam("vnp_Amount");
+
+  const hasVnPayReturnParams = Boolean(
+    vnpResponseCode ||
+      vnpTxnRef ||
+      vnpTransactionStatus ||
+      vnpOrderInfo ||
+      vnpSecureHash ||
+      vnpTransactionNo ||
+      vnpBankCode ||
+      vnpPayDate ||
+      vnpAmount
+  );
+
+  const orderIdFromParams =
+    (explicitOrderId && isValidUuid(explicitOrderId)
+      ? explicitOrderId.toLowerCase()
+      : explicitOrderId) || extractOrderIdFromVnPayOrderInfo(vnpOrderInfo);
+
+  return {
+    hasVnPayReturnParams,
+    orderIdFromParams: orderIdFromParams || null,
+    vnpTxnRef,
+    vnpResponseCode,
+    vnpTransactionStatus,
+    vnpBankCode,
+    vnpPayDate,
+    vnpTransactionNo,
+    vnpOrderInfo,
+  };
+}
+
+/**
+ * Tạo đường dẫn `/order-confirmation` chuẩn từ `orderId` và giữ lại các tham số ngữ cảnh VNPay (`vnp_*`).
+ */
+export function buildVnPayOrderConfirmationUrl(
+  orderId: string,
+  searchParams?: { get: (key: string) => string | null } | URLSearchParams | null,
+  extraParams?: Record<string, string | null | undefined>
+): string {
+  const params = new URLSearchParams();
+  params.set("orderId", orderId.trim());
+
+  const preservedKeys = [
+    "vnp_ResponseCode",
+    "vnp_TransactionStatus",
+    "vnp_TxnRef",
+    "vnp_BankCode",
+    "vnp_PayDate",
+    "vnp_TransactionNo",
+    "vnp_OrderInfo",
+  ] as const;
+
+  if (searchParams && typeof searchParams.get === "function") {
+    for (const key of preservedKeys) {
+      const val = searchParams.get(key);
+      if (typeof val === "string" && val.trim().length > 0) {
+        params.set(key, val.trim());
+      }
+    }
+  }
+
+  if (extraParams) {
+    for (const [k, v] of Object.entries(extraParams)) {
+      if (typeof v === "string" && v.trim().length > 0) {
+        params.set(k, v.trim());
+      }
+    }
+  }
+
+  return `/order-confirmation?${params.toString()}`;
+}
+
 /**
  * Tìm đơn hàng mục tiêu từ kết quả `GET /orders/me`:
  * - Nếu có `targetOrderId`: tìm đúng Order có `id === targetOrderId`.
- * - Nếu không truyền `targetOrderId`: ưu tiên lấy Order đang active (`PENDING` hoặc `PAYMENT_FAILED`).
+ * - Nếu có `vnpTxnRef` (mã tham chiếu VNPay `paymentId` không dấu gạch ngang): tìm đúng Order có `payment.id` khớp `vnpTxnRef`.
+ * - Nếu không truyền `targetOrderId` / `vnpTxnRef`: ưu tiên lấy Order đang active (`PENDING` hoặc `PAYMENT_FAILED`).
  */
 export function selectTargetOrderFromMyOrders(
   orders: MyOrderDto[],
-  targetOrderId?: string | null
+  targetOrderId?: string | null,
+  vnpTxnRef?: string | null
 ): MyOrderDto | null {
   if (!Array.isArray(orders) || orders.length === 0) return null;
 
@@ -1327,6 +1547,24 @@ export function selectTargetOrderFromMyOrders(
       (o) => o.id && o.id.trim().toLowerCase() === normalizedTarget
     );
     if (matched) return matched;
+  }
+
+  const normalizedTxnRef =
+    typeof vnpTxnRef === "string"
+      ? vnpTxnRef.trim().replace(/-/g, "").toLowerCase()
+      : "";
+
+  if (normalizedTxnRef.length >= 8) {
+    const matchedByTxnRef = orders.find((o) => {
+      const paymentId = o.payment?.id;
+      if (typeof paymentId !== "string" || !paymentId.trim()) return false;
+      const cleanPaymentId = paymentId.trim().replace(/-/g, "").toLowerCase();
+      return (
+        cleanPaymentId === normalizedTxnRef ||
+        paymentId.trim().toLowerCase() === vnpTxnRef!.trim().toLowerCase()
+      );
+    });
+    if (matchedByTxnRef) return matchedByTxnRef;
   }
 
   // Ưu tiên đơn hàng đang chờ thanh toán (PENDING hoặc PAYMENT_FAILED)
@@ -1374,9 +1612,170 @@ export async function fetchAuthMeProfile(
   }
 }
 
+/**
+ * Runtime validation cho phản hồi `GET /payments/:paymentId/status` (API-03, API Contract v4.0 Mục 5 & Phụ lục C).
+ */
+export function validatePaymentStatusResponseData(
+  raw: unknown
+): PaymentStatusResponseDto {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw createPaymentError(
+      "Phản hồi GET /payments/:paymentId/status không phải là object JSON hợp lệ.",
+      502,
+      "INTERNAL_ERROR",
+      "",
+      { canRetrySameKey: false }
+    );
+  }
+
+  const r = raw as Record<string, unknown>;
+  const paymentId =
+    typeof r.paymentId === "string" ? r.paymentId.trim() : "";
+  const orderId =
+    typeof r.orderId === "string" ? r.orderId.trim() : "";
+
+  if (!paymentId) {
+    throw createPaymentError(
+      "Phản hồi trạng thái thanh toán có paymentId không hợp lệ.",
+      502,
+      "INTERNAL_ERROR",
+      "",
+      { canRetrySameKey: false }
+    );
+  }
+
+  if (!orderId) {
+    throw createPaymentError(
+      "Phản hồi trạng thái thanh toán có orderId không hợp lệ.",
+      502,
+      "INTERNAL_ERROR",
+      "",
+      { canRetrySameKey: false }
+    );
+  }
+
+  const validProviders: readonly string[] = ["VNPAY", "MOCK", "ZERO_AMOUNT", "CARD", "WALLET"];
+  if (
+    typeof r.provider !== "string" ||
+    !validProviders.includes(r.provider)
+  ) {
+    throw createPaymentError(
+      "Trường provider trong phản hồi trạng thái thanh toán không hợp lệ.",
+      502,
+      "INTERNAL_ERROR",
+      "",
+      { canRetrySameKey: false }
+    );
+  }
+
+  if (
+    r.paymentStatus !== "PENDING" &&
+    r.paymentStatus !== "SUCCESS" &&
+    r.paymentStatus !== "FAILED"
+  ) {
+    throw createPaymentError(
+      "Trường paymentStatus trong phản hồi trạng thái thanh toán không hợp lệ.",
+      502,
+      "INTERNAL_ERROR",
+      "",
+      { canRetrySameKey: false }
+    );
+  }
+
+  const validOrderStatuses: readonly OrderStatus[] = [
+    "PENDING",
+    "PAYMENT_FAILED",
+    "PAID",
+    "PREPARING",
+    "READY",
+    "COMPLETED",
+    "CANCELLED",
+  ];
+  if (
+    typeof r.orderStatus !== "string" ||
+    !validOrderStatuses.includes(r.orderStatus as OrderStatus)
+  ) {
+    throw createPaymentError(
+      "Trường orderStatus trong phản hồi trạng thái thanh toán không hợp lệ.",
+      502,
+      "INTERNAL_ERROR",
+      "",
+      { canRetrySameKey: false }
+    );
+  }
+
+  if (
+    typeof r.amountVnd !== "number" ||
+    !Number.isSafeInteger(r.amountVnd) ||
+    r.amountVnd < 0
+  ) {
+    throw createPaymentError(
+      "Trường amountVnd trong phản hồi trạng thái thanh toán không hợp lệ.",
+      502,
+      "INTERNAL_ERROR",
+      "",
+      { canRetrySameKey: false }
+    );
+  }
+
+  if (
+    typeof r.resolution !== "string" ||
+    !VALID_PAYMENT_RESOLUTIONS.includes(r.resolution as PaymentResolution)
+  ) {
+    throw createPaymentError(
+      "Trường resolution trong phản hồi trạng thái thanh toán không hợp lệ.",
+      502,
+      "INTERNAL_ERROR",
+      "",
+      { canRetrySameKey: false }
+    );
+  }
+
+  if (typeof r.requiresReview !== "boolean" || typeof r.canRetry !== "boolean") {
+    throw createPaymentError(
+      "Trường requiresReview hoặc canRetry trong phản hồi trạng thái thanh toán không hợp lệ.",
+      502,
+      "INTERNAL_ERROR",
+      "",
+      { canRetrySameKey: false }
+    );
+  }
+
+  if (
+    typeof r.createdAt !== "string" ||
+    !isValidIsoUtcString(r.createdAt) ||
+    typeof r.orderExpiresAt !== "string" ||
+    !isValidIsoUtcString(r.orderExpiresAt) ||
+    typeof r.lastUpdatedAt !== "string" ||
+    !isValidIsoUtcString(r.lastUpdatedAt)
+  ) {
+    throw createPaymentError(
+      "Các mốc thời gian createdAt, orderExpiresAt, lastUpdatedAt phải đúng chuẩn ISO 8601 UTC.",
+      502,
+      "INTERNAL_ERROR",
+      "",
+      { canRetrySameKey: false }
+    );
+  }
+
+  return {
+    paymentId,
+    orderId,
+    provider: r.provider as PaymentProvider,
+    paymentStatus: r.paymentStatus,
+    orderStatus: r.orderStatus as OrderStatus,
+    amountVnd: r.amountVnd,
+    resolution: r.resolution as PaymentResolution,
+    requiresReview: r.requiresReview,
+    canRetry: r.canRetry,
+    createdAt: r.createdAt,
+    orderExpiresAt: r.orderExpiresAt,
+    lastUpdatedAt: r.lastUpdatedAt,
+  };
+}
 
 // ============================================================================
-// VNPAY PHASE 2 APIS (API CONTRACT v4.0 §3, §5, §6 / BR-01..BR-06)
+// VNPAY & ZERO_AMOUNT PHASE 2 APIS (API CONTRACT v4.0 §3, §5, §6 / BR-01..BR-06)
 // ============================================================================
 
 export interface InitiateVnPayPaymentRequestDto {
@@ -1417,29 +1816,6 @@ export interface ZeroAmountPaymentResponseDto {
 export interface SubmitZeroAmountApiResult {
   response: ZeroAmountPaymentResponseDto;
   replayed: boolean;
-}
-
-export type PaymentResolution =
-  | "PROCESSING"
-  | "RECONCILING"
-  | "PAYMENT_ACCEPTED"
-  | "FAILED"
-  | "FINANCIAL_EXCEPTION"
-  | "REQUIRES_REVIEW";
-
-export interface PaymentStatusResponseDto {
-  paymentId: string;
-  orderId: string;
-  provider: "VNPAY" | "MOCK" | "ZERO_AMOUNT";
-  paymentStatus: "PENDING" | "SUCCESS" | "FAILED";
-  orderStatus: OrderStatus;
-  amountVnd: number;
-  resolution: PaymentResolution;
-  requiresReview: boolean;
-  canRetry: boolean;
-  createdAt: string;
-  orderExpiresAt: string;
-  lastUpdatedAt: string;
 }
 
 /**
@@ -1772,14 +2148,33 @@ export async function submitZeroAmountPaymentApi(
 
 /**
  * Tra cứu trạng thái giao dịch thanh toán qua `GET /payments/:paymentId/status` (API Contract v4.0 §5).
+ * Read-only, không tạo mới Payment attempt.
  */
 export async function fetchPaymentStatusApi(
   paymentId: string,
-  options?: {
-    accessToken?: string | null;
-  }
+  optionsOrToken?:
+    | string
+    | null
+    | {
+        accessToken?: string | null;
+      }
 ): Promise<PaymentStatusResponseDto> {
-  const token = options?.accessToken ?? getStoredToken();
+  const cleanPaymentId =
+    typeof paymentId === "string" ? paymentId.trim() : "";
+  if (!cleanPaymentId) {
+    throw createPaymentError(
+      "Mã thanh toán (paymentId) không hợp lệ.",
+      400,
+      "VALIDATION_ERROR",
+      ""
+    );
+  }
+
+  const token =
+    typeof optionsOrToken === "string"
+      ? optionsOrToken
+      : optionsOrToken?.accessToken ?? getStoredToken();
+
   if (!token || isTokenExpired(token)) {
     clearStoredSession();
     throw createPaymentError(
@@ -1791,18 +2186,18 @@ export async function fetchPaymentStatusApi(
     );
   }
 
-  if (!paymentId || typeof paymentId !== "string") {
-    throw createPaymentError("Mã thanh toán (paymentId) không hợp lệ.", 400, "VALIDATION_ERROR", "");
-  }
-
   let res: Response;
   try {
-    res = await fetch(resolveBackendEndpoint(`/payments/${encodeURIComponent(paymentId)}/status`), {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
+    res = await fetch(
+      resolveBackendEndpoint(`/payments/${encodeURIComponent(cleanPaymentId)}/status`),
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+        },
+      }
+    );
   } catch {
     throw createPaymentError(
       "Không thể kết nối tới máy chủ tra cứu thanh toán.",
@@ -1814,33 +2209,34 @@ export async function fetchPaymentStatusApi(
 
   if (res.status === 401) {
     clearStoredSession();
-    throw createPaymentError("Phiên làm việc hết hạn (401 UNAUTHORIZED).", 401, "UNAUTHORIZED", "");
-  }
-
-  if (!res.ok) {
     throw createPaymentError(
-      res.status === 404
-        ? "Không tìm thấy thông tin giao dịch thanh toán (404 NOT_FOUND)."
-        : `Không thể lấy trạng thái thanh toán (HTTP ${res.status}).`,
-      res.status,
-      res.status === 404 ? "NOT_FOUND" : "SERVER_ERROR",
+      "Phiên làm việc hết hạn (401 UNAUTHORIZED).",
+      401,
+      "UNAUTHORIZED",
       ""
     );
   }
 
-  const data = (await res.json()) as Record<string, unknown>;
-  return {
-    paymentId: String(data.paymentId || paymentId),
-    orderId: String(data.orderId || ""),
-    provider: (data.provider as "VNPAY" | "MOCK" | "ZERO_AMOUNT") || "VNPAY",
-    paymentStatus: (data.paymentStatus as "PENDING" | "SUCCESS" | "FAILED") || "PENDING",
-    orderStatus: (data.orderStatus as OrderStatus) || "PENDING",
-    amountVnd: Number(data.amountVnd) || 0,
-    resolution: (data.resolution as PaymentResolution) || "PROCESSING",
-    requiresReview: Boolean(data.requiresReview),
-    canRetry: Boolean(data.canRetry),
-    createdAt: typeof data.createdAt === "string" ? data.createdAt : new Date().toISOString(),
-    orderExpiresAt: typeof data.orderExpiresAt === "string" ? data.orderExpiresAt : new Date().toISOString(),
-    lastUpdatedAt: typeof data.lastUpdatedAt === "string" ? data.lastUpdatedAt : new Date().toISOString(),
-  };
+  if (res.status === 404) {
+    throw createPaymentError(
+      "Không tìm thấy thông tin giao dịch thanh toán (404 NOT_FOUND).",
+      404,
+      "NOT_FOUND",
+      "",
+      { canRetrySameKey: false }
+    );
+  }
+
+  if (!res.ok) {
+    throw createPaymentError(
+      `Không thể lấy trạng thái thanh toán (HTTP ${res.status}).`,
+      res.status,
+      res.status === 400 ? "VALIDATION_ERROR" : "SERVER_ERROR",
+      "",
+      { canRetrySameKey: false }
+    );
+  }
+
+  const rawData: unknown = await res.json().catch(() => null);
+  return validatePaymentStatusResponseData(rawData);
 }

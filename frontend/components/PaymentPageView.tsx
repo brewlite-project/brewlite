@@ -28,10 +28,13 @@ import {
 import {
   clearStoredSession,
   getDisplayCustomerName,
+  getStoredToken,
   isTokenExpired,
 } from "@/services/auth.service";
 import {
   buildCreatePaymentPayload,
+  buildVnPayOrderConfirmationUrl,
+  extractVnPayReturnContext,
   fetchAuthMeProfile,
   fetchMyOrdersApi,
   generateIdempotencyKey,
@@ -47,6 +50,17 @@ import {
   validateZeroAmountPaymentResponse,
   type SubmitPaymentApiResult,
 } from "@/services/payment.service";
+import {
+  getOrderConfirmationPollingConfig,
+  shouldPollOrderConfirmation,
+  type OrderConfirmationData,
+} from "@/services/order-confirmation.service";
+import { OrderSuccessView } from "@/components/OrderSuccessView";
+import { PaymentFailedRetryView } from "@/components/PaymentFailedRetryView";
+import { VnPayProcessingView } from "@/components/VnPayProcessingView";
+import { VnPaySuccessView } from "@/components/VnPaySuccessView";
+import { VnPayFailedRetryView } from "@/components/VnPayFailedRetryView";
+import { ZeroPaymentBypassView } from "@/components/ZeroPaymentBypassView";
 
 export type PaymentSubmissionOutcome =
   | {
@@ -329,18 +343,20 @@ export async function executePaymentSubmission(
   }
 }
 
+const FALLBACK_SAFE_ROUTER = {
+  push: () => {},
+  replace: () => {},
+  prefetch: () => {},
+  back: () => {},
+  forward: () => {},
+  refresh: () => {},
+};
+
 function useSafeAppRouter() {
   try {
-    return useRouter();
+    return useRouter() ?? FALLBACK_SAFE_ROUTER;
   } catch {
-    return {
-      push: () => {},
-      replace: () => {},
-      prefetch: () => {},
-      back: () => {},
-      forward: () => {},
-      refresh: () => {},
-    };
+    return FALLBACK_SAFE_ROUTER;
   }
 }
 
@@ -407,6 +423,12 @@ export default function PaymentPageView({
   const currentUserId =
     isAuthenticated && user?.id ? user.id.trim().toLowerCase() : null;
 
+  const initialSearchParams =
+    typeof window !== "undefined" && window.location?.search
+      ? new URLSearchParams(window.location.search)
+      : null;
+  const initialVnPayReturnCtx = extractVnPayReturnContext(initialSearchParams);
+
   // Khôi phục đơn hàng PENDING từ Checkout Flow Sprint 2 (nếu vừa chuyển từ CartDrawer sang)
   const sessionCheckoutOrder = useMemo<CreateOrderResponseDto | null>(() => {
     if (initialOrder) return initialOrder;
@@ -419,11 +441,51 @@ export default function PaymentPageView({
 
   const [serverOrder, setServerOrder] = useState<
     CreateOrderResponseDto | MyOrderDto | null
-  >(initialOrder ?? sessionCheckoutOrder);
-  const [isLoadingOrder, setIsLoadingOrder] = useState<boolean>(
-    !initialOrder && !sessionCheckoutOrder
+  >(
+    initialOrder ??
+      (initialVnPayReturnCtx.hasVnPayReturnParams ? null : sessionCheckoutOrder)
   );
+  const [isLoadingOrder, setIsLoadingOrder] = useState<boolean>(
+    (!initialOrder && !sessionCheckoutOrder) ||
+      (!initialOrder && initialVnPayReturnCtx.hasVnPayReturnParams)
+  );
+  const [hasLoadedServerTruth, setHasLoadedServerTruth] = useState<boolean>(
+    Boolean(initialOrder && !initialVnPayReturnCtx.hasVnPayReturnParams)
+  );
+  const [dismissedVnPayReturnView, setDismissedVnPayReturnView] =
+    useState<boolean>(false);
   const [loadOrderError, setLoadOrderError] = useState<string | null>(null);
+
+  const sessionCheckoutOrderRef = useRef<CreateOrderResponseDto | null>(
+    sessionCheckoutOrder
+  );
+  const resolvedOrderIdRef = useRef<string | null>(
+    initialOrder?.id ?? sessionCheckoutOrder?.id ?? null
+  );
+  const clearedPaidOrderIdRef = useRef<string | null>(null);
+  const notifiedSuccessOrderIdRef = useRef<string | null>(null);
+  const redirectedConfirmUrlRef = useRef<string | null>(null);
+  const pollAttemptsRef = useRef<number>(0);
+  const routerRef = useRef(router);
+  const onNavigateSuccessRef = useRef(onNavigateSuccess);
+  const clearCartRef = useRef(clearCart);
+  const setContextActiveOrderRef = useRef(setContextActiveOrder);
+
+  useEffect(() => {
+    routerRef.current = router;
+    onNavigateSuccessRef.current = onNavigateSuccess;
+    clearCartRef.current = clearCart;
+    setContextActiveOrderRef.current = setContextActiveOrder;
+  }, [router, onNavigateSuccess, clearCart, setContextActiveOrder]);
+
+  useEffect(() => {
+    if (sessionCheckoutOrder) {
+      sessionCheckoutOrderRef.current = sessionCheckoutOrder;
+      if (!resolvedOrderIdRef.current) {
+        resolvedOrderIdRef.current = sessionCheckoutOrder.id;
+      }
+    }
+  }, [sessionCheckoutOrder]);
 
   // Map hình ảnh sản phẩm thật từ GET /products
   const [productImagesById, setProductImagesById] = useState<
@@ -467,7 +529,16 @@ export default function PaymentPageView({
   const [paymentError, setPaymentError] =
     useState<PaymentSubmissionErrorState | null>(initialPaymentError);
 
-  const activeOrder = serverOrder ?? sessionCheckoutOrder;
+  const currentSearchParams =
+    typeof window !== "undefined" && window.location?.search
+      ? new URLSearchParams(window.location.search)
+      : null;
+  const vnpReturnCtx = extractVnPayReturnContext(currentSearchParams);
+
+  const activeOrder =
+    vnpReturnCtx.hasVnPayReturnParams && !hasLoadedServerTruth && !initialOrder
+      ? null
+      : serverOrder ?? sessionCheckoutOrder;
 
   const [submittedOrderStatus, setSubmittedOrderStatus] =
     useState<OrderStatus | null>(null);
@@ -503,122 +574,337 @@ export default function PaymentPageView({
   }, []);
 
   // Tải đơn hàng thật từ GET /orders/me và hồ sơ khách hàng từ GET /auth/me
-  const loadRealOrderAndProfile = useCallback(async () => {
-    if (isAuthLoading) return;
+  const loadRealOrderAndProfile = useCallback(
+    async (options?: {
+      silent?: boolean;
+      fromPoll?: boolean;
+    }): Promise<OrderConfirmationData | null> => {
+      if (isAuthLoading) return null;
 
-    if (!isAuthenticated || !accessToken) {
-      setIsLoadingOrder(false);
+      const effectiveToken =
+        accessToken ||
+        (isAuthenticated && typeof window !== "undefined"
+          ? getStoredToken()
+          : null);
+
+      if (!isAuthenticated || !effectiveToken) {
+        if (!options?.silent) {
+          setIsLoadingOrder(false);
+          setHasLoadedServerTruth(true);
+        }
+        return null;
+      }
+
+      if (!options?.silent) {
+        setIsLoadingOrder(true);
+        setLoadOrderError(null);
+      }
+
+      try {
+        const searchParams =
+          typeof window !== "undefined"
+            ? new URLSearchParams(window.location.search)
+            : null;
+        const returnCtx = extractVnPayReturnContext(searchParams);
+        const explicitOrderId = returnCtx.orderIdFromParams;
+        const fallbackOrderId =
+          resolvedOrderIdRef.current ||
+          sessionCheckoutOrderRef.current?.id ||
+          null;
+
+        const [myOrdersRes, authMeProfile] = await Promise.all([
+          fetchMyOrdersApi(effectiveToken),
+          fetchAuthMeProfile(effectiveToken),
+        ]);
+
+        // Tính tổng điểm tích lũy thật từ GET /auth/me (hoặc cộng từ các đơn hàng đã ghi nhận trong GET /orders/me)
+        if (authMeProfile && typeof authMeProfile.loyaltyPoints === "number") {
+          setLoyaltyPoints(authMeProfile.loyaltyPoints);
+        } else {
+          const totalEarnedFromOrders = myOrdersRes.items.reduce(
+            (sum, o) =>
+              sum + (typeof o.pointsEarned === "number" ? o.pointsEarned : 0),
+            0
+          );
+          setLoyaltyPoints(totalEarnedFromOrders);
+        }
+
+        // Ưu tiên khớp theo explicitOrderId (orderId hoặc vnp_OrderInfo) -> vnp_TxnRef -> fallbackOrderId (từ checkout session)
+        let targetOrder = selectTargetOrderFromMyOrders(
+          myOrdersRes.items,
+          explicitOrderId,
+          returnCtx.vnpTxnRef
+        );
+        if (
+          !targetOrder &&
+          !explicitOrderId &&
+          !returnCtx.vnpTxnRef &&
+          fallbackOrderId
+        ) {
+          targetOrder = selectTargetOrderFromMyOrders(
+            myOrdersRes.items,
+            fallbackOrderId,
+            null
+          );
+        } else if (
+          targetOrder &&
+          !explicitOrderId &&
+          !returnCtx.vnpTxnRef &&
+          fallbackOrderId &&
+          targetOrder.id.trim().toLowerCase() !==
+            fallbackOrderId.trim().toLowerCase()
+        ) {
+          const matchedFallback = myOrdersRes.items.find(
+            (o) =>
+              o.id.trim().toLowerCase() === fallbackOrderId.trim().toLowerCase()
+          );
+          if (matchedFallback) {
+            targetOrder = matchedFallback;
+          }
+        }
+
+        if (targetOrder) {
+          resolvedOrderIdRef.current = targetOrder.id;
+          setServerOrder(targetOrder);
+          setSubmittedOrderStatus(targetOrder.status);
+          setHasLoadedServerTruth(true);
+
+          const hasFinancialLock =
+            targetOrder.hasFinancialException === true ||
+            targetOrder.payment?.requiresReview === true ||
+            targetOrder.payment?.resolution === "FINANCIAL_EXCEPTION" ||
+            targetOrder.payment?.resolution === "REQUIRES_REVIEW";
+
+          const isConfirmedPaid =
+            !hasFinancialLock &&
+            (targetOrder.status === "PAID" ||
+              targetOrder.status === "PREPARING" ||
+              targetOrder.status === "READY" ||
+              targetOrder.status === "COMPLETED");
+
+          if (isConfirmedPaid) {
+            if (clearedPaidOrderIdRef.current !== targetOrder.id) {
+              clearedPaidOrderIdRef.current = targetOrder.id;
+              clearCartRef.current();
+              clearStoredActiveOrder();
+              setContextActiveOrderRef.current?.(null);
+            }
+          } else if (!isOrderPayable(targetOrder)) {
+            clearStoredActiveOrder();
+            setContextActiveOrderRef.current?.(null);
+          }
+
+          // Điều hướng sang /order-confirmation khi:
+          // 1. Có tham số VNPay Return URL (vnp_*) trên /payment, HOẶC
+          // 2. Đơn hàng VNPay đã được máy chủ xác nhận PAID + payment.status === "SUCCESS"
+          const isVnPayTarget =
+            targetOrder.payment?.provider === "VNPAY" ||
+            targetOrder.payment?.method === "VNPAY";
+          const isVnPayConfirmedSuccess =
+            isConfirmedPaid && targetOrder.payment?.status === "SUCCESS";
+
+          if (
+            returnCtx.hasVnPayReturnParams ||
+            (isVnPayTarget && isVnPayConfirmedSuccess)
+          ) {
+            const confirmUrl = buildVnPayOrderConfirmationUrl(
+              targetOrder.id,
+              searchParams
+            );
+            if (redirectedConfirmUrlRef.current !== confirmUrl) {
+              redirectedConfirmUrlRef.current = confirmUrl;
+              routerRef.current.replace(confirmUrl);
+            }
+            if (
+              isVnPayConfirmedSuccess &&
+              notifiedSuccessOrderIdRef.current !== targetOrder.id
+            ) {
+              notifiedSuccessOrderIdRef.current = targetOrder.id;
+              setVnPayFlowState("success");
+              onNavigateSuccessRef.current?.(confirmUrl);
+            }
+          }
+
+          // Nếu đơn hàng trên Server đã có Payment snapshot (ví dụ reload sau khi đã thanh toán Mock):
+          // khôi phục kết quả đã kiểm duyệt từ GET /orders/me mà KHÔNG gọi POST /payments lại (API Contract v3.0 §4.2 & §9)
+          if (
+            targetOrder.payment &&
+            !returnCtx.hasVnPayReturnParams &&
+            !isVnPayTarget
+          ) {
+            try {
+              const candidatePayment: PaymentResponseDto = {
+                paymentId: targetOrder.payment.id,
+                orderId: targetOrder.id,
+                paymentStatus: targetOrder.payment.status,
+                orderStatus:
+                  targetOrder.payment.status === "SUCCESS"
+                    ? "PAID"
+                    : "PAYMENT_FAILED",
+                amountVnd: targetOrder.payment.amountVnd,
+                method: targetOrder.payment.method,
+                methodLast4: targetOrder.payment.methodLast4 || "0000",
+                mockReference: targetOrder.payment.mockReference || "MOCK-0000",
+                pointsEarned: targetOrder.pointsEarned,
+                failureReason:
+                  targetOrder.payment.failureReason === "PAYMENT_DECLINED"
+                    ? "PAYMENT_DECLINED"
+                    : null,
+                createdAt: targetOrder.payment.createdAt,
+              };
+              const verifiedSnapshot = validatePaymentResponseData(
+                candidatePayment,
+                "",
+                {
+                  expectedOrderId: targetOrder.id,
+                  expectedAmountVnd: targetOrder.totalVnd,
+                }
+              );
+              setPaymentResult(verifiedSnapshot);
+            } catch {
+              // Bỏ qua nếu snapshot payment không hợp lệ
+            }
+          }
+
+          return targetOrder as unknown as OrderConfirmationData;
+        } else if (
+          !returnCtx.hasVnPayReturnParams &&
+          sessionCheckoutOrderRef.current
+        ) {
+          setServerOrder(sessionCheckoutOrderRef.current);
+          setSubmittedOrderStatus(sessionCheckoutOrderRef.current.status);
+          setHasLoadedServerTruth(true);
+        } else {
+          setServerOrder(null);
+          setHasLoadedServerTruth(true);
+        }
+      } catch (err: unknown) {
+        if (!options?.silent) {
+          const msg =
+            err instanceof Error && err.message
+              ? err.message
+              : "Không thể tải thông tin đơn hàng từ máy chủ (GET /orders/me).";
+          setLoadOrderError(msg);
+          setHasLoadedServerTruth(true);
+        }
+      } finally {
+        if (!options?.silent) {
+          setIsLoadingOrder(false);
+        }
+      }
+      return null;
+    },
+    [isAuthLoading, isAuthenticated, accessToken]
+  );
+
+  useEffect(() => {
+    const hasVnPayQuery =
+      typeof window !== "undefined" &&
+      extractVnPayReturnContext(new URLSearchParams(window.location.search))
+        .hasVnPayReturnParams;
+    if (initialOrder && !hasVnPayQuery) return;
+    pollAttemptsRef.current = 0;
+    let cancelled = false;
+    void Promise.resolve().then(() => {
+      if (!cancelled) {
+        void loadRealOrderAndProfile();
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [initialOrder, loadRealOrderAndProfile]);
+
+  // Bounded Polling trên /payment (dành cho luồng VNPay Return URL hoặc đơn VNPay đang PENDING / PROCESSING / RECONCILING):
+  // Tự động refetch GET /orders/me và chuyển sang trạng thái xác nhận thành công ngay khi máy chủ báo Payment SUCCESS + Order PAID mà không cần F5.
+  useEffect(() => {
+    const searchParams =
+      typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search)
+        : null;
+    const returnCtx = extractVnPayReturnContext(searchParams);
+    const effectiveToken =
+      accessToken ||
+      (isAuthenticated && typeof window !== "undefined"
+        ? getStoredToken()
+        : null);
+
+    if (
+      isLoadingOrder ||
+      !isAuthenticated ||
+      !effectiveToken ||
+      !serverOrder ||
+      (initialOrder && !returnCtx.hasVnPayReturnParams)
+    ) {
       return;
     }
 
-    setIsLoadingOrder(true);
-    setLoadOrderError(null);
+    const orderAsConfirmation = serverOrder as unknown as OrderConfirmationData;
+    const isVnPayInFlight =
+      returnCtx.hasVnPayReturnParams ||
+      orderAsConfirmation.payment?.provider === "VNPAY" ||
+      orderAsConfirmation.payment?.method === "VNPAY" ||
+      vnPayFlowState === "verifying" ||
+      vnPayFlowState === "redirecting" ||
+      isVnPayTabOpened;
 
-    try {
-      const searchParams =
-        typeof window !== "undefined"
-          ? new URLSearchParams(window.location.search)
-          : null;
-      const queryOrderId =
-        searchParams?.get("orderId") || sessionCheckoutOrder?.id || null;
-
-      const [myOrdersRes, authMeProfile] = await Promise.all([
-        fetchMyOrdersApi(accessToken),
-        fetchAuthMeProfile(accessToken),
-      ]);
-
-      // Tính tổng điểm tích lũy thật từ GET /auth/me (hoặc cộng từ các đơn hàng đã ghi nhận trong GET /orders/me)
-      if (authMeProfile && typeof authMeProfile.loyaltyPoints === "number") {
-        setLoyaltyPoints(authMeProfile.loyaltyPoints);
-      } else {
-        const totalEarnedFromOrders = myOrdersRes.items.reduce(
-          (sum, o) =>
-            sum + (typeof o.pointsEarned === "number" ? o.pointsEarned : 0),
-          0
-        );
-        setLoyaltyPoints(totalEarnedFromOrders);
-      }
-
-      const targetOrder = selectTargetOrderFromMyOrders(
-        myOrdersRes.items,
-        queryOrderId
-      );
-
-      if (targetOrder) {
-        setServerOrder(targetOrder);
-        setSubmittedOrderStatus(targetOrder.status);
-
-        if (!isOrderPayable(targetOrder)) {
-          clearStoredActiveOrder();
-          setContextActiveOrder?.(null);
-        }
-
-        // Nếu đơn hàng trên Server đã có Payment snapshot (ví dụ reload sau khi đã thanh toán):
-        // khôi phục kết quả đã kiểm duyệt từ GET /orders/me mà KHÔNG gọi POST /payments lại (API Contract v3.0 §4.2 & §9)
-        if (targetOrder.payment) {
-          try {
-            const candidatePayment: PaymentResponseDto = {
-              paymentId: targetOrder.payment.id,
-              orderId: targetOrder.id,
-              paymentStatus: targetOrder.payment.status,
-              orderStatus:
-                targetOrder.payment.status === "SUCCESS"
-                  ? "PAID"
-                  : "PAYMENT_FAILED",
-              amountVnd: targetOrder.payment.amountVnd,
-              method: targetOrder.payment.method,
-              methodLast4: targetOrder.payment.methodLast4 || "0000",
-              mockReference: targetOrder.payment.mockReference || "MOCK-0000",
-              pointsEarned: targetOrder.pointsEarned,
-              failureReason:
-                targetOrder.payment.failureReason === "PAYMENT_DECLINED"
-                  ? "PAYMENT_DECLINED"
-                  : null,
-              createdAt: targetOrder.payment.createdAt,
-            };
-            const verifiedSnapshot = validatePaymentResponseData(
-              candidatePayment,
-              "",
-              {
-                expectedOrderId: targetOrder.id,
-                expectedAmountVnd: targetOrder.totalVnd,
-              }
-            );
-            setPaymentResult(verifiedSnapshot);
-          } catch {
-            // Bỏ qua nếu snapshot payment không hợp lệ
-          }
-        }
-      } else if (sessionCheckoutOrder) {
-        setServerOrder(sessionCheckoutOrder);
-        setSubmittedOrderStatus(sessionCheckoutOrder.status);
-      } else {
-        setServerOrder(null);
-      }
-    } catch (err: unknown) {
-      const msg =
-        err instanceof Error && err.message
-          ? err.message
-          : "Không thể tải thông tin đơn hàng từ máy chủ (GET /orders/me).";
-      setLoadOrderError(msg);
-    } finally {
-      setIsLoadingOrder(false);
+    if (!isVnPayInFlight || !shouldPollOrderConfirmation(orderAsConfirmation)) {
+      return;
     }
+
+    const { intervalMs, maxAttempts } = getOrderConfirmationPollingConfig();
+    if (maxAttempts <= 0 || pollAttemptsRef.current >= maxAttempts) {
+      return;
+    }
+
+    let isDisposed = false;
+    let timerId: ReturnType<typeof setTimeout> | null = null;
+
+    const scheduleNextPoll = () => {
+      if (isDisposed || pollAttemptsRef.current >= maxAttempts) {
+        return;
+      }
+
+      timerId = setTimeout(async () => {
+        if (isDisposed || pollAttemptsRef.current >= maxAttempts) {
+          return;
+        }
+        pollAttemptsRef.current += 1;
+
+        const updated = await loadRealOrderAndProfile({
+          silent: true,
+          fromPoll: true,
+        });
+        if (isDisposed) return;
+
+        if (updated && !shouldPollOrderConfirmation(updated)) {
+          return;
+        }
+
+        if (!isDisposed && pollAttemptsRef.current < maxAttempts) {
+          scheduleNextPoll();
+        }
+      }, intervalMs);
+    };
+
+    scheduleNextPoll();
+
+    return () => {
+      isDisposed = true;
+      if (timerId !== null) {
+        clearTimeout(timerId);
+      }
+    };
   }, [
-    isAuthLoading,
+    isLoadingOrder,
     isAuthenticated,
     accessToken,
-    sessionCheckoutOrder,
-    setContextActiveOrder,
+    serverOrder,
+    initialOrder,
+    vnPayFlowState,
+    isVnPayTabOpened,
+    loadRealOrderAndProfile,
   ]);
-
-  useEffect(() => {
-    if (initialOrder) return;
-    const timer = setTimeout(() => {
-      void loadRealOrderAndProfile();
-    }, 0);
-    return () => clearTimeout(timer);
-  }, [initialOrder, loadRealOrderAndProfile]);
 
   const customerFullName = useMemo(() => {
     if (user) {
@@ -989,6 +1275,210 @@ export default function PaymentPageView({
       onPointsEarned: (pts) => setLoyaltyPoints((prev) => prev + pts),
     });
   };
+
+  const effectiveAccessToken =
+    accessToken ||
+    (isAuthenticated && typeof window !== "undefined"
+      ? getStoredToken()
+      : null);
+
+  const confirmationOrder = serverOrder as unknown as OrderConfirmationData | null;
+  const hasFinancialOrReviewLock = Boolean(
+    confirmationOrder &&
+      (confirmationOrder.hasFinancialException === true ||
+        confirmationOrder.payment?.requiresReview === true ||
+        confirmationOrder.payment?.resolution === "FINANCIAL_EXCEPTION" ||
+        confirmationOrder.payment?.resolution === "REQUIRES_REVIEW")
+  );
+  const isConfirmedSuccessStatus = Boolean(
+    confirmationOrder &&
+      !hasFinancialOrReviewLock &&
+      (confirmationOrder.status === "PAID" ||
+        confirmationOrder.status === "PREPARING" ||
+        confirmationOrder.status === "READY" ||
+        confirmationOrder.status === "COMPLETED")
+  );
+  const isZeroAmountOrder = Boolean(
+    confirmationOrder &&
+      (confirmationOrder.totalVnd === 0 ||
+        confirmationOrder.payment?.provider === "ZERO_AMOUNT" ||
+        confirmationOrder.payment?.method === "ZERO_AMOUNT")
+  );
+  const isMockOrder = Boolean(
+    confirmationOrder &&
+      !isZeroAmountOrder &&
+      (confirmationOrder.payment?.provider === "MOCK" ||
+        confirmationOrder.payment?.method === "CARD" ||
+        confirmationOrder.payment?.method === "WALLET")
+  );
+  const isExplicitVnPayOrder = Boolean(
+    confirmationOrder &&
+      !isZeroAmountOrder &&
+      !isMockOrder &&
+      (confirmationOrder.payment?.provider === "VNPAY" ||
+        confirmationOrder.payment?.method === "VNPAY")
+  );
+
+  const shouldRenderAuthoritativeConfirmationView = Boolean(
+    hasLoadedServerTruth &&
+      !isLoadingOrder &&
+      confirmationOrder &&
+      ((vnpReturnCtx.hasVnPayReturnParams && !dismissedVnPayReturnView) ||
+        (!initialOrder &&
+          isExplicitVnPayOrder &&
+          isConfirmedSuccessStatus &&
+          confirmationOrder.payment?.status === "SUCCESS"))
+  );
+
+  if (shouldRenderAuthoritativeConfirmationView && confirmationOrder) {
+    const handleConfirmationRetrySuccess = async () => {
+      clearCart();
+      clearStoredActiveOrder();
+      setContextActiveOrder?.(null);
+      await loadRealOrderAndProfile({ silent: false });
+    };
+
+    const handleConfirmationRetryFailure = async () => {
+      return await loadRealOrderAndProfile({ silent: true });
+    };
+
+    // Ưu tiên #1: Khóa đối soát tài chính / cần rà soát thủ công (REQUIRES_REVIEW / FINANCIAL_EXCEPTION)
+    if (hasFinancialOrReviewLock) {
+      return (
+        <PaymentFailedRetryView
+          order={confirmationOrder}
+          token={effectiveAccessToken}
+          onRetrySuccess={handleConfirmationRetrySuccess}
+          onRetryFailure={handleConfirmationRetryFailure}
+        />
+      );
+    }
+
+    // Ưu tiên #2: Máy chủ đã xác nhận đơn hàng PAID (PAID / PREPARING / READY / COMPLETED)
+    if (isConfirmedSuccessStatus) {
+      if (isZeroAmountOrder) {
+        return (
+          <ZeroPaymentBypassView
+            order={confirmationOrder}
+            customerName={customerFullName}
+          />
+        );
+      }
+
+      if (isExplicitVnPayOrder) {
+        return (
+          <VnPaySuccessView
+            order={confirmationOrder}
+            customerName={customerFullName}
+            userPoints={loyaltyPoints || confirmationOrder.pointsEarned}
+            vnpayDetails={{
+              vnp_TxnRef: vnpReturnCtx.vnpTxnRef || undefined,
+              vnp_TransactionNo: vnpReturnCtx.vnpTransactionNo || undefined,
+              vnp_BankCode: vnpReturnCtx.vnpBankCode || undefined,
+              vnp_PayDate: vnpReturnCtx.vnpPayDate || undefined,
+            }}
+          />
+        );
+      }
+
+      return (
+        <OrderSuccessView
+          order={confirmationOrder}
+          customerName={customerFullName}
+          userPoints={loyaltyPoints || confirmationOrder.pointsEarned}
+        />
+      );
+    }
+
+    // Ưu tiên #3: Không phải giao dịch VNPay trên máy chủ (VD: payment === null hoặc MOCK) -> giữ chuẩn Server Truth
+    if (!isExplicitVnPayOrder) {
+      return (
+        <PaymentFailedRetryView
+          order={confirmationOrder}
+          token={effectiveAccessToken}
+          onRetrySuccess={handleConfirmationRetrySuccess}
+          onRetryFailure={handleConfirmationRetryFailure}
+        />
+      );
+    }
+
+    // Ưu tiên #4: Đơn hàng đã CANCELLED trên máy chủ
+    if (confirmationOrder.status === "CANCELLED") {
+      return (
+        <PaymentFailedRetryView
+          order={confirmationOrder}
+          token={effectiveAccessToken}
+          onRetrySuccess={handleConfirmationRetrySuccess}
+          onRetryFailure={handleConfirmationRetryFailure}
+        />
+      );
+    }
+
+    // Ưu tiên #5: Giao dịch VNPay đã FAILED trên máy chủ (BR-05)
+    const isServerVnPayFailed =
+      confirmationOrder.status === "PAYMENT_FAILED" ||
+      confirmationOrder.payment?.status === "FAILED" ||
+      confirmationOrder.payment?.resolution === "FAILED";
+
+    if (isServerVnPayFailed) {
+      const failureReason = confirmationOrder.payment?.failureReason;
+      const derivedResponseCode =
+        (vnpReturnCtx.vnpResponseCode && vnpReturnCtx.vnpResponseCode !== "00"
+          ? vnpReturnCtx.vnpResponseCode
+          : null) ||
+        (failureReason?.startsWith("VNPAY_RESPONSE_")
+          ? failureReason.replace("VNPAY_RESPONSE_", "")
+          : failureReason?.startsWith("VNPAY_STATUS_")
+          ? failureReason.replace("VNPAY_STATUS_", "")
+          : "24");
+
+      return (
+        <VnPayFailedRetryView
+          order={confirmationOrder}
+          vnpResponseCode={derivedResponseCode}
+          vnpTxnRef={vnpReturnCtx.vnpTxnRef}
+          token={effectiveAccessToken}
+          onRetryVnPay={async () => {
+            if (confirmationOrder.payment?.status === "PENDING") {
+              await loadRealOrderAndProfile({ silent: true });
+              return;
+            }
+            setDismissedVnPayReturnView(true);
+            router.replace(
+              `/payment?orderId=${encodeURIComponent(confirmationOrder.id)}&method=VNPAY`
+            );
+          }}
+        />
+      );
+    }
+
+    // Ưu tiên #6: Giao dịch VNPay đang PENDING / PROCESSING / RECONCILING (đang chờ IPN / QueryDR)
+    if (
+      confirmationOrder.status === "PENDING" &&
+      (confirmationOrder.payment?.status === "PENDING" ||
+        confirmationOrder.payment?.resolution === "PROCESSING" ||
+        confirmationOrder.payment?.resolution === "RECONCILING")
+    ) {
+      return (
+        <VnPayProcessingView
+          order={confirmationOrder}
+          orderIdParam={confirmationOrder.id}
+          vnpTxnRef={vnpReturnCtx.vnpTxnRef}
+          amountVnd={confirmationOrder.totalVnd}
+          onRefreshStatus={() => loadRealOrderAndProfile({ silent: true })}
+        />
+      );
+    }
+
+    return (
+      <PaymentFailedRetryView
+        order={confirmationOrder}
+        token={effectiveAccessToken}
+        onRetrySuccess={handleConfirmationRetrySuccess}
+        onRetryFailure={handleConfirmationRetryFailure}
+      />
+    );
+  }
 
 
   return (
