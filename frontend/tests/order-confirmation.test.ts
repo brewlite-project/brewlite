@@ -3923,6 +3923,139 @@ describe("SCRUM-68: Order Confirmation Service & Logic Automated Tests", () => {
         cleanupDom();
       }
     });
+
+    it("10.11 VNPay Return URL without explicit ?orderId= (using vnp_OrderInfo / vnp_TxnRef) resolves target order and transitions PENDING -> PAID via bounded polling", async () => {
+      const targetOrderId = "809cdca3-8ba3-428f-b64c-84f5196e7dc0";
+      const targetPaymentId = "c279e7fe-5ede-4f98-b065-9f90b651b899";
+      const vnpTxnRef = targetPaymentId.replace(/-/g, "");
+
+      setupDomWithUrl(
+        `http://localhost/order-confirmation?vnp_Amount=9800000&vnp_OrderInfo=VNPaySandboxPayment&vnp_ResponseCode=00&vnp_TransactionStatus=00&vnp_TxnRef=${vnpTxnRef}`
+      );
+      setOrderConfirmationPollingConfig({ intervalMs: 25, maxAttempts: 5 });
+
+      const container = dom.window.document.getElementById("root")!;
+      const root = createRoot(container);
+      const mockToken = createValidMockJwt();
+      dom.window.localStorage.setItem("brewlite_auth_token", mockToken);
+
+      const pendingOrder: OrderConfirmationData = {
+        id: targetOrderId,
+        status: "PENDING",
+        createdAt: new Date(Date.now() - 60000).toISOString(),
+        expiresAt: new Date(Date.now() + 600000).toISOString(),
+        subtotalVnd: 98000,
+        discountVnd: 0,
+        totalVnd: 98000,
+        couponCode: null,
+        pointsEarned: 0,
+        hasFinancialException: false,
+        items: [
+          {
+            id: "550e8400-e29b-41d4-a716-446655440011",
+            productId: "550e8400-e29b-41d4-a716-446655440001",
+            productName: "Cà Phê Muối",
+            size: "M",
+            sizeMultiplierPercent: 120,
+            basePriceVnd: 40000,
+            quantity: 2,
+            unitPriceVnd: 49000,
+            lineTotalVnd: 98000,
+            toppings: [],
+          },
+        ],
+        payment: {
+          id: targetPaymentId,
+          status: "PENDING",
+          provider: "VNPAY",
+          method: "VNPAY",
+          methodLast4: null,
+          amountVnd: 98000,
+          mockReference: null,
+          failureReason: null,
+          resolution: "PROCESSING",
+          requiresReview: false,
+          canRetry: false,
+          createdAt: new Date().toISOString(),
+        },
+      };
+
+      const paidOrder: OrderConfirmationData = {
+        ...pendingOrder,
+        status: "PAID",
+        pointsEarned: 9,
+        payment: {
+          ...pendingOrder.payment!,
+          status: "SUCCESS",
+          resolution: "PAYMENT_ACCEPTED",
+        },
+      };
+
+      let ordersMeCalls = 0;
+      global.fetch = async (url) => {
+        const u = String(url);
+        if (u.includes("/orders/me")) {
+          ordersMeCalls += 1;
+          const current = ordersMeCalls === 1 ? pendingOrder : paidOrder;
+          return new Response(
+            JSON.stringify({
+              items: [current],
+              meta: { page: 1, limit: 10, total: 1, totalPages: 1 },
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        if (u.includes("/auth/me")) {
+          return new Response(
+            JSON.stringify({
+              id: "550e8400-e29b-41d4-a716-446655440001",
+              email: "khachhang@brewlite.vn",
+              fullName: "Nguyễn Văn A",
+              loyaltyPoints: ordersMeCalls === 1 ? 0 : 9,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        return new Response("Not found", { status: 404 });
+      };
+
+      try {
+        await act(async () => {
+          root.render(
+            React.createElement(
+              AuthContext.Provider,
+              { value: createMockAuthContext(mockToken) },
+              React.createElement(
+                CartProvider as React.ComponentType<{ key?: string }>,
+                { key: "vnp-txnref-lookup-poll-test" },
+                React.createElement(OrderConfirmationPage)
+              )
+            )
+          );
+        });
+
+        let text = container.textContent || "";
+        assert.ok(
+          text.includes("Đang kiểm tra kết quả giao dịch..."),
+          "Ban đầu khi PENDING phải hiển thị VnPayProcessingView"
+        );
+
+        await act(async () => {
+          await new Promise((r) => setTimeout(r, 80));
+        });
+
+        text = container.textContent || "";
+        assert.ok(
+          text.includes("Thanh toán thành công qua VNPay!"),
+          "Sau khi poll báo PAID + SUCCESS phải tự động chuyển sang VnPaySuccessView không cần F5"
+        );
+      } finally {
+        await act(async () => {
+          root.unmount();
+        });
+        cleanupDom();
+      }
+    });
   });
 
 });

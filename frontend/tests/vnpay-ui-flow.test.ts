@@ -1929,4 +1929,754 @@ describe("VNPay Phase 2 UI & Flow Deep Test Suite", () => {
       }
     });
   });
+
+  // =========================================================================
+  // SUITE 13: SCRUM-88 VNPay Return URL (/payment?vnp_*) Navigation, Polling & Server Truth Precedence
+  // =========================================================================
+  describe("13. SCRUM-88 VNPay Return URL (/payment?vnp_*) Navigation, Bounded Polling & Server Truth Precedence", () => {
+    const originalFetch = globalThis.fetch;
+
+    afterEach(async () => {
+      globalThis.fetch = originalFetch;
+      const { resetOrderConfirmationPollingConfig } = await import(
+        "../services/order-confirmation.service"
+      );
+      resetOrderConfirmationPollingConfig();
+    });
+
+    it("13.1 VNPay return -> /payment?vnp_* -> backend already Payment SUCCESS + Order PAID -> UI automatically reaches confirmation success state without refresh", async () => {
+      const targetOrderId = "809cdca3-8ba3-428f-b64c-84f5196e7dc0";
+      const targetPaymentId = "c279e7fe-5ede-4f98-b065-9f90b651b899";
+      const vnpTxnRef = targetPaymentId.replace(/-/g, "");
+      const olderPendingOrderId = "11111111-2222-4333-8444-555555555555";
+
+      dom.window.history.replaceState(
+        {},
+        "",
+        `/payment?vnp_Amount=9800000&vnp_BankCode=NCB&vnp_OrderInfo=${encodeURIComponent(
+          `Thanh toan don hang ${targetOrderId}`
+        )}&vnp_PayDate=20261106113000&vnp_ResponseCode=00&vnp_TmnCode=CGXZLS0Z&vnp_TransactionNo=14899988&vnp_TransactionStatus=00&vnp_TxnRef=${vnpTxnRef}&vnp_SecureHash=abcdef123456`
+      );
+
+      const jwtToken = createTestJwt();
+      let cartClearedCount = 0;
+      let contextActiveOrderCleared = false;
+      const navigatedSuccessUrls: string[] = [];
+
+      // Stale PENDING order snapshot in CartContext before VNPay return
+      const staleSessionOrder: CreateOrderResponseDto = {
+        id: targetOrderId,
+        status: "PENDING",
+        createdAt: new Date(Date.now() - 120000).toISOString(),
+        subtotalVnd: 118000,
+        discountVnd: 20000,
+        totalVnd: 98000,
+        couponCode: "BREW20K",
+        items: [
+          {
+            id: "550e8400-e29b-41d4-a716-446655440011",
+            productId: "550e8400-e29b-41d4-a716-446655440001",
+            productName: "Caramel Cloud Cold Brew",
+            size: "M",
+            sizeMultiplierPercent: 120,
+            basePriceVnd: 45000,
+            quantity: 1,
+            unitPriceVnd: 98000,
+            lineTotalVnd: 98000,
+            toppings: [],
+          },
+        ],
+      };
+
+      // Older PENDING order also in history + Target order already finalized as PAID + Payment SUCCESS
+      const olderPendingOrder = {
+        ...staleSessionOrder,
+        id: olderPendingOrderId,
+        status: "PENDING",
+        pointsEarned: 0,
+        hasFinancialException: false,
+        payment: null,
+      };
+
+      const finalizedPaidOrder = {
+        ...staleSessionOrder,
+        id: targetOrderId,
+        status: "PAID",
+        pointsEarned: 9,
+        hasFinancialException: false,
+        payment: {
+          id: targetPaymentId,
+          status: "SUCCESS",
+          provider: "VNPAY",
+          method: "VNPAY",
+          methodLast4: null,
+          amountVnd: 98000,
+          mockReference: null,
+          failureReason: null,
+          resolution: "PAYMENT_ACCEPTED",
+          requiresReview: false,
+          canRetry: false,
+          createdAt: new Date().toISOString(),
+        },
+      };
+
+      globalThis.fetch = async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/orders/me")) {
+          return new Response(
+            JSON.stringify({
+              items: [olderPendingOrder, finalizedPaidOrder],
+              meta: { page: 1, limit: 10, total: 2, totalPages: 1 },
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        if (url.includes("/auth/me")) {
+          return new Response(
+            JSON.stringify({
+              id: "550e8400-e29b-41d4-a716-446655440000",
+              email: "khachhang@brewlite.vn",
+              fullName: "Nguyễn Hải Đăng",
+              loyaltyPoints: 109,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        if (url.includes("/products")) {
+          return new Response(JSON.stringify({ products: [], toppings: [] }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response("Not Found", { status: 404 });
+      };
+
+      const authContextValue: AuthContextType = {
+        user: {
+          id: "550e8400-e29b-41d4-a716-446655440000",
+          email: "khachhang@brewlite.vn",
+          fullName: "Nguyễn Hải Đăng",
+        },
+        accessToken: jwtToken,
+        isAuthenticated: true,
+        isLoading: false,
+        isAuthModalOpen: false,
+        authModalMode: "login",
+        authModalMessage: null,
+        openAuthModal: () => {},
+        closeAuthModal: () => {},
+        login: async () => {},
+        register: async () => ({
+          id: "550e8400-e29b-41d4-a716-446655440000",
+          email: "khachhang@brewlite.vn",
+          fullName: "Nguyễn Hải Đăng",
+        }),
+        logout: () => {},
+        verifySession: () => true,
+        handleUnauthorizedCheckout: () => {},
+        pendingCheckout: false,
+        setPendingCheckout: () => {},
+      };
+
+      function StatefulTestHarness() {
+        const [activeOrderState, setActiveOrderState] =
+          React.useState<CreateOrderResponseDto | null>(staleSessionOrder);
+        const cartContextValue: CartContextValue = {
+          items: [],
+          totalQuantity: 1,
+          totalLines: 1,
+          subtotalVnd: 98000,
+          formattedSubtotal: "98.000 ₫",
+          isCartOpen: false,
+          couponCode: "BREW20K",
+          setCouponCode: () => {},
+          feedbackMessage: null,
+          feedbackType: null,
+          addToCart: () => ({ success: true, message: "OK" }),
+          updateQuantity: () => {},
+          incrementQuantity: () => {},
+          decrementQuantity: () => {},
+          removeFromCart: () => {},
+          clearCart: () => {
+            cartClearedCount += 1;
+          },
+          openCart: () => {},
+          closeCart: () => {},
+          toggleCart: () => {},
+          dismissFeedback: () => {},
+          mapToCreateOrderPayload: () =>
+            ({ items: [] } as unknown as CreateOrderRequestDto),
+          activeOrder: activeOrderState,
+          setActiveOrder: (next) => {
+            if (next === null) {
+              contextActiveOrderCleared = true;
+            }
+            setActiveOrderState(next);
+          },
+        };
+
+        return React.createElement(
+          AuthContext.Provider,
+          { value: authContextValue },
+          React.createElement(
+            CartContext.Provider,
+            { value: cartContextValue },
+            React.createElement(PaymentPageView, {
+              onNavigateSuccess: (url: string) => {
+                navigatedSuccessUrls.push(url);
+              },
+            })
+          )
+        );
+      }
+
+      await act(async () => {
+        root = createRoot(container);
+        root.render(React.createElement(StatefulTestHarness));
+      });
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 20));
+      });
+
+      const text = container.textContent || "";
+      assert.ok(
+        text.includes("Thanh toán thành công qua VNPay!"),
+        "UI must automatically transition to VnPaySuccessView without refreshing (F5)"
+      );
+      assert.ok(
+        text.includes("ĐÃ THANH TOÁN (PAID)"),
+        "UI must display PAID badge from server truth"
+      );
+      assert.strictEqual(
+        text.includes("CHỜ THANH TOÁN"),
+        false,
+        "UI must NEVER remain stuck displaying 'CHỜ THANH TOÁN' after backend is PAID + SUCCESS"
+      );
+      assert.strictEqual(
+        cartClearedCount,
+        1,
+        "Cart must be cleared once when server confirms PAID + SUCCESS"
+      );
+      assert.strictEqual(
+        contextActiveOrderCleared,
+        true,
+        "Active checkout order in context must be cleared without wiping the resolved PAID order"
+      );
+      assert.strictEqual(
+        navigatedSuccessUrls.length,
+        1,
+        "Must trigger navigation to /order-confirmation"
+      );
+      assert.ok(
+        navigatedSuccessUrls[0].startsWith(
+          `/order-confirmation?orderId=${targetOrderId}`
+        ),
+        `Navigation URL must target /order-confirmation?orderId=${targetOrderId}, got: ${navigatedSuccessUrls[0]}`
+      );
+    });
+
+    it("13.2 VNPay return -> /payment?vnp_* -> backend initially PENDING then becomes SUCCESS+PAID on poll -> UI automatically transitions to success without F5", async () => {
+      const { setOrderConfirmationPollingConfig } = await import(
+        "../services/order-confirmation.service"
+      );
+      setOrderConfirmationPollingConfig({ intervalMs: 25, maxAttempts: 5 });
+
+      const targetOrderId = "809cdca3-8ba3-428f-b64c-84f5196e7dc0";
+      const targetPaymentId = "c279e7fe-5ede-4f98-b065-9f90b651b899";
+      const vnpTxnRef = targetPaymentId.replace(/-/g, "");
+
+      // Simulate VNPay Return URL with only vnp_TxnRef (even if vnp_OrderInfo has no UUID)
+      dom.window.history.replaceState(
+        {},
+        "",
+        `/payment?vnp_Amount=9800000&vnp_BankCode=NCB&vnp_OrderInfo=VNPaySandboxPayment&vnp_ResponseCode=00&vnp_TransactionStatus=00&vnp_TxnRef=${vnpTxnRef}`
+      );
+
+      const jwtToken = createTestJwt();
+      let ordersMeCalls = 0;
+      let cartClearedCount = 0;
+      const navigatedSuccessUrls: string[] = [];
+
+      const baseOrder = {
+        id: targetOrderId,
+        createdAt: new Date(Date.now() - 60000).toISOString(),
+        expiresAt: new Date(Date.now() + 840000).toISOString(),
+        subtotalVnd: 98000,
+        discountVnd: 0,
+        totalVnd: 98000,
+        couponCode: null,
+        hasFinancialException: false,
+        items: [
+          {
+            id: "550e8400-e29b-41d4-a716-446655440011",
+            productId: "550e8400-e29b-41d4-a716-446655440001",
+            productName: "Artisanal Iced Oat Latte",
+            size: "L",
+            sizeMultiplierPercent: 140,
+            basePriceVnd: 70000,
+            quantity: 1,
+            unitPriceVnd: 98000,
+            lineTotalVnd: 98000,
+            toppings: [],
+          },
+        ],
+      };
+
+      const pendingOrderSnapshot = {
+        ...baseOrder,
+        status: "PENDING",
+        pointsEarned: 0,
+        payment: {
+          id: targetPaymentId,
+          status: "PENDING",
+          provider: "VNPAY",
+          method: "VNPAY",
+          methodLast4: null,
+          amountVnd: 98000,
+          mockReference: null,
+          failureReason: null,
+          resolution: "PROCESSING",
+          requiresReview: false,
+          canRetry: false,
+          createdAt: new Date().toISOString(),
+        },
+      };
+
+      const paidOrderSnapshot = {
+        ...baseOrder,
+        status: "PAID",
+        pointsEarned: 9,
+        payment: {
+          id: targetPaymentId,
+          status: "SUCCESS",
+          provider: "VNPAY",
+          method: "VNPAY",
+          methodLast4: null,
+          amountVnd: 98000,
+          mockReference: null,
+          failureReason: null,
+          resolution: "PAYMENT_ACCEPTED",
+          requiresReview: false,
+          canRetry: false,
+          createdAt: new Date().toISOString(),
+        },
+      };
+
+      globalThis.fetch = async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/orders/me")) {
+          ordersMeCalls += 1;
+          const snapshot =
+            ordersMeCalls === 1 ? pendingOrderSnapshot : paidOrderSnapshot;
+          return new Response(
+            JSON.stringify({
+              items: [snapshot],
+              meta: { page: 1, limit: 10, total: 1, totalPages: 1 },
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        if (url.includes("/auth/me")) {
+          return new Response(
+            JSON.stringify({
+              id: "550e8400-e29b-41d4-a716-446655440000",
+              email: "khachhang@brewlite.vn",
+              fullName: "Nguyễn Hải Đăng",
+              loyaltyPoints: ordersMeCalls === 1 ? 100 : 109,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        return new Response(JSON.stringify({ products: [], toppings: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      };
+
+      const authContextValue: AuthContextType = {
+        user: {
+          id: "550e8400-e29b-41d4-a716-446655440000",
+          email: "khachhang@brewlite.vn",
+          fullName: "Nguyễn Hải Đăng",
+        },
+        accessToken: jwtToken,
+        isAuthenticated: true,
+        isLoading: false,
+        isAuthModalOpen: false,
+        authModalMode: "login",
+        authModalMessage: null,
+        openAuthModal: () => {},
+        closeAuthModal: () => {},
+        login: async () => {},
+        register: async () => ({
+          id: "550e8400-e29b-41d4-a716-446655440000",
+          email: "khachhang@brewlite.vn",
+          fullName: "Nguyễn Hải Đăng",
+        }),
+        logout: () => {},
+        verifySession: () => true,
+        handleUnauthorizedCheckout: () => {},
+        pendingCheckout: false,
+        setPendingCheckout: () => {},
+      };
+
+      const cartContextValue: CartContextValue = {
+        items: [],
+        totalQuantity: 1,
+        totalLines: 1,
+        subtotalVnd: 98000,
+        formattedSubtotal: "98.000 ₫",
+        isCartOpen: false,
+        couponCode: "",
+        setCouponCode: () => {},
+        feedbackMessage: null,
+        feedbackType: null,
+        addToCart: () => ({ success: true, message: "OK" }),
+        updateQuantity: () => {},
+        incrementQuantity: () => {},
+        decrementQuantity: () => {},
+        removeFromCart: () => {},
+        clearCart: () => {
+          cartClearedCount += 1;
+        },
+        openCart: () => {},
+        closeCart: () => {},
+        toggleCart: () => {},
+        dismissFeedback: () => {},
+        mapToCreateOrderPayload: () =>
+          ({ items: [] } as unknown as CreateOrderRequestDto),
+        activeOrder: null,
+        setActiveOrder: () => {},
+      };
+
+      await act(async () => {
+        root = createRoot(container);
+        root.render(
+          React.createElement(
+            AuthContext.Provider,
+            { value: authContextValue },
+            React.createElement(
+              CartContext.Provider,
+              { value: cartContextValue },
+              React.createElement(PaymentPageView, {
+                onNavigateSuccess: (url: string) => {
+                  navigatedSuccessUrls.push(url);
+                },
+              })
+            )
+          )
+        );
+      });
+
+      // Initial load (Call #1): Server is still PENDING -> UI must show VnPayProcessingView, NOT mark success from vnp_ResponseCode=00
+      let text = container.textContent || "";
+      assert.strictEqual(ordersMeCalls, 1);
+      assert.ok(
+        text.includes("Đang kiểm tra kết quả giao dịch..."),
+        "While server truth is PENDING, UI must render VnPayProcessingView and NOT trust vnp_ResponseCode=00"
+      );
+      assert.strictEqual(
+        cartClearedCount,
+        0,
+        "Cart must NOT be cleared while server truth is still PENDING"
+      );
+
+      // Wait for bounded poll (Call #2) to complete and automatically transition UI to PAID + SUCCESS
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 80));
+      });
+
+      text = container.textContent || "";
+      assert.ok(ordersMeCalls >= 2, "Bounded polling must refetch GET /orders/me");
+      assert.ok(
+        text.includes("Thanh toán thành công qua VNPay!"),
+        "Once GET /orders/me reports Payment SUCCESS + Order PAID, UI must automatically transition to VnPaySuccessView without F5"
+      );
+      assert.strictEqual(
+        text.includes("CHỜ THANH TOÁN"),
+        false,
+        "UI must not display 'CHỜ THANH TOÁN'"
+      );
+      assert.strictEqual(
+        cartClearedCount,
+        1,
+        "Cart must be cleared once after server confirms PAID"
+      );
+      assert.strictEqual(
+        navigatedSuccessUrls.length,
+        1,
+        "Must invoke onNavigateSuccess once when poll confirms PAID + SUCCESS"
+      );
+    });
+
+    it("13.3 VNPay return -> /payment?vnp_ResponseCode=00 -> preserves FAILED / CANCELLED / REQUIRES_REVIEW / payment=null server truth precedence and NEVER marks success from query params", async () => {
+      const { setOrderConfirmationPollingConfig } = await import(
+        "../services/order-confirmation.service"
+      );
+      setOrderConfirmationPollingConfig({ intervalMs: 3000, maxAttempts: 0 });
+
+      const targetOrderId = "809cdca3-8ba3-428f-b64c-84f5196e7dc0";
+      const targetPaymentId = "c279e7fe-5ede-4f98-b065-9f90b651b899";
+      const vnpTxnRef = targetPaymentId.replace(/-/g, "");
+
+      // Browser query params claim vnp_ResponseCode=00 (spoofed or stale success hint)
+      dom.window.history.replaceState(
+        {},
+        "",
+        `/payment?vnp_Amount=9800000&vnp_OrderInfo=${encodeURIComponent(
+          `Thanh toan don hang ${targetOrderId}`
+        )}&vnp_ResponseCode=00&vnp_TransactionStatus=00&vnp_TxnRef=${vnpTxnRef}`
+      );
+
+      const jwtToken = createTestJwt();
+      let cartClearedCount = 0;
+      const navigatedSuccessUrls: string[] = [];
+
+      const baseOrder = {
+        id: targetOrderId,
+        createdAt: new Date(Date.now() - 60000).toISOString(),
+        expiresAt: new Date(Date.now() + 840000).toISOString(),
+        subtotalVnd: 98000,
+        discountVnd: 0,
+        totalVnd: 98000,
+        couponCode: null,
+        pointsEarned: 0,
+        items: [
+          {
+            id: "550e8400-e29b-41d4-a716-446655440011",
+            productId: "550e8400-e29b-41d4-a716-446655440001",
+            productName: "Caramel Cloud Cold Brew",
+            size: "M",
+            sizeMultiplierPercent: 120,
+            basePriceVnd: 45000,
+            quantity: 1,
+            unitPriceVnd: 98000,
+            lineTotalVnd: 98000,
+            toppings: [],
+          },
+        ],
+      };
+
+      const serverScenarios = [
+        {
+          name: "FAILED payment on server",
+          orderSnapshot: {
+            ...baseOrder,
+            status: "PAYMENT_FAILED",
+            hasFinancialException: false,
+            payment: {
+              id: targetPaymentId,
+              status: "FAILED",
+              provider: "VNPAY",
+              method: "VNPAY",
+              methodLast4: null,
+              amountVnd: 98000,
+              mockReference: null,
+              failureReason: "VNPAY_RESPONSE_24",
+              resolution: "FAILED",
+              requiresReview: false,
+              canRetry: true,
+              createdAt: new Date().toISOString(),
+            },
+          },
+          assertDom: (containerEl: HTMLElement) => {
+            assert.ok(
+              containerEl.querySelector("#vnpay-retry-btn"),
+              "FAILED server truth must render VnPayFailedRetryView (#vnpay-retry-btn)"
+            );
+          },
+        },
+        {
+          name: "CANCELLED order on server",
+          orderSnapshot: {
+            ...baseOrder,
+            status: "CANCELLED",
+            hasFinancialException: false,
+            payment: {
+              id: targetPaymentId,
+              status: "FAILED",
+              provider: "VNPAY",
+              method: "VNPAY",
+              methodLast4: null,
+              amountVnd: 98000,
+              mockReference: null,
+              failureReason: "VNPAY_RESPONSE_24",
+              resolution: "FAILED",
+              requiresReview: false,
+              canRetry: false,
+              createdAt: new Date().toISOString(),
+            },
+          },
+          assertDom: (containerEl: HTMLElement) => {
+            const txt = containerEl.textContent || "";
+            assert.ok(
+              txt.includes("Đơn hàng đã bị hủy") &&
+                txt.includes("CANCELLED (ĐÃ HỦY)"),
+              "CANCELLED server truth must render PaymentFailedRetryView with CANCELLED status"
+            );
+          },
+        },
+        {
+          name: "REQUIRES_REVIEW / FINANCIAL_EXCEPTION on server",
+          orderSnapshot: {
+            ...baseOrder,
+            status: "PENDING",
+            hasFinancialException: true,
+            payment: {
+              id: targetPaymentId,
+              status: "FAILED",
+              provider: "VNPAY",
+              method: "VNPAY",
+              methodLast4: null,
+              amountVnd: 98000,
+              mockReference: null,
+              failureReason: "AMOUNT_MISMATCH",
+              resolution: "FINANCIAL_EXCEPTION",
+              requiresReview: true,
+              canRetry: false,
+              createdAt: new Date().toISOString(),
+            },
+          },
+          assertDom: (containerEl: HTMLElement) => {
+            const txt = containerEl.textContent || "";
+            assert.ok(
+              txt.includes("FINANCIAL_EXCEPTION / REQUIRES_REVIEW"),
+              "REQUIRES_REVIEW / FINANCIAL_EXCEPTION must render FINANCIAL_EXCEPTION / REQUIRES_REVIEW badge and lock retry"
+            );
+          },
+        },
+      ];
+
+      const authContextValue: AuthContextType = {
+        user: {
+          id: "550e8400-e29b-41d4-a716-446655440000",
+          email: "khachhang@brewlite.vn",
+          fullName: "Nguyễn Hải Đăng",
+        },
+        accessToken: jwtToken,
+        isAuthenticated: true,
+        isLoading: false,
+        isAuthModalOpen: false,
+        authModalMode: "login",
+        authModalMessage: null,
+        openAuthModal: () => {},
+        closeAuthModal: () => {},
+        login: async () => {},
+        register: async () => ({
+          id: "550e8400-e29b-41d4-a716-446655440000",
+          email: "khachhang@brewlite.vn",
+          fullName: "Nguyễn Hải Đăng",
+        }),
+        logout: () => {},
+        verifySession: () => true,
+        handleUnauthorizedCheckout: () => {},
+        pendingCheckout: false,
+        setPendingCheckout: () => {},
+      };
+
+      const cartContextValue: CartContextValue = {
+        items: [],
+        totalQuantity: 1,
+        totalLines: 1,
+        subtotalVnd: 98000,
+        formattedSubtotal: "98.000 ₫",
+        isCartOpen: false,
+        couponCode: "",
+        setCouponCode: () => {},
+        feedbackMessage: null,
+        feedbackType: null,
+        addToCart: () => ({ success: true, message: "OK" }),
+        updateQuantity: () => {},
+        incrementQuantity: () => {},
+        decrementQuantity: () => {},
+        removeFromCart: () => {},
+        clearCart: () => {
+          cartClearedCount += 1;
+        },
+        openCart: () => {},
+        closeCart: () => {},
+        toggleCart: () => {},
+        dismissFeedback: () => {},
+        mapToCreateOrderPayload: () =>
+          ({ items: [] } as unknown as CreateOrderRequestDto),
+        activeOrder: null,
+        setActiveOrder: () => {},
+      };
+
+      for (const scenario of serverScenarios) {
+        globalThis.fetch = async (input: RequestInfo | URL) => {
+          const url = String(input);
+          if (url.includes("/orders/me")) {
+            return new Response(
+              JSON.stringify({
+                items: [scenario.orderSnapshot],
+                meta: { page: 1, limit: 10, total: 1, totalPages: 1 },
+              }),
+              { status: 200, headers: { "Content-Type": "application/json" } }
+            );
+          }
+          if (url.includes("/auth/me")) {
+            return new Response(
+              JSON.stringify({
+                id: "550e8400-e29b-41d4-a716-446655440000",
+                email: "khachhang@brewlite.vn",
+                fullName: "Nguyễn Hải Đăng",
+                loyaltyPoints: 100,
+              }),
+              { status: 200, headers: { "Content-Type": "application/json" } }
+            );
+          }
+          return new Response(JSON.stringify({ products: [], toppings: [] }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        };
+
+        await act(async () => {
+          root = createRoot(container);
+          root.render(
+            React.createElement(
+              AuthContext.Provider,
+              { value: authContextValue },
+              React.createElement(
+                CartContext.Provider,
+                { value: cartContextValue },
+                React.createElement(PaymentPageView, {
+                  onNavigateSuccess: (url: string) => {
+                    navigatedSuccessUrls.push(url);
+                  },
+                })
+              )
+            )
+          );
+        });
+        await act(async () => {
+          await new Promise((r) => setTimeout(r, 20));
+        });
+
+        const text = container.textContent || "";
+        assert.strictEqual(
+          text.includes("Thanh toán thành công qua VNPay!"),
+          false,
+          `[${scenario.name}] MUST NEVER render VnPaySuccessView from vnp_ResponseCode=00`
+        );
+        assert.strictEqual(
+          cartClearedCount,
+          0,
+          `[${scenario.name}] MUST NEVER clear Cart when server truth is not PAID`
+        );
+        assert.strictEqual(
+          navigatedSuccessUrls.length,
+          0,
+          `[${scenario.name}] MUST NEVER trigger onNavigateSuccess when server truth is not PAID+SUCCESS`
+        );
+        scenario.assertDom(container);
+
+        await act(async () => {
+          root?.unmount();
+          root = null;
+        });
+      }
+    });
+  });
 });

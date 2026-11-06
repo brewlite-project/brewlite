@@ -8,6 +8,7 @@ import { useCart, clearStoredActiveOrder } from "@/context/CartContext";
 import { getStoredToken } from "@/services/auth.service";
 import {
   type OrderConfirmationData,
+  extractOrderIdFromVnPayOrderInfo,
   fetchMyOrdersApi,
   findOrderForConfirmation,
   fetchAuthMeProfile,
@@ -54,7 +55,9 @@ function useSafeSearchParams(): { get: (key: string) => string | null } {
 function OrderConfirmationContent() {
   const router = useSafeAppRouter();
   const searchParams = useSafeSearchParams();
-  const orderIdParam = searchParams.get("orderId");
+  const vnpOrderInfo = searchParams.get("vnp_OrderInfo");
+  const orderIdParam =
+    searchParams.get("orderId") || extractOrderIdFromVnPayOrderInfo(vnpOrderInfo);
   const vnpResponseCode = searchParams.get("vnp_ResponseCode");
   const vnpTxnRef = searchParams.get("vnp_TxnRef");
   const vnpBankCode = searchParams.get("vnp_BankCode");
@@ -98,9 +101,14 @@ function OrderConfirmationContent() {
         return;
       }
 
-      // Khi URL thiếu orderId: TUYỆT ĐỐI KHÔNG tự ý chọn order mới nhất!
+      const hasOrderId =
+        typeof orderIdParam === "string" && orderIdParam.trim() !== "";
+      const hasVnPayTxnRef =
+        typeof vnpTxnRef === "string" && vnpTxnRef.trim() !== "";
+
+      // Khi URL thiếu cả orderId và vnp_TxnRef: TUYỆT ĐỐI KHÔNG tự ý chọn order mới nhất!
       // Báo lỗi rõ ràng để yêu cầu người dùng cung cấp orderId.
-      if (!orderIdParam || typeof orderIdParam !== "string" || orderIdParam.trim() === "") {
+      if (!hasOrderId && !hasVnPayTxnRef) {
         setError("Vui lòng cung cấp mã đơn hàng (orderId) trên đường dẫn URL.");
         setLoading(false);
         return;
@@ -121,7 +129,7 @@ function OrderConfirmationContent() {
           setUserLoyaltyPoints(profile.loyaltyPoints);
         }
 
-        const target = findOrderForConfirmation(orders, orderIdParam);
+        const target = findOrderForConfirmation(orders, orderIdParam, vnpTxnRef);
         if (!target) {
           setError("Không tìm thấy thông tin đơn hàng này trong lịch sử của bạn.");
         } else {
@@ -147,13 +155,14 @@ function OrderConfirmationContent() {
     return () => {
       isCancelled = true;
     };
-  }, [token, orderIdParam]);
+  }, [token, orderIdParam, vnpTxnRef]);
 
   // Bounded Polling: Tự động refetch Server Truth khi trạng thái đang PENDING / PROCESSING / RECONCILING.
   // Dừng ngay khi gặp terminal state (SUCCESS/PAID, FAILED terminal, CANCELLED, financial exception),
   // giới hạn số lần tối đa (maxAttempts) và cleanup khi unmount.
   useEffect(() => {
-    if (loading || !token || !orderIdParam || !order) {
+    const effectiveOrderId = order?.id || orderIdParam;
+    if (loading || !token || (!effectiveOrderId && !vnpTxnRef) || !order) {
       return;
     }
 
@@ -191,7 +200,11 @@ function OrderConfirmationContent() {
             setUserLoyaltyPoints(profile.loyaltyPoints);
           }
 
-          const updatedOrder = findOrderForConfirmation(orders, orderIdParam);
+          const updatedOrder = findOrderForConfirmation(
+            orders,
+            effectiveOrderId,
+            vnpTxnRef
+          );
           if (updatedOrder) {
             setOrder(updatedOrder);
             if (!shouldPollOrderConfirmation(updatedOrder)) {
@@ -220,13 +233,15 @@ function OrderConfirmationContent() {
     loading,
     token,
     orderIdParam,
+    vnpTxnRef,
     order,
   ]);
 
   // Handler khi retry payment hoàn thành (dù SUCCESS hay FAILED):
   // Luôn reload server truth từ GET /orders/me và GET /auth/me để cập nhật trạng thái đơn hàng chính xác từ máy chủ.
   const handleReloadOrder = async (showFullLoading = true) => {
-    if (!token || !orderIdParam) return null;
+    const effectiveOrderId = order?.id || orderIdParam;
+    if (!token || (!effectiveOrderId && !vnpTxnRef)) return null;
     try {
       if (showFullLoading) {
         setLoading(true);
@@ -238,7 +253,11 @@ function OrderConfirmationContent() {
       if (profile?.loyaltyPoints !== undefined) {
         setUserLoyaltyPoints(profile.loyaltyPoints);
       }
-      const updatedOrder = findOrderForConfirmation(orders, orderIdParam);
+      const updatedOrder = findOrderForConfirmation(
+        orders,
+        effectiveOrderId,
+        vnpTxnRef
+      );
       if (updatedOrder) {
         setOrder(updatedOrder);
         return updatedOrder;

@@ -1402,14 +1402,140 @@ export async function fetchMyOrdersApi(
   return validateMyOrdersResponse(rawData);
 }
 
+export interface VnPayReturnContext {
+  hasVnPayReturnParams: boolean;
+  orderIdFromParams: string | null;
+  vnpTxnRef: string | null;
+  vnpResponseCode: string | null;
+  vnpTransactionStatus: string | null;
+  vnpBankCode: string | null;
+  vnpPayDate: string | null;
+  vnpTransactionNo: string | null;
+  vnpOrderInfo: string | null;
+}
+
+/**
+ * Trích xuất UUID của đơn hàng từ trường `vnp_OrderInfo` (VD: "Thanh toan don hang 809cdca3-8ba3-428f-b64c-84f5196e7dc0").
+ * Chỉ dùng làm gợi ý điều hướng/tra cứu đơn hàng; trạng thái thanh toán luôn lấy từ Server Truth (`GET /orders/me`).
+ */
+export function extractOrderIdFromVnPayOrderInfo(
+  orderInfo?: string | null
+): string | null {
+  if (typeof orderInfo !== "string" || !orderInfo.trim()) return null;
+  const uuidMatch = orderInfo.match(
+    /[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i
+  );
+  return uuidMatch ? uuidMatch[0].toLowerCase() : null;
+}
+
+/**
+ * Trích xuất ngữ cảnh VNPay Return URL từ query parameters.
+ * Lưu ý bảo mật (BR-04): `vnp_ResponseCode=00` hoặc các tham số `vnp_*` tuyệt đối KHÔNG bao giờ được dùng
+ * để đánh dấu giao dịch thành công; chúng chỉ dùng làm gợi ý định tuyến/tra cứu đơn hàng từ `GET /orders/me`.
+ */
+export function extractVnPayReturnContext(
+  searchParams?: { get: (key: string) => string | null } | URLSearchParams | null
+): VnPayReturnContext {
+  const readParam = (key: string): string | null => {
+    if (!searchParams || typeof searchParams.get !== "function") return null;
+    const raw = searchParams.get(key);
+    if (typeof raw !== "string") return null;
+    const trimmed = raw.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  };
+
+  const explicitOrderId = readParam("orderId");
+  const vnpOrderInfo = readParam("vnp_OrderInfo");
+  const vnpTxnRef = readParam("vnp_TxnRef");
+  const vnpResponseCode = readParam("vnp_ResponseCode");
+  const vnpTransactionStatus = readParam("vnp_TransactionStatus");
+  const vnpBankCode = readParam("vnp_BankCode");
+  const vnpPayDate = readParam("vnp_PayDate");
+  const vnpTransactionNo = readParam("vnp_TransactionNo");
+  const vnpSecureHash = readParam("vnp_SecureHash");
+  const vnpAmount = readParam("vnp_Amount");
+
+  const hasVnPayReturnParams = Boolean(
+    vnpResponseCode ||
+      vnpTxnRef ||
+      vnpTransactionStatus ||
+      vnpOrderInfo ||
+      vnpSecureHash ||
+      vnpTransactionNo ||
+      vnpBankCode ||
+      vnpPayDate ||
+      vnpAmount
+  );
+
+  const orderIdFromParams =
+    (explicitOrderId && isValidUuid(explicitOrderId)
+      ? explicitOrderId.toLowerCase()
+      : explicitOrderId) || extractOrderIdFromVnPayOrderInfo(vnpOrderInfo);
+
+  return {
+    hasVnPayReturnParams,
+    orderIdFromParams: orderIdFromParams || null,
+    vnpTxnRef,
+    vnpResponseCode,
+    vnpTransactionStatus,
+    vnpBankCode,
+    vnpPayDate,
+    vnpTransactionNo,
+    vnpOrderInfo,
+  };
+}
+
+/**
+ * Tạo đường dẫn `/order-confirmation` chuẩn từ `orderId` và giữ lại các tham số ngữ cảnh VNPay (`vnp_*`).
+ */
+export function buildVnPayOrderConfirmationUrl(
+  orderId: string,
+  searchParams?: { get: (key: string) => string | null } | URLSearchParams | null,
+  extraParams?: Record<string, string | null | undefined>
+): string {
+  const params = new URLSearchParams();
+  params.set("orderId", orderId.trim());
+
+  const preservedKeys = [
+    "vnp_ResponseCode",
+    "vnp_TransactionStatus",
+    "vnp_TxnRef",
+    "vnp_BankCode",
+    "vnp_PayDate",
+    "vnp_TransactionNo",
+    "vnp_OrderInfo",
+  ] as const;
+
+  if (searchParams && typeof searchParams.get === "function") {
+    for (const key of preservedKeys) {
+      const val = searchParams.get(key);
+      if (typeof val === "string" && val.trim().length > 0) {
+        params.set(key, val.trim());
+      }
+    }
+  }
+
+  if (extraParams) {
+    for (const [k, v] of Object.entries(extraParams)) {
+      if (typeof v === "string" && v.trim().length > 0) {
+        params.set(k, v.trim());
+      }
+    }
+  }
+
+  return `/order-confirmation?${params.toString()}`;
+}
+
 /**
  * Tìm đơn hàng mục tiêu từ kết quả `GET /orders/me`:
  * - Nếu có `targetOrderId`: tìm đúng Order có `id === targetOrderId`.
- * - Nếu không truyền `targetOrderId`: ưu tiên lấy Order đang active (`PENDING` hoặc `PAYMENT_FAILED`).
+ * - Nếu có `vnpTxnRef` (mã tham chiếu VNPay `paymentId` không dấu gạch ngang): tìm đúng Order có `payment.id` khớp `vnpTxnRef`.
+ * - Nếu không truyền `targetOrderId` / `vnpTxnRef`: ưu tiên lấy Order đang active (`PENDING` hoặc `PAYMENT_FAILED`).
  */
 export function selectTargetOrderFromMyOrders(
   orders: MyOrderDto[],
-  targetOrderId?: string | null
+  targetOrderId?: string | null,
+  vnpTxnRef?: string | null
 ): MyOrderDto | null {
   if (!Array.isArray(orders) || orders.length === 0) return null;
 
@@ -1421,6 +1547,24 @@ export function selectTargetOrderFromMyOrders(
       (o) => o.id && o.id.trim().toLowerCase() === normalizedTarget
     );
     if (matched) return matched;
+  }
+
+  const normalizedTxnRef =
+    typeof vnpTxnRef === "string"
+      ? vnpTxnRef.trim().replace(/-/g, "").toLowerCase()
+      : "";
+
+  if (normalizedTxnRef.length >= 8) {
+    const matchedByTxnRef = orders.find((o) => {
+      const paymentId = o.payment?.id;
+      if (typeof paymentId !== "string" || !paymentId.trim()) return false;
+      const cleanPaymentId = paymentId.trim().replace(/-/g, "").toLowerCase();
+      return (
+        cleanPaymentId === normalizedTxnRef ||
+        paymentId.trim().toLowerCase() === vnpTxnRef!.trim().toLowerCase()
+      );
+    });
+    if (matchedByTxnRef) return matchedByTxnRef;
   }
 
   // Ưu tiên đơn hàng đang chờ thanh toán (PENDING hoặc PAYMENT_FAILED)

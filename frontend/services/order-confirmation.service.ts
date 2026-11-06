@@ -8,11 +8,15 @@
 import { isValidUuid } from "./api.service";
 import { isTokenExpired } from "./auth.service";
 import {
+  buildVnPayOrderConfirmationUrl,
+  extractOrderIdFromVnPayOrderInfo,
+  extractVnPayReturnContext,
   fetchPaymentStatusApi,
   isValidIsoUtcString,
   validateMyOrdersResponse,
   validatePaymentResponseData,
   validatePaymentStatusResponseData,
+  type VnPayReturnContext,
 } from "./payment.service";
 import type {
   PaymentProvider,
@@ -21,12 +25,16 @@ import type {
 } from "@/mock-data";
 
 export {
+  buildVnPayOrderConfirmationUrl,
+  extractOrderIdFromVnPayOrderInfo,
+  extractVnPayReturnContext,
   fetchPaymentStatusApi,
   isValidIsoUtcString,
   validatePaymentStatusResponseData,
   type PaymentProvider,
   type PaymentResolution,
   type PaymentStatusResponseDto,
+  type VnPayReturnContext,
 };
 
 export type OrderStatus =
@@ -347,27 +355,48 @@ export async function fetchMyOrdersApi(token: string): Promise<OrderConfirmation
 }
 
 /**
- * Tìm kiếm đơn hàng theo orderId từ danh sách đơn của user.
- * Nếu không truyền orderId, trả về đơn hàng mới nhất của người dùng.
+ * Tìm kiếm đơn hàng theo orderId (hoặc vnpTxnRef khi quay về từ VNPay Return URL) từ danh sách đơn của user.
+ * Khi thiếu cả orderId và vnpTxnRef hợp lệ, TUYỆT ĐỐI KHÔNG tự ý chọn order mới nhất!
  */
 export function findOrderForConfirmation(
   orders: OrderConfirmationData[],
-  targetOrderId?: string | null
+  targetOrderId?: string | null,
+  vnpTxnRef?: string | null
 ): OrderConfirmationData | null {
   if (!orders || orders.length === 0) return null;
 
-  // Khi URL thiếu orderId (undefined, null, hoặc chuỗi rỗng):
-  // TUYỆT ĐỐI KHÔNG tự ý chọn order mới nhất! Phải trả về null để giao diện yêu cầu cung cấp mã đơn.
-  if (!targetOrderId || typeof targetOrderId !== "string" || targetOrderId.trim() === "") {
-    return null;
+  const cleanId =
+    typeof targetOrderId === "string" ? targetOrderId.trim() : "";
+  if (cleanId && isValidUuid(cleanId)) {
+    const match = orders.find(
+      (o) => o.id && o.id.trim().toLowerCase() === cleanId.toLowerCase()
+    );
+    if (match) return match;
   }
 
-  const cleanId = targetOrderId.trim();
-  if (!isValidUuid(cleanId)) return null;
+  const cleanTxnRef =
+    typeof vnpTxnRef === "string"
+      ? vnpTxnRef.trim().replace(/-/g, "").toLowerCase()
+      : "";
+  if (cleanTxnRef.length >= 8) {
+    const matchByTxnRef = orders.find((o) => {
+      const paymentId = o.payment?.id;
+      if (typeof paymentId !== "string" || !paymentId.trim()) return false;
+      const normalizedPaymentId = paymentId
+        .trim()
+        .replace(/-/g, "")
+        .toLowerCase();
+      return (
+        normalizedPaymentId === cleanTxnRef ||
+        paymentId.trim().toLowerCase() === vnpTxnRef!.trim().toLowerCase()
+      );
+    });
+    if (matchByTxnRef) return matchByTxnRef;
+  }
 
-  // Tìm chính xác đơn hàng theo UUID: nếu không thấy, trả về null, KHÔNG mở nhầm đơn khác
-  const match = orders.find((o) => o.id === cleanId);
-  return match || null;
+  // Khi không khớp UUID và không có vnpTxnRef hợp lệ:
+  // TUYỆT ĐỐI KHÔNG tự ý chọn order mới nhất! Phải trả về null để giao diện yêu cầu cung cấp mã đơn.
+  return null;
 }
 
 /**
