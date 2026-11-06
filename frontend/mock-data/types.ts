@@ -412,17 +412,21 @@ export interface OrderSubmissionErrorState {
 export interface OrderPaymentSummaryDto {
   id: string;
   status: PaymentStatus;
-  method: PaymentMethod;
+  provider?: PaymentProvider;
+  method: PaymentMethod | null;
   methodLast4: string | null;
   amountVnd: number;
   mockReference: string | null;
   failureReason: string | null;
+  resolution?: PaymentResolution;
+  requiresReview?: boolean;
+  canRetry?: boolean;
   createdAt: string;
 }
 
 /**
  * Từng phần tử đơn hàng trong danh sách `GET /orders/me`
- * (API Contract v3.0 §4.2 — `MyOrderItemDto`)
+ * (API Contract v3.0 §4.2 & v4.0 §8 — `MyOrderItemDto`)
  */
 export interface OrderHistoryItemDto {
   id: string;
@@ -436,6 +440,7 @@ export interface OrderHistoryItemDto {
   couponCode: string | null;
   /** Điểm tích lũy đã ghi nhận trên Order (số nguyên >= 0; = 0 với đơn chưa thanh toán) */
   pointsEarned: number;
+  hasFinancialException?: boolean;
   items: OrderItemSnapshotDto[];
   payment: OrderPaymentSummaryDto | null;
 }
@@ -534,11 +539,36 @@ export interface SiteConfigData {
 
 export type PaymentMethod = "CARD" | "WALLET" | "VNPAY" | "ZERO_AMOUNT";
 
+export type PaymentProvider = "MOCK" | "VNPAY" | "ZERO_AMOUNT";
+
 export type PaymentStatus = "SUCCESS" | "FAILED" | "PENDING";
 
-export type PaymentOrderStatus = "PAID" | "PAYMENT_FAILED";
+export type PaymentResolution =
+  | "PROCESSING"
+  | "RECONCILING"
+  | "PAYMENT_ACCEPTED"
+  | "FAILED"
+  | "FINANCIAL_EXCEPTION"
+  | "REQUIRES_REVIEW";
 
-export type PaymentFailureReason = "PAYMENT_DECLINED" | null;
+export type PaymentOrderStatus = "PAID" | "PAYMENT_FAILED" | "PENDING" | "CANCELLED";
+
+export type PaymentFailureReason = "PAYMENT_DECLINED" | string | null;
+
+export interface PaymentStatusResponseDto {
+  paymentId: string;
+  orderId: string;
+  provider: PaymentProvider;
+  paymentStatus: PaymentStatus;
+  orderStatus: OrderStatus;
+  amountVnd: number;
+  resolution: PaymentResolution;
+  requiresReview: boolean;
+  canRetry: boolean;
+  createdAt: string;
+  orderExpiresAt: string;
+  lastUpdatedAt: string;
+}
 
 /** Thông tin chi tiết khi method = "CARD" (chỉ gồm cardNumber đúng 16 chữ số) */
 export interface CardPaymentDetailsDto {
@@ -576,7 +606,7 @@ export interface PaymentResponseDto {
   paymentStatus: PaymentStatus;
   orderStatus: PaymentOrderStatus;
   amountVnd: number;
-  method: PaymentMethod;
+  method: PaymentMethod | null;
   methodLast4: string;
   mockReference: string;
   pointsEarned: number;

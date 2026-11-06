@@ -1,11 +1,27 @@
 "use client";
 
-import React, { Suspense, useEffect, useState } from "react";
+import React, { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
 import { useCart, clearStoredActiveOrder } from "@/context/CartContext";
 import { getStoredToken } from "@/services/auth.service";
+import {
+  type OrderConfirmationData,
+  extractOrderIdFromVnPayOrderInfo,
+  fetchMyOrdersApi,
+  findOrderForConfirmation,
+  fetchAuthMeProfile,
+  getOrderConfirmationPollingConfig,
+  shouldPollOrderConfirmation,
+} from "@/services/order-confirmation.service";
+import { OrderSuccessView } from "@/components/OrderSuccessView";
+import { PaymentFailedRetryView } from "@/components/PaymentFailedRetryView";
+import { VnPayProcessingView } from "@/components/VnPayProcessingView";
+import { VnPaySuccessView } from "@/components/VnPaySuccessView";
+import { VnPayFailedRetryView } from "@/components/VnPayFailedRetryView";
+import { VnPayRedirectingView } from "@/components/VnPayRedirectingView";
+import { ZeroPaymentBypassView } from "@/components/ZeroPaymentBypassView";
 
 function useSafeAppRouter() {
   try {
@@ -21,23 +37,27 @@ function useSafeAppRouter() {
     };
   }
 }
-import {
-  type OrderConfirmationData,
-  fetchMyOrdersApi,
-  findOrderForConfirmation,
-  fetchAuthMeProfile,
-} from "@/services/order-confirmation.service";
-import { OrderSuccessView } from "@/components/OrderSuccessView";
-import { PaymentFailedRetryView } from "@/components/PaymentFailedRetryView";
-import { VnPayProcessingView } from "@/components/VnPayProcessingView";
-import { VnPaySuccessView } from "@/components/VnPaySuccessView";
-import { VnPayFailedRetryView } from "@/components/VnPayFailedRetryView";
-import { ZeroPaymentBypassView } from "@/components/ZeroPaymentBypassView";
+
+function useSafeSearchParams(): { get: (key: string) => string | null } {
+  const nextParams = useSearchParams();
+  return {
+    get: (key: string) => {
+      const fromNext = nextParams?.get?.(key) ?? null;
+      if (fromNext !== null) return fromNext;
+      if (typeof window !== "undefined" && window.location?.search) {
+        return new URLSearchParams(window.location.search).get(key);
+      }
+      return null;
+    },
+  };
+}
 
 function OrderConfirmationContent() {
   const router = useSafeAppRouter();
-  const searchParams = useSearchParams();
-  const orderIdParam = searchParams.get("orderId");
+  const searchParams = useSafeSearchParams();
+  const vnpOrderInfo = searchParams.get("vnp_OrderInfo");
+  const orderIdParam =
+    searchParams.get("orderId") || extractOrderIdFromVnPayOrderInfo(vnpOrderInfo);
   const vnpResponseCode = searchParams.get("vnp_ResponseCode");
   const vnpTxnRef = searchParams.get("vnp_TxnRef");
   const vnpBankCode = searchParams.get("vnp_BankCode");
@@ -53,9 +73,27 @@ function OrderConfirmationContent() {
   const [error, setError] = useState<string | null>(null);
   const [order, setOrder] = useState<OrderConfirmationData | null>(null);
   const [userLoyaltyPoints, setUserLoyaltyPoints] = useState<number>(0);
+  const clearedPaidOrderIdRef = useRef<string | null>(null);
+  const pollAttemptsRef = useRef<number>(0);
+
+  // BR-04: Tự động xóa giỏ hàng và active order đúng 1 lần khi máy chủ xác nhận đơn đã PAID
+  useEffect(() => {
+    if (!order) return;
+    const isConfirmedPaid =
+      order.status === "PAID" ||
+      order.status === "PREPARING" ||
+      order.status === "READY" ||
+      order.status === "COMPLETED";
+    if (isConfirmedPaid && clearedPaidOrderIdRef.current !== order.id) {
+      clearedPaidOrderIdRef.current = order.id;
+      clearCart();
+      clearStoredActiveOrder();
+    }
+  }, [order, clearCart]);
 
   useEffect(() => {
     let isCancelled = false;
+    pollAttemptsRef.current = 0;
 
     async function loadConfirmationOrder() {
       if (!token) {
@@ -63,9 +101,14 @@ function OrderConfirmationContent() {
         return;
       }
 
-      // Khi URL thiếu orderId: TUYỆT ĐỐI KHÔNG tự ý chọn order mới nhất!
+      const hasOrderId =
+        typeof orderIdParam === "string" && orderIdParam.trim() !== "";
+      const hasVnPayTxnRef =
+        typeof vnpTxnRef === "string" && vnpTxnRef.trim() !== "";
+
+      // Khi URL thiếu cả orderId và vnp_TxnRef: TUYỆT ĐỐI KHÔNG tự ý chọn order mới nhất!
       // Báo lỗi rõ ràng để yêu cầu người dùng cung cấp orderId.
-      if (!orderIdParam || typeof orderIdParam !== "string" || orderIdParam.trim() === "") {
+      if (!hasOrderId && !hasVnPayTxnRef) {
         setError("Vui lòng cung cấp mã đơn hàng (orderId) trên đường dẫn URL.");
         setLoading(false);
         return;
@@ -86,7 +129,7 @@ function OrderConfirmationContent() {
           setUserLoyaltyPoints(profile.loyaltyPoints);
         }
 
-        const target = findOrderForConfirmation(orders, orderIdParam);
+        const target = findOrderForConfirmation(orders, orderIdParam, vnpTxnRef);
         if (!target) {
           setError("Không tìm thấy thông tin đơn hàng này trong lịch sử của bạn.");
         } else {
@@ -112,12 +155,93 @@ function OrderConfirmationContent() {
     return () => {
       isCancelled = true;
     };
-  }, [token, orderIdParam]);
+  }, [token, orderIdParam, vnpTxnRef]);
+
+  // Bounded Polling: Tự động refetch Server Truth khi trạng thái đang PENDING / PROCESSING / RECONCILING.
+  // Dừng ngay khi gặp terminal state (SUCCESS/PAID, FAILED terminal, CANCELLED, financial exception),
+  // giới hạn số lần tối đa (maxAttempts) và cleanup khi unmount.
+  useEffect(() => {
+    const effectiveOrderId = order?.id || orderIdParam;
+    if (loading || !token || (!effectiveOrderId && !vnpTxnRef) || !order) {
+      return;
+    }
+
+    if (!shouldPollOrderConfirmation(order)) {
+      return;
+    }
+
+    const { intervalMs, maxAttempts } = getOrderConfirmationPollingConfig();
+    if (maxAttempts <= 0 || pollAttemptsRef.current >= maxAttempts) {
+      return;
+    }
+
+    let isDisposed = false;
+    let timerId: ReturnType<typeof setTimeout> | null = null;
+
+    const scheduleNextPoll = () => {
+      if (isDisposed || pollAttemptsRef.current >= maxAttempts) {
+        return;
+      }
+
+      timerId = setTimeout(async () => {
+        if (isDisposed || pollAttemptsRef.current >= maxAttempts) {
+          return;
+        }
+        pollAttemptsRef.current += 1;
+
+        try {
+          const [orders, profile] = await Promise.all([
+            fetchMyOrdersApi(token),
+            fetchAuthMeProfile(token),
+          ]);
+          if (isDisposed) return;
+
+          if (profile?.loyaltyPoints !== undefined) {
+            setUserLoyaltyPoints(profile.loyaltyPoints);
+          }
+
+          const updatedOrder = findOrderForConfirmation(
+            orders,
+            effectiveOrderId,
+            vnpTxnRef
+          );
+          if (updatedOrder) {
+            setOrder(updatedOrder);
+            if (!shouldPollOrderConfirmation(updatedOrder)) {
+              return;
+            }
+          }
+        } catch {
+          if (isDisposed) return;
+        }
+
+        if (!isDisposed && pollAttemptsRef.current < maxAttempts) {
+          scheduleNextPoll();
+        }
+      }, intervalMs);
+    };
+
+    scheduleNextPoll();
+
+    return () => {
+      isDisposed = true;
+      if (timerId !== null) {
+        clearTimeout(timerId);
+      }
+    };
+  }, [
+    loading,
+    token,
+    orderIdParam,
+    vnpTxnRef,
+    order,
+  ]);
 
   // Handler khi retry payment hoàn thành (dù SUCCESS hay FAILED):
   // Luôn reload server truth từ GET /orders/me và GET /auth/me để cập nhật trạng thái đơn hàng chính xác từ máy chủ.
   const handleReloadOrder = async (showFullLoading = true) => {
-    if (!token || !orderIdParam) return null;
+    const effectiveOrderId = order?.id || orderIdParam;
+    if (!token || (!effectiveOrderId && !vnpTxnRef)) return null;
     try {
       if (showFullLoading) {
         setLoading(true);
@@ -129,7 +253,11 @@ function OrderConfirmationContent() {
       if (profile?.loyaltyPoints !== undefined) {
         setUserLoyaltyPoints(profile.loyaltyPoints);
       }
-      const updatedOrder = findOrderForConfirmation(orders, orderIdParam);
+      const updatedOrder = findOrderForConfirmation(
+        orders,
+        effectiveOrderId,
+        vnpTxnRef
+      );
       if (updatedOrder) {
         setOrder(updatedOrder);
         return updatedOrder;
@@ -227,48 +355,43 @@ function OrderConfirmationContent() {
     );
   }
 
-  // VNPay Processing: khi có vnp_ResponseCode hoặc view=processing và đơn hàng chưa PAID
-  const isVnPayCallback =
-    (vnpResponseCode === "00" || viewParam === "processing") &&
-    order.status === "PENDING";
-  if (isVnPayCallback && (order.status === "PENDING")) {
-    return (
-      <VnPayProcessingView
-        order={order}
-        orderIdParam={orderIdParam}
-        vnpTxnRef={vnpTxnRef}
-        amountVnd={order.totalVnd}
-        onRefreshStatus={() => handleReloadOrder(false)}
-      />
-    );
-  }
-
-  // 4. Kiểm tra trạng thái đơn hàng (CHỈ DỰA VÀO DỮ LIỆU SERVER XÁC NHẬN)
-  // Tuyệt đối KHÔNG tin URL query param status=PAID khi server chưa xác nhận!
+  // 4. Phân loại trạng thái và provider dựa trên SERVER TRUTH tuyệt đối (BR-04)
+  // Các query params (view=redirecting, view=zero, view=vnpay_success, vnp_ResponseCode=00)
+  // TUYỆT ĐỐI KHÔNG được phép ghi đè trạng thái đơn hàng hoặc provider thực tế từ máy chủ!
   const isSuccessStatus =
     order.status === "PAID" ||
     order.status === "PREPARING" ||
     order.status === "READY" ||
     order.status === "COMPLETED";
 
-  // Case Zero-Payment Bypass (BR-06)
-  if (isSuccessStatus && (order.totalVnd === 0 || order.payment?.method === "ZERO_AMOUNT" || viewParam === "zero")) {
-    return (
-      <ZeroPaymentBypassView
-        order={order}
-        customerName={user?.fullName || "Quý khách"}
-      />
-    );
-  }
+  const isZeroAmountOrder =
+    order.totalVnd === 0 ||
+    order.payment?.provider === "ZERO_AMOUNT" ||
+    order.payment?.method === "ZERO_AMOUNT";
 
-  // Case VNPay Payment Success
-  const isVnPaySuccess =
-    order.payment?.method === "VNPAY" ||
-    vnpResponseCode === "00" ||
-    viewParam === "vnpay_success";
+  const isMockOrder =
+    !isZeroAmountOrder &&
+    (order.payment?.provider === "MOCK" ||
+      order.payment?.method === "CARD" ||
+      order.payment?.method === "WALLET");
 
+  const isExplicitVnPayOrder =
+    !isZeroAmountOrder &&
+    !isMockOrder &&
+    (order.payment?.provider === "VNPAY" || order.payment?.method === "VNPAY");
+
+  // Ưu tiên #1: Đơn hàng đã được máy chủ xác nhận PAID (PAID / PREPARING / READY / COMPLETED)
   if (isSuccessStatus) {
-    if (isVnPaySuccess) {
+    if (isZeroAmountOrder) {
+      return (
+        <ZeroPaymentBypassView
+          order={order}
+          customerName={user?.fullName || "Quý khách"}
+        />
+      );
+    }
+
+    if (isExplicitVnPayOrder) {
       return (
         <VnPaySuccessView
           order={order}
@@ -293,33 +416,128 @@ function OrderConfirmationContent() {
     );
   }
 
-  // Case VNPay Payment Failed & Retry (BR-05)
-  const isVnPayFailed =
-    order.payment?.method === "VNPAY" ||
-    (Boolean(vnpResponseCode) && vnpResponseCode !== "00") ||
-    viewParam === "vnpay_failed";
+  // Ưu tiên #2: Chỉ cho phép vào luồng giao diện VNPay khi máy chủ xác nhận rõ payment.provider === "VNPAY".
+  // Khi payment === null (hoặc thuộc provider MOCK / ZERO_AMOUNT), TUYỆT ĐỐI KHÔNG cho phép URL query params
+  // (view=redirecting, vnp_ResponseCode=00, vnp_ResponseCode!=00, view=vnpay_failed) tự suy diễn ra provider VNPay.
+  if (!isExplicitVnPayOrder) {
+    return (
+      <PaymentFailedRetryView
+        order={order}
+        token={token}
+        onRetrySuccess={handleRetrySuccess}
+        onRetryFailure={handleRetryFailure}
+      />
+    );
+  }
 
-  if (isVnPayFailed) {
+  // Ưu tiên #3: Đơn hàng có payment.provider === "VNPAY" được máy chủ xác nhận
+  const hasFinancialOrReviewLock =
+    order.hasFinancialException === true ||
+    order.payment?.requiresReview === true ||
+    order.payment?.resolution === "FINANCIAL_EXCEPTION" ||
+    order.payment?.resolution === "REQUIRES_REVIEW";
+
+  if (hasFinancialOrReviewLock) {
+    return (
+      <PaymentFailedRetryView
+        order={order}
+        token={token}
+        onRetrySuccess={handleRetrySuccess}
+        onRetryFailure={handleRetryFailure}
+      />
+    );
+  }
+
+  if (order.status === "CANCELLED") {
+    if (order.payment?.resolution === "RECONCILING" && viewParam === "processing") {
+      return (
+        <VnPayProcessingView
+          order={order}
+          orderIdParam={orderIdParam}
+          vnpTxnRef={vnpTxnRef}
+          amountVnd={order.totalVnd}
+          onRefreshStatus={() => handleReloadOrder(false)}
+        />
+      );
+    }
+    return (
+      <PaymentFailedRetryView
+        order={order}
+        token={token}
+        onRetrySuccess={handleRetrySuccess}
+        onRetryFailure={handleRetryFailure}
+      />
+    );
+  }
+
+  const isServerVnPayFailed =
+    order.status === "PAYMENT_FAILED" ||
+    order.payment?.status === "FAILED" ||
+    order.payment?.resolution === "FAILED";
+
+  // Case VNPay Payment Failed & Retry (BR-05):
+  // Khi máy chủ đã xác nhận giao dịch VNPay FAILED, luôn giữ trạng thái FAILED/retry theo máy chủ,
+  // TUYỆT ĐỐI KHÔNG cho phép view=redirecting, view=processing hay vnp_ResponseCode=00 ghi đè về màn hình redirect/processing.
+  if (isServerVnPayFailed) {
+    const failureReason = order.payment?.failureReason;
+    const derivedResponseCode =
+      (vnpResponseCode && vnpResponseCode !== "00" ? vnpResponseCode : null) ||
+      (failureReason?.startsWith("VNPAY_RESPONSE_")
+        ? failureReason.replace("VNPAY_RESPONSE_", "")
+        : failureReason?.startsWith("VNPAY_STATUS_")
+        ? failureReason.replace("VNPAY_STATUS_", "")
+        : "24");
     return (
       <VnPayFailedRetryView
         order={order}
-        vnpResponseCode={vnpResponseCode || "24"}
+        vnpResponseCode={derivedResponseCode}
         vnpTxnRef={vnpTxnRef}
         token={token}
         onRetryVnPay={async () => {
           if (order.payment?.status === "PENDING") {
-            // Không retry khi Payment vẫn PENDING
             await handleReloadOrder(false);
             return;
           }
-          // Retry terminal FAILED: thực sự quay lại Payment để khởi tạo attempt mới hợp lệ
           router.push(`/payment?orderId=${encodeURIComponent(order.id)}&method=VNPAY`);
         }}
       />
     );
   }
 
-  // Mặc định cho PAYMENT_FAILED, CANCELLED, PENDING của Mock Payment
+  // Khi giao dịch VNPay trên máy chủ đang ở trạng thái PENDING (PROCESSING / RECONCILING):
+  if (
+    viewParam === "redirecting" &&
+    order.status === "PENDING" &&
+    order.payment?.status === "PENDING" &&
+    order.payment?.resolution !== "RECONCILING" &&
+    !vnpResponseCode
+  ) {
+    return (
+      <VnPayRedirectingView
+        order={order}
+        vnpayPaymentUrl={`/order-confirmation?orderId=${order.id}&vnp_ResponseCode=00&view=processing`}
+      />
+    );
+  }
+
+  if (
+    order.status === "PENDING" &&
+    (order.payment?.status === "PENDING" ||
+      order.payment?.resolution === "PROCESSING" ||
+      order.payment?.resolution === "RECONCILING")
+  ) {
+    return (
+      <VnPayProcessingView
+        order={order}
+        orderIdParam={orderIdParam}
+        vnpTxnRef={vnpTxnRef}
+        amountVnd={order.totalVnd}
+        onRefreshStatus={() => handleReloadOrder(false)}
+      />
+    );
+  }
+
+  // Mặc định cho các trạng thái còn lại
   return (
     <PaymentFailedRetryView
       order={order}

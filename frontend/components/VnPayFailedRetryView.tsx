@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { formatVnd, FALLBACK_DRINK_IMAGE } from "@/services/api.service";
+import { formatVnd } from "@/services/api.service";
 import {
   type OrderConfirmationData,
   computeOrderRemainingSeconds,
@@ -138,6 +138,17 @@ export function VnPayFailedRetryView({
 
   const isExpired = remainingSeconds <= 0 || isOrderExpired(order);
   const isPendingAttempt = order.payment?.status === "PENDING";
+  const isReviewOrException =
+    order.hasFinancialException === true ||
+    order.payment?.requiresReview === true ||
+    order.payment?.resolution === "FINANCIAL_EXCEPTION" ||
+    order.payment?.resolution === "REQUIRES_REVIEW";
+  const isPendingOrBlocked =
+    isPendingAttempt ||
+    order.payment?.resolution === "PROCESSING" ||
+    order.payment?.resolution === "RECONCILING" ||
+    order.payment?.canRetry === false;
+  const isRetryDisabled = isExpired || isReviewOrException || isPendingOrBlocked;
   const errorInfo = mapVnPayResponseCodeToMessage(vnpResponseCode);
 
   const displayTxnRef = vnpTxnRef || `VNP_TXN_${order.id.slice(0, 8).toUpperCase()}_01`;
@@ -156,6 +167,14 @@ export function VnPayFailedRetryView({
   }, [order.expiresAt]);
 
   const handleRetry = async () => {
+    if (isReviewOrException) {
+      setRetryError("Đơn hàng có cảnh báo đối soát tài chính (FINANCIAL_EXCEPTION / REQUIRES_REVIEW). Đã khóa tạo giao dịch mới để bảo vệ an toàn.");
+      return;
+    }
+    if (isPendingOrBlocked) {
+      setRetryError("Đơn hàng đang có giao dịch chờ đối soát hoặc không đủ điều kiện thử lại theo quy định BR-05.");
+      return;
+    }
     if (isExpired) {
       setRetryError("Đơn hàng đã hết hạn thanh toán 15 phút. Theo quy định BR-03, không thể tạo thêm lượt giao dịch mới.");
       return;
@@ -302,7 +321,7 @@ export function VnPayFailedRetryView({
                       <button
                         type="button"
                         onClick={handleRetry}
-                        disabled={isRetrying || isExpired || isPendingAttempt}
+                        disabled={isRetrying || isRetryDisabled}
                         id="vnpay-retry-btn"
                         className="w-full sm:flex-1 flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-primary hover:bg-on-secondary-container text-on-primary font-semibold transition-all shadow-md active:scale-[0.99] disabled:opacity-50 cursor-pointer"
                       >
@@ -326,7 +345,8 @@ export function VnPayFailedRetryView({
                       <button
                         type="button"
                         onClick={handleChangeMethod}
-                        className="w-full sm:w-auto px-5 py-3.5 rounded-xl border border-outline hover:bg-surface-container text-on-surface font-semibold transition-colors cursor-pointer"
+                        disabled={isRetryDisabled}
+                        className="w-full sm:w-auto px-5 py-3.5 rounded-xl border border-outline hover:bg-surface-container text-on-surface font-semibold transition-colors disabled:opacity-50 cursor-pointer"
                       >
                         Đổi phương thức thanh toán
                       </button>
