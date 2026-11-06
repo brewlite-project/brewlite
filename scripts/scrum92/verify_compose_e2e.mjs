@@ -643,14 +643,24 @@ async function runExplicitArtifactCleanupRecovery() {
   );
 }
 
-async function fetchWithRetry(url, options = {}, retries = 4, delayMs = 400) {
+const SAFE_RETRY_METHODS = new Set(['GET', 'HEAD']);
+
+/**
+ * Retries ONLY on network errors and ONLY for side-effect-free methods (GET/HEAD) by default.
+ * A mutating request (POST/PUT/PATCH/DELETE) may already have been processed by the backend before the
+ * connection failed, so it is sent exactly once unless the specific call-site explicitly proves the
+ * endpoint idempotent and opts in with { allowMutatingRetry: true }.
+ */
+async function fetchWithRetry(url, options = {}, { retries = 4, delayMs = 400, allowMutatingRetry = false } = {}) {
+  const method = String(options.method || 'GET').toUpperCase();
+  const maxRetries = SAFE_RETRY_METHODS.has(method) || allowMutatingRetry ? retries : 0;
   let lastErr;
-  for (let attempt = 0; attempt <= retries; attempt++) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       return await fetch(url, options);
     } catch (err) {
       lastErr = err;
-      if (attempt < retries) {
+      if (attempt < maxRetries) {
         await new Promise((r) => setTimeout(r, delayMs));
       }
     }
@@ -658,8 +668,8 @@ async function fetchWithRetry(url, options = {}, retries = 4, delayMs = 400) {
   throw lastErr;
 }
 
-async function jsonFetch(url, options = {}) {
-  const res = await fetchWithRetry(url, options);
+async function jsonFetch(url, options = {}, retryOptions = {}) {
+  const res = await fetchWithRetry(url, options, retryOptions);
   const text = await res.text();
   let body = null;
   try {
