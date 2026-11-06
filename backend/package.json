@@ -25,7 +25,8 @@
     "db:validate": "prisma validate --config prisma7.config.ts",
     "db:migrate": "prisma migrate deploy --config prisma7.config.ts",
     "db:seed": "prisma db seed --config prisma7.config.ts",
-    "db:seed:promotion": "tsx prisma/seed-compose-coupons.ts"
+    "db:seed:promotion": "node --import tsx prisma/run-compose-coupons-host.mjs",
+    "db:seed:promotion:manual": "tsx prisma/seed-compose-coupons.ts"
   },
   "dependencies": {
     "@nestjs/common": "^12.0.1",

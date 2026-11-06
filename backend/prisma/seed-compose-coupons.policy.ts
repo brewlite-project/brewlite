@@ -23,10 +23,10 @@ export function validatePromotionSeedTarget(env: PromotionSeedEnv): string {
   if (name !== 'brewlite_compose' || env.SEED_PROMO_ALLOWED_DATABASE !== 'brewlite_compose') {
     throw new Error('Seed blocked: only the explicitly approved brewlite_compose database is allowed');
   }
-  // The existing Compose catalog seed approves exactly postgres:5432. For a host-side
-  // run use localhost:5432; do NOT allow arbitrary remote PostgreSQL hosts.
-  const allowedHosts = (url.hostname === 'postgres' && (url.port === '5432' || url.port === '')) ||
-    (['localhost', '127.0.0.1'].includes(url.hostname) && url.port === '5432');
+  // Container-side: postgres:5432; host-side: Compose's loopback-only published 55432.
+  // Deliberately reject host:5432: it might point to a different local database.
+  const allowedHosts = (url.hostname === 'postgres' && url.port === '5432') ||
+    (['localhost', '127.0.0.1'].includes(url.hostname) && url.port === '55432');
   if (!allowedHosts) throw new Error('Seed blocked: unexpected DB host/port');
   if (env.SEED_PROMO_CONFIRM !== 'SEED_PROMO_brewlite_compose') {
     throw new Error('Seed blocked: explicit SEED_PROMO_CONFIRM is required');
@@ -53,4 +53,30 @@ export function describePromotionDrift(
   }
   if (actual.startsAt > now || actual.expiresAt <= now) differences.push('validity-window');
   return differences;
+}
+
+/** Convert the known Compose *container* URL to its loopback-only host mapping.
+ * This is for a developer's local tooling process, never for a deployed backend.
+ */
+export function composeInternalUrlToHostUrl(connection: string): string {
+  let url: URL;
+  try {
+    url = new URL(connection);
+  } catch {
+    throw new Error('Seed blocked: malformed Compose DATABASE_URL');
+  }
+  // No arbitrary endpoint, DB, userinfo override, or libpq host/socket escape.
+  validatePromotionSeedTarget({
+    NODE_ENV: 'development',
+    SEED_PROMO_ENV: 'dev-compose',
+    SEED_PROMO_ALLOWED_DATABASE: 'brewlite_compose',
+    SEED_PROMO_CONFIRM: 'SEED_PROMO_brewlite_compose',
+    DATABASE_URL: connection,
+  });
+  if (url.hostname !== 'postgres' || url.port !== '5432') {
+    throw new Error('Seed blocked: Compose DATABASE_URL must use postgres:5432');
+  }
+  url.hostname = '127.0.0.1';
+  url.port = '55432';
+  return url.toString();
 }
