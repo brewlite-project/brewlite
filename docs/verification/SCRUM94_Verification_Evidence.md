@@ -3,13 +3,14 @@
 **Ngày chạy:** 06–07/11/2026 (Asia/Bangkok)
 **Historical source commit for evidence below:** fb293e2ac35c0fe29fbe3573bf5edf81b7a586a0
 **Post-sync source commit for coupon helper/Docker target checks:** eef344c24fedd7480d06c085da3fff298def90d4
+**Latest origin/dev fetched 07/11/2026:** dba36a5c31ea07e88b2201e3c8ffd6b345720afa, merged into this branch by 13c6410; no newer origin/dev commit at fetch. No application tests/runtime checks were run on dba36a5.
 **Branch kiểm tra:** SCRUM-94-phase2-readme-report
 **Môi trường:** Windows; host checks Node v22.18.0/npm 10.9.3; Docker Desktop 4.97.0, Engine 29.9.2, Compose 5.6.1; clean test container Node v26.13.0; PostgreSQL 18. Docker CLI có trong PATH dưới thư mục cài user-local Docker Desktop nhưng sandbox từ chối truy cập; các kiểm tra CLI/Engine thành công khi chạy với quyền đã cấp.
 **DB:** PostgreSQL 18 trong Compose project scrum94_p2_20261106_a7f3, network/volume riêng; brewlite_seed_scrum94_docker cho migrate/seed/runtime; brewlite_scrum69_test_db được suite tạo bên trong cùng server tạm. Không dùng brewlite_db, brewlite_seed_hoang hoặc DB dùng chung. Không ghi DB URL, JWT, cookie, Authorization, password, HashSecret hay signed URL vào evidence.
 
 **Lịch sử đồng bộ:** các kiểm chứng runtime/test cũ được chạy trên source commit `fb293e2`. Sau đó `origin/dev` được fetch và merge tới `1a67a0c` tại task-branch merge commit `eef344c`. Upstream thêm `backend/package.json` scripts, policy/launcher/seed coupon dev/test, test và hướng dẫn riêng. Diff từ `fb293e2` xác nhận không đổi `backend/src/payments`, `docker-compose.yml`, `backend/Dockerfile`, migration, package-lock hoặc frontend. Evidence cũ vẫn gắn với commit fb293e2; các kiểm tra helper/Docker target mới ghi riêng commit eef344c trong [post-sync log](SCRUM94_DevSync_Verification_Safe.log). Không gộp số liệu giữa các commit.
 
-Các kết quả trong những bảng cũ bên dưới được ghi từ output của command/test trên fb293e2. Kiểm chứng mới tại eef344c nằm ở mục “Sau khi đồng bộ origin/dev”. Log đã lọc; không lưu thông tin nhạy cảm và không có screenshot.
+Các kết quả trong bảng lịch sử được ghi từ output của command/test trên commit nêu rõ (chủ yếu fb293e2, riêng helper/Docker targets tại eef344c). Không gán các số này cho dba36a5 hoặc commit tài liệu mới. Log đã lọc; không lưu thông tin nhạy cảm và không có screenshot.
 
 ## Thiết lập sạch
 
@@ -54,6 +55,22 @@ SCRUM-69 trước hết đọc backend/.env nếu có, rồi chọn ORDERS_TEST_
 
 Lượt selected integration ban đầu giữ gate tắt nên có 10 skipped. Để chạy đúng guard, một PostgreSQL container task-local dùng `network=none`, không có published ports; test runner chia sẻ network namespace bằng `--network container:<postgres-container>`, nên `localhost:5433` trong runner trỏ duy nhất tới DB tạm. Xác nhận từ PostgreSQL và runner: `current_database()=brewlite_test`, `inet_server_port()=5433`, 9 migrations hoàn tất, kết nối runner thành công. Không nới guard, dùng host listener hay DB chung. Với `PAYMENT_CONCURRENCY_TESTS=1`, ba file cho kết quả 83/83 pass; 23 concurrency cases active, không skip.
 
+## Sau khi đồng bộ latest origin/dev
+
+| Case / mong đợi | Kết quả thực tế | Trạng thái |
+| --- | --- | --- |
+| Fetch/sync dev | Kiểm tra remote ref sau khi hoàn tất merge README hiện tại | origin/dev=dba36a5c31ea07e88b2201e3c8ffd6b345720afa; đã có trong merge commit 13c6410; fetch ngày 07/11 không có dev commit mới hơn. | PASS — Git ancestry/ref check, không phải app test |
+| SCRUM-92 Compose source | README khớp Compose và helper mới | PostgreSQL host default đổi thành loopback 15432 (override POSTGRES_HOST_PORT), backend/frontend 3001/3000 configurable; Compose env/preflight PowerShell, clean setup guide và isolated E2E verifier đã merge. | PASS — static source/doc review |
+| Compose default runtime tại dba36a5 | Build/start/health/migrate/seed/FE flow | Không chạy lại sau sync; kết quả SCRUM-94 tại fb293e2 thiếu VNPAY_TMN_CODE nên backend/frontend chưa healthy. Báo cáo SCRUM-92 chứa runtime evidence lịch sử ở commit ghi trong report, không gán sang dba36a5. | NOT RUN trên dba36a5; không claim PASS |
+| Isolated SCRUM-92 E2E config | VNPay test config có thật hay synthetic | Harness dùng values synthetic trong source để kiểm tra initiation/replay, không gửi payment/QueryDR tới gateway và không cần merchant secret thật. | Static distinction; không phải Sandbox E2E |
+| Coupon helper port | Dùng helper với Compose default | Helper host launcher/policy cố định 127.0.0.1:55432; Compose default mới là 15432. Lần PASS tại eef344c dùng isolated namespace mở 55432, không xác minh host default. Không sửa code/config. | Compatibility limitation, chưa chạy helper trên default |
+
+### A1 cuối: nguồn và giới hạn xác nhận
+
+Nguồn định nghĩa phạm vi là [ADR approved ngày 03/11/2026](../decisions/ADR-P2-QueryDR-Sandbox-E2E-Deferred.md). ADR chấp nhận trong A1 IPN Sandbox thật, QueryDR client và automated tests; QueryDR Sandbox E2E/khôi phục mất IPN chuyển A2/SCRUM-95. ADR báo giao dịch 42.000 VND qua HTTPS/ngrok, IPN RspCode 00, Payment SUCCESS, Order PAID, Gateway Event FINALIZED, không financial exception; cũng ghi unit 221/221, PostgreSQL integration 28/28, build/lint PASS lúc đó. Đây là lịch sử theo ADR, không phải lượt chạy SCRUM-94.
+
+[PR #127](https://github.com/brewlite-project/brewlite/pull/127) có review APPROVED và merge commit c4c2422. [PR #142](https://github.com/brewlite-project/brewlite/pull/142) merge commit 784895b sửa QueryDR client/parser tests; không có Sandbox E2E output mới. Repository không có Jira/Leader record xác nhận overall A1 acceptance; phiên này không có Jira connector. Phạm vi ADR và PR history được xác nhận, trạng thái tổng thể A1 không suy diễn.
+
 ## Local runtime smoke
 
 **Chuẩn bị:** seed DB task-local; Node processes chỉ dùng cổng 3002/3005; frontend same-origin route trỏ backend task-local. Synthetic credentials/card data được giữ trong tiến trình test và không lưu trong report.
@@ -64,7 +81,7 @@ Lượt selected integration ban đầu giữ gate tắt nên có 10 skipped. Đ
 | POST đăng ký qua frontend /api/backend/auth/register; kỳ vọng 201 | Host smoke trước đó báo 502 fetch failed, direct trả 201. Next host rerun với BACKEND_INTERNAL_URL=http://127.0.0.1:3002 và Compose rerun với backend:3001 đều cho proxy/direct POST 201; 502 không tái hiện. Lượt trước có log Next không nhất quán ghi 201. | Rerun PASS; nguyên nhân 502 cũ chưa xác định, không gán implementation/owner |
 | Login/create Order/Mock Payment qua Next proxy | Register 201, login 200, order 201 PENDING, Mock payment 200 SUCCESS, Order PAID, GET /orders/me 200 | PASS; Mock/local only, không phải VNPay |
 | Restart backend Compose tạm và GET history | Restart chỉ container task SCRUM-94; cùng JWT trong tiến trình đọc lại Order | PASS — Order vẫn PAID sau restart |
-| GET /payments/:paymentId/status | API Contract v4.0 §5 khóa GET với Bearer/ownership/DB-only: UUID sai 400, không tồn tại/khác chủ 404, chủ sở hữu 200. Frontend service gọi GET. Backend controller inventory chỉ có POST /payments, POST /payments/vnpay/initiate, GET /payments/vnpay/ipn, POST /payments/zero-amount; không có GET status. Runtime GET direct và proxied đều 404 ở fb293e. Upstream sync không đổi backend/src/payments; route vẫn thiếu tại eef344c. Probe không gửi JWT để phát hiện route; không chứng minh authenticated not-found behavior theo Contract. | FAIL — implementation gap so với Contract; không gán owner |
+| GET /payments/:paymentId/status | API Contract v4.0 §5 khóa GET với Bearer/ownership/DB-only: UUID sai 400, không tồn tại/khác chủ 404, chủ sở hữu 200. Frontend service gọi GET. Backend controller inventory chỉ có POST /payments, POST /payments/vnpay/initiate, GET /payments/vnpay/ipn, POST /payments/zero-amount; không có GET status. Runtime GET direct và proxied đều 404 ở fb293e. Upstream sync không đổi backend/src/payments; static inventory tại source sau sync dba36a5 vẫn không thấy route; runtime probe chỉ được chạy tại fb293e2. Probe không gửi JWT để phát hiện route; không chứng minh authenticated not-found behavior theo Contract. | FAIL — implementation gap so với Contract; không gán owner |
 | UI browser và screenshot | Không chạy/chụp | BLOCKED — CUA báo `Browsers: Error: The browser access host is unavailable`; dừng UI theo yêu cầu. Cần ảnh thật cho catalog, login, checkout, Mock payment success và order history. |
 
 ### Tái hiện tối thiểu: POST proxy 502
@@ -108,4 +125,4 @@ CUA báo browser access host unavailable; không thử vượt chặn, không c�
 
 ## Nguồn log đã lưu trong repository
 
-Các file log đã lọc nằm trong cùng thư mục verification: [runtime development smoke](SCRUM94_Runtime_Smoke_Safe.log), [SCRUM-69 test](SCRUM94_SCRUM69_Test_Safe.log), [PostgreSQL concurrency](SCRUM94_Concurrency_Test_Safe.log), [default Compose](SCRUM94_Docker_Default_Safe.log), [post-sync coupon helper/Docker targets](SCRUM94_DevSync_Verification_Safe.log), [browser screenshot availability](SCRUM94_Browser_Screenshot_Blocked_Safe.log). Docker smoke không phải SCRUM-92 acceptance. Browser screenshot và VNPay Sandbox E2E chưa có; không suy từ Nest/API E2E, JSDOM, PostgreSQL integration hoặc Mock sang Sandbox PASS.
+Các file log đã lọc nằm trong cùng thư mục verification: [runtime development smoke](SCRUM94_Runtime_Smoke_Safe.log), [SCRUM-69 test](SCRUM94_SCRUM69_Test_Safe.log), [PostgreSQL concurrency](SCRUM94_Concurrency_Test_Safe.log), [default Compose](SCRUM94_Docker_Default_Safe.log), [post-sync coupon helper/Docker targets](SCRUM94_DevSync_Verification_Safe.log), [browser screenshot availability](SCRUM94_Browser_Screenshot_Blocked_Safe.log). SCRUM-92 verification report có trong repository nhưng không phải SCRUM-94 rerun tại dba36a5 hay Leader/Jira acceptance. Browser screenshot và QueryDR Sandbox E2E mới chưa có; không suy từ Nest/API E2E, JSDOM, PostgreSQL integration hoặc Mock sang Sandbox PASS.

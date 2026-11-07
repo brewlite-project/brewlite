@@ -3,7 +3,7 @@
 > **Trạng thái tài liệu:** Bản nháp Markdown để tích hợp vào báo cáo chính. Đã rà soát lại DOCX/PDF trong repository: `BrewLite_Project_Charter.docx` là project charter; các DOCX còn lại là requirements, US/AC hoặc model decisions, không có báo cáo đồ án chính để sửa trực tiếp. Nội dung này chưa phải báo cáo chính, Leader approval hay nghiệm thu Jira.
 
 **Ngày cập nhật kiểm chứng:** 07/11/2026 (Asia/Bangkok)
-**Source baseline của các kiểm chứng trước sync:** fb293e2ac35c0fe29fbe3573bf5edf81b7a586a0. Branch đã đồng bộ `origin/dev` tới 1a67a0c tại merge commit `eef344c`; coupon helper mới được kiểm tra riêng trên commit này. Lịch sử và log theo từng commit ở [evidence](verification/SCRUM94_Verification_Evidence.md).
+**Source baseline của các kiểm chứng runtime/test:** fb293e2ac35c0fe29fbe3573bf5edf81b7a586a0; coupon helper/Docker target check riêng tại eef344c24fedd7480d06c085da3fff298def90d4. Ngày 07/11/2026 fetch origin/dev mới nhất dba36a5c31ea07e88b2201e3c8ffd6b345720afa và merge tại 13c6410; không có dev commit mới hơn tại thời điểm fetch. Merge mới thêm Compose/env/docs/scripts, không sửa app source. Không chạy lại tests/runtime trên dba36a5; mọi số test dưới đây vẫn gắn với commit ghi rõ trong evidence.
 **Bằng chứng:** [SCRUM-94 Verification Evidence](verification/SCRUM94_Verification_Evidence.md)
 
 ## 1. Phạm vi Phase 2
@@ -19,7 +19,7 @@ Các chức năng có trong source tại commit khảo sát gồm:
 - Shared payment finalization, idempotency, khóa và transaction PostgreSQL, xử lý trùng lặp/xung đột/financial exception.
 - Hết hạn Order, Grace và nhánh ZERO_AMOUNT nội bộ.
 - Regression giữ provider Mock của Phase 1 để test/demo và không gọi cổng thanh toán thật.
-- Coupon seed helper mới của dev chỉ dành cho fixture development/test; là thao tác opt-in riêng, không tự chạy cùng catalog seed hoặc Compose startup.
+- Coupon seed helper chỉ dành cho fixture development/test; là thao tác opt-in riêng, không tự chạy cùng catalog seed hoặc Compose startup. Helper host-side hard-code port 55432, không khớp Compose host default mới 15432; lần kiểm tra eef344c dùng namespace test riêng expose 55432, không xác minh mapping mặc định.
 
 Các đầu mục trên mô tả **implementation**. Mức **test** và **nghiệm thu** được tách ở mục 6. Không dùng Mock hoặc test giả lập làm bằng chứng Sandbox E2E.
 
@@ -37,7 +37,7 @@ flowchart LR
 
 Frontend: Next.js 16.3.8, React 19.2.8 và TypeScript. Backend: NestJS 12, TypeScript 6, Prisma 7.10.1. Container base dùng Node 26; Compose dùng PostgreSQL 18. Source được tổ chức theo frontend/, backend/, docs/, và docker-compose.yml.
 
-Host local: browser dùng localhost:3000; backend dùng localhost:3001; PostgreSQL dùng host/port trong DATABASE_URL. Trong Docker network, service-to-service dùng postgres:5432 và backend:3001; host published ports là frontend 3000, backend 3001, database 55432. BACKEND_INTERNAL_URL là server-side runtime config; NEXT_PUBLIC_API_URL có thể được nhúng vào client build và không được chứa secret.
+Host local: browser dùng localhost:3000; backend dùng localhost:3001; PostgreSQL dùng host/port trong DATABASE_URL. Compose mặc định publish frontend 3000, backend 3001 và PostgreSQL 127.0.0.1:15432; host ports có thể override bằng FRONTEND_HOST_PORT, BACKEND_HOST_PORT, POSTGRES_HOST_PORT. Trong Docker network dùng postgres:5432 và backend:3001. BACKEND_INTERNAL_URL là server-side runtime config; NEXT_PUBLIC_API_URL có thể được nhúng vào client build và không được chứa secret.
 
 Migration được quản lý bằng Prisma migrations. Compose có service migrate chạy prisma migrate deploy rồi mới cho backend start. Catalog seed và coupon fixture seed là hai thao tác tách biệt; coupon helper mới chỉ chấp nhận DB có tên brewlite_compose cùng target/acknowledgement guard riêng, và không được dùng trên DB ứng dụng hoặc database chia sẻ. Chi tiết lệnh và điều kiện nằm trong [coupon seed guide](../backend/prisma/README-dev-compose-coupons.md).
 
@@ -49,7 +49,7 @@ Migration được quản lý bằng Prisma migrations. Compose có service migr
 4. VNPay gọi IPN server-to-server qua HTTPS, không cần Customer JWT. Backend xác minh HMAC, merchant, TxnRef, amount và trạng thái trước khi ACK.
 5. QueryDR client xác minh response để phục hồi/đối soát; scheduler quản lý lần thử và lease. IPN và QueryDR đưa bằng chứng đã xác minh vào cùng Shared Payment Finalization.
 6. Finalization xử lý trong transaction và khóa theo Order/Payment. Idempotency, gateway event và điều kiện terminal ngăn lặp coupon, Loyalty, inventory hoặc side effect.
-7. UI cần đọc trạng thái server sau Return. **GET /payments/:paymentId/status chưa có controller/route backend trong source baseline; upstream sync tới eef344c không đổi payment source**, dù API Contract v4.0 §5 và frontend service có tham chiếu endpoint này.
+7. UI cần đọc trạng thái server sau Return. **GET /payments/:paymentId/status chưa có controller/route backend trong source baseline; static inventory sau sync tới origin/dev dba36a5 cũng không thấy route**, dù API Contract v4.0 §5 và frontend service có tham chiếu endpoint này.
 
 Payment có trạng thái PENDING, SUCCESS, FAILED. Order có PENDING, PAYMENT_FAILED, PAID, PREPARING, READY, COMPLETED, CANCELLED. Tối đa một Payment SUCCESS được chấp nhận cho một Order. Event trùng được nhận diện và không lặp side effect; event mâu thuẫn/late success tạo financial exception/requires review, giữ terminal state hiện có và không hồi sinh Order.
 
@@ -96,19 +96,27 @@ Các kết quả ứng dụng cũ ở bảng dưới thuộc source commit fb293
 | Post-sync backend Docker targets: `docker build --target migrate` và `--target runtime` trên source eef344c ([log](verification/SCRUM94_DevSync_Verification_Safe.log)) | Hai targets build/export thành công; không start production app hoặc gọi Sandbox. | PASS cho Docker packaging, không phải Compose health |
 | Coupon seed policy: `npx vitest run prisma/seed-compose-coupons.policy.spec.ts`; source spec bind-mounted read-only vì Docker build context loại `*.spec.ts` ([log](verification/SCRUM94_DevSync_Verification_Safe.log)) | Lần đầu 0 test file do `.dockerignore`; rerun 25 passed, 0 failed, 0 skipped. | PASS ở rerun; setup attempt không tính là test |
 | Coupon seed helper + PostgreSQL trên source eef344c ([log](verification/SCRUM94_DevSync_Verification_Safe.log)) | DB task-local tên `brewlite_compose`, network namespace riêng, port 55432 không publish host, 9 migrations trước seed. Lần đầu 5 new, lần hai 0 new/5 existing; sau cùng 5 coupon, usage sum 0, 0 redemptions. | PASS cho insert-only/idempotent helper trên DB tạm; không dùng application DB |
-| VNPay Sandbox / QueryDR Sandbox E2E | Khang bổ sung credential, public HTTPS IPN và Sandbox/QueryDR E2E theo xác nhận của người yêu cầu. SCRUM-94 không gọi Sandbox, không thanh toán thật và không thay Mock vào. | BLOCKED; chờ Khang |
+| VNPay Sandbox / QueryDR Sandbox E2E | ADR A1 ngày 03/11 báo cáo IPN Sandbox 42.000 VND thành công; SCRUM-94 không gọi lại. QueryDR Sandbox E2E được ADR chuyển sang A2/SCRUM-95. Khang bổ sung credential/public HTTPS IPN và evidence Sandbox hiện hành; synthetic values không phải credential thật. | BLOCKED cho lượt SCRUM-94; chờ Khang, không claim QueryDR PASS |
 | Screenshot giao diện thật | CUA báo `Browsers: Error: The browser access host is unavailable`; dừng thao tác UI. Chưa có ảnh thật trong repo. Còn cần catalog, login, checkout, Mock payment success, order history. | BLOCKED |
 
 Backend unit/service, Nest/API E2E, frontend Node/JSDOM, PostgreSQL integration/concurrency, Docker Compose smoke, coupon helper integration và VNPay Sandbox là các lớp kiểm chứng riêng. Frontend 174/174 chạy bằng Node/JSDOM cùng SCRUM-69 PostgreSQL test DB; không phải browser thật. Nest/API E2E không chứng minh JSDOM hoặc concurrency; PostgreSQL concurrency và coupon helper dùng DB thật nhưng không phải Sandbox; Docker default Compose chỉ đạt build/migrate/seed, còn development override smoke là Mock. Backend Docker targets riêng sau sync là packaging checks, không xác nhận Compose service healthy. Không lớp nào thay cho Sandbox E2E. SCRUM-92/93 không được tự nghiệm thu trong tài liệu này.
+
+## A1 cuối — nguồn xác nhận và phạm vi có thể kết luận
+
+Nguồn định nghĩa A1 cuối tìm thấy trong repository là [ADR-P2-QueryDR-Sandbox-E2E-Deferred](decisions/ADR-P2-QueryDR-Sandbox-E2E-Deferred.md), trạng thái APPROVED ngày 03/11/2026. ADR điều chỉnh nghiệm thu SCRUM-81 cho A1: IPN Sandbox thật được thử thành công; QueryDR client và automated tests được chấp nhận; QueryDR Sandbox E2E và phục hồi khi mất IPN chuyển sang A2/SCRUM-95. ADR ghi lịch sử giao dịch 42.000 VND qua HTTPS/ngrok, RspCode 00, Payment SUCCESS, Order PAID, Gateway Event FINALIZED, không có financial exception; unit 221/221, PostgreSQL integration 28/28, build/lint PASS tại thời điểm đó. Đây là kết quả do ADR báo cáo, không phải lượt chạy SCRUM-94.
+
+[PR #127](https://github.com/brewlite-project/brewlite/pull/127) có review APPROVED và merge commit c4c2422. [PR #142](https://github.com/brewlite-project/brewlite/pull/142) merge QueryDR response handling/tests (commit 784895b, ancestor của origin/dev dba36a5); diff PR chỉ sửa client/spec, không chứng minh Sandbox E2E mới.
+
+Chưa tìm thấy Jira/Leader record xác nhận trạng thái tổng thể A1 hoặc SCRUM-81 là Done; phiên này không có Jira connector. Vì vậy chỉ xác nhận được phạm vi A1 theo ADR và lịch sử review/merge PR, không suy ra nghiệm thu tổng thể A1. Khang bổ sung credential/public HTTPS IPN và evidence Sandbox hiện hành; QueryDR Sandbox E2E vẫn là phần A2 theo ADR. Không dùng kết quả Mock/synthetic thay thế.
 
 ## 7. Hạn chế và công việc còn mở
 
 - **Frontend proxy:** POST đăng ký trước đây từng báo 502 nhưng Next host và Compose rerun đều trả 201 qua direct và proxy; root cause của kết quả cũ chưa rõ. Chưa có căn cứ gán owner. Nếu tái diễn, cần giữ đúng request/log để phân tích trước khi kết luận implementation.
 - **Payment status:** thêm/hoàn thiện API status theo Contract đã duyệt và test ownership/server truth; hiện UI Return chưa thể đọc trạng thái authoritative qua endpoint dự kiến.
-- **Sandbox/QueryDR Sandbox E2E:** Khang bổ sung credential, public HTTPS IPN và Sandbox/QueryDR E2E theo xác nhận của người yêu cầu. ADR-P2-QueryDR-Sandbox-E2E-Deferred.md ghi lần QueryDR 99/Unexpected error và chuyển E2E sang SCRUM-95; SCRUM-94 không thay Sandbox bằng Mock và không chạy giao dịch thật.
-- **Docker:** Default Compose build/migrate/seed đã chạy trên project/database/volume tạm ở source commit fb293e; upstream sync tới eef344c chỉ thêm coupon helper, không đổi Compose/Docker/payment runtime; backend migrate/runtime targets và coupon helper đã build/test riêng, còn Compose startup không chạy lại sau sync; production backend không khởi động do thiếu merchant Sandbox (`VNPAY_TMN_CODE`), frontend bị chặn theo health dependency. Development override riêng đã chạy luồng Mock và persistence. Override đặt NODE_ENV=development, tắt ORDER_EXPIRATION_ENABLED và PAYMENT_RECONCILIATION_ENABLED, bật MOCK_PAYMENT_ENABLED; chỉ host port mappings cũng được remap để cách ly. Không có production/Sandbox pass; không tìm thấy kết quả nghiệm thu SCRUM-92 và không tự kết luận task Done.
+- **Sandbox:** ADR APPROVED ghi nhận IPN Sandbox đã thành công trong lần nghiệm thu SCRUM-81 lịch sử. SCRUM-94 không chạy lại; Khang bổ sung credential/public HTTPS IPN và evidence Sandbox hiện hành. QueryDR Sandbox E2E được ADR chuyển sang A2/SCRUM-95; response 99/Unexpected error vẫn là giới hạn, không ghi PASS bằng Mock/synthetic data.
+- **Docker:** Default Compose trên source fb293e đã build/migrate/seed nhưng backend production không healthy do thiếu VNPAY_TMN_CODE; frontend bị chặn theo dependency. Development override chạy Mock/persistence riêng, không phải production pass. eef344c kiểm tra riêng Docker targets/coupon helper. Latest dev dba36a5 thêm Compose ports/env, preflight PowerShell, guide và SCRUM-92 isolated harness; SCRUM-94 không chạy lại Docker tại dba36a5. Repo có [SCRUM-92 verification report](verification/SCRUM92_Docker_Clean_Setup_Verification.md) với outputs gắn commit lịch sử, không phải Leader/Jira acceptance. Coupon helper host-side cố định port 55432 còn Compose default là 15432; kết quả eef chạy namespace riêng, không xác minh default mapping. Không claim Compose default production/Sandbox PASS.
 - **Frontend payment tests:** full npm test hiện có 174 passed, 0 failed/cancelled/skipped sau khi SCRUM-69 được chạy trong DB tạm. Lần host đầu có 2 cancelled do thiếu biến DB. Kết quả test không tự xác nhận Jira SCRUM-87 đã Done.
-- **Sandbox E2E:** không có merchant/secret đủ để chạy; không tìm thấy kết quả SCRUM-93 trong repository. Không tự cập nhật trạng thái task/approval.
+- **Trạng thái A1:** ADR APPROVED là nguồn xác nhận phạm vi SCRUM-81 A1, PR #127 được review APPROVED/merged; không tìm thấy Jira/Leader record về nghiệm thu tổng thể A1. Không tự cập nhật trạng thái SCRUM-87/92/93.
 - **Bằng chứng ảnh:** Ngày 07/11/2026 tại code commit `eef344c`, browser inventory trả `Browsers: Error: The browser access host is unavailable`; chưa mở ứng dụng hay chụp ảnh. Edge hiện có đang phục vụ công việc khác nên không bị tác động. Chi tiết trong [screenshot availability log](verification/SCRUM94_Browser_Screenshot_Blocked_Safe.log). Bản báo cáo chính cần ảnh thật của catalog, đăng nhập, checkout, Mock payment success và lịch sử đơn từ môi trường test riêng.
 - Cài dependencies trên Node 22.18.0 sinh EBADENGINE và npm audit ghi nhận advisory; không chạy audit fix hay nâng dependency trong phạm vi tài liệu.
 

@@ -2,10 +2,10 @@
 
 > **Phạm vi:** hướng dẫn tích hợp VNPay Sandbox ở backend NestJS, frontend Next.js và PostgreSQL. Không dùng production merchant hoặc thanh toán thật.
 > **Snapshot code:** fb293e2ac35c0fe29fbe3573bf5edf81b7a586a0, kiểm tra ngày 06/11/2026.
-> **Đối chiếu sau sync:** task branch đã merge `origin/dev` tới `1a67a0c` tại `eef344c`; upstream delta chỉ thêm coupon seed dev/test, không đổi payment source, Compose, Dockerfile, migration hoặc lockfile. Runtime evidence bên dưới ghi rõ commit `fb293e2` thực sự được chạy.
+> **Đối chiếu source:** runtime evidence bên dưới vẫn gắn với fb293e2ac35c0fe29fbe3573bf5edf81b7a586a0. Branch đã sync origin/dev=dba36a5 tại merge commit 13c6410; merge mới thêm Compose/env/docs/scripts SCRUM-92, không đổi payment source. PR #142 (merge 784895b, đã nằm trong baseline fb293e2) sửa QueryDR response handling/tests nhưng không phải Sandbox E2E evidence.
 > **Nguồn thiết kế:** [API Contract v4.0](../api/BrewLite_API_Contract_v4.0.md), [Requirements v3.1](../docs_Phase2/BrewLite_Requirements_Specification_v3.1.docx), [US/AC Phase 2](../docs_Phase2/BrewLite_User_Stories_Acceptance_Criteria_Phase2.docx), [ADR QueryDR](../decisions/ADR-P2-QueryDR-Sandbox-E2E-Deferred.md).
 
-Contract v4 §14 chốt các tài liệu nghiệp vụ Phase 2 là approved inputs; metadata review/candidate ở một số đầu tài liệu chưa đồng bộ. Không sửa baseline đã duyệt chỉ để phù hợp source. Tài liệu này phân biệt route có trong code, automated test và Sandbox E2E.
+Contract v4 §14 chốt các tài liệu nghiệp vụ Phase 2 là approved inputs; metadata review/candidate ở một số đầu tài liệu chưa đồng bộ. Không sửa baseline đã duyệt chỉ để phù hợp source. Tài liệu này phân biệt route có trong code, automated test và Sandbox E2E. ADR A1 approved ngày 03/11 báo cáo một giao dịch IPN Sandbox thành công; đây là historical result, SCRUM-94 không chạy lại. ADR chuyển QueryDR Sandbox E2E sang A2/SCRUM-95. PR #127 được review APPROVED/merge; PR #142 chỉ cập nhật QueryDR client/tests, không xác nhận Sandbox mới. Jira/Leader overall A1 acceptance chưa được truy cập/xác nhận.
 
 ## 1. Runtime status
 
