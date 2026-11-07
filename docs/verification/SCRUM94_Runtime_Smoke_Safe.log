@@ -1,0 +1,23 @@
+SCRUM-94 isolated Compose runtime smoke (safe summary)
+Date: 2026-11-06 Asia/Bangkok
+Code commit: fb293e2ac35c0fe29fbe3573bf5edf81b7a586a0
+Environment: Docker Desktop 4.97.0; Docker Engine 29.9.2; Compose 5.6.1; source images built from this worktree; backend/frontend host mappings 127.0.0.1:3002 and 127.0.0.1:3005; PostgreSQL isolated on project network; database brewlite_seed_scrum94_docker. Temporary development override explicitly disabled expiration/reconciliation and enabled Mock; this was not a Sandbox/production configuration.
+Expected: FE proxy reaches BE and seeded PostgreSQL; registration, login, order and local Mock flow work; order/payment state survives backend restart.
+Actual:
+PASS GET http://127.0.0.1:3002/products -> 200 JSON.
+PASS GET http://127.0.0.1:3005/api/backend/products -> 200 JSON.
+PASS POST http://127.0.0.1:3002/auth/register -> 201 JSON.
+PASS POST http://127.0.0.1:3005/api/backend/auth/register -> 201 JSON.
+PASS POST /auth/login via Next proxy -> 200; token stayed in process memory and was not logged.
+PASS POST /orders via Next proxy -> 201, PENDING; GET /orders/me returned the order.
+PASS POST /payments via Next proxy with local Mock only -> 200, Payment SUCCESS, Order PAID.
+PASS Backend restart in the task Compose project; GET /orders/me after restart still returned the Order as PAID.
+Expected/actual mismatch from earlier same-commit host smoke: earlier output reported POST proxy 502 `fetch failed` while direct POST was 201. The current correctly configured Compose run did not reproduce it (proxy POST 201). Earlier evidence also had an inconsistent Next request line showing 201. Root cause remains undetermined; no implementation attribution or owner is assigned.
+Payment status route probe: GET /payments/<valid-shaped UUID>/status returned 404 both direct and through proxy. Probe omitted Authorization only to detect route registration. Static implementation inventory found no GET status handler. This is not proof that the Contract's authenticated missing-payment 404 behavior is implemented.
+Minimal status-route reproduction (commit fb293e2ac35c0fe29fbe3573bf5edf81b7a586a0): GET /payments/<valid-shaped UUID>/status direct to backend and GET /api/backend/payments/<valid-shaped UUID>/status through Next, with no Authorization header. API Contract v4.0 §5 expects the protected route to be registered (401 without JWT; with valid owner JWT, 200 for owned payment, 400 for invalid UUID and 404 for absent/foreign payment). Actual: 404 direct and proxied. Because no route/controller exists, authenticated owner/foreign-owner behavior was not testable; this is an implementation gap relative to Contract, not proof of the Contract's 404 ownership behavior. No JWT or real UUID logged.
+This is an API/HTTP smoke, not a real browser screenshot or VNPay Sandbox E2E.
+Sensitive values and response bodies were not recorded.
+Host Next development proxy rerun (same commit; 2026-11-06):
+Environment: PORT=3006, BACKEND_INTERNAL_URL=http://127.0.0.1:3002, NEXT_PUBLIC_API_URL=http://localhost:3002; backend was the SCRUM-94 isolated Compose service on host port 3002. Port 3006 was chosen because 3005 belonged to the task Compose frontend.
+Expected/actual: GET /api/backend/products 200; direct POST /auth/register 201; proxied POST /api/backend/auth/register 201.
+The historical host-smoke 502 did not reproduce in either this host Next run or the Compose frontend run. This does not identify the earlier cause. Request bodies and response contents were not logged.
