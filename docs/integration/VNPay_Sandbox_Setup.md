@@ -2,6 +2,7 @@
 
 > **Phạm vi:** hướng dẫn tích hợp VNPay Sandbox ở backend NestJS, frontend Next.js và PostgreSQL. Không dùng production merchant hoặc thanh toán thật.
 > **Snapshot code:** fb293e2ac35c0fe29fbe3573bf5edf81b7a586a0, kiểm tra ngày 06/11/2026.
+> **Đối chiếu sau sync:** task branch đã merge `origin/dev` tới `1a67a0c` tại `eef344c`; upstream delta chỉ thêm coupon seed dev/test, không đổi payment source, Compose, Dockerfile, migration hoặc lockfile. Runtime evidence bên dưới ghi rõ commit `fb293e2` thực sự được chạy.
 > **Nguồn thiết kế:** [API Contract v4.0](../api/BrewLite_API_Contract_v4.0.md), [Requirements v3.1](../docs_Phase2/BrewLite_Requirements_Specification_v3.1.docx), [US/AC Phase 2](../docs_Phase2/BrewLite_User_Stories_Acceptance_Criteria_Phase2.docx), [ADR QueryDR](../decisions/ADR-P2-QueryDR-Sandbox-E2E-Deferred.md).
 
 Contract v4 §14 chốt các tài liệu nghiệp vụ Phase 2 là approved inputs; metadata review/candidate ở một số đầu tài liệu chưa đồng bộ. Không sửa baseline đã duyệt chỉ để phù hợp source. Tài liệu này phân biệt route có trong code, automated test và Sandbox E2E.
@@ -66,11 +67,10 @@ Frontend host env: NEXT_PUBLIC_API_URL là public/build-time; BACKEND_INTERNAL_U
 
 Cách cài dependencies, generate client, migrate, seed đúng allowlist, chạy host app hoặc Compose nằm trong [README](../../README.md). Chạy test trên database riêng đã migrate. Không bật PAYMENT_RECONCILIATION_ENABLED nếu chưa có QueryDR config hợp lệ. Trước khi chạy backend trên port 3001, kiểm tra port; không dừng service đang dùng.
 
-Initiation cần JWT Customer, Order còn hợp lệ và Idempotency-Key:
+Initiation cần JWT Customer, Order còn hợp lệ và Idempotency-Key. Gửi JWT qua cơ chế xác thực của client; không chép giá trị hoặc Authorization header vào tài liệu/log.
 
 ~~~http
 POST /payments/vnpay/initiate
-Authorization: Bearer <customer-token>
 Idempotency-Key: <unique-key>
 Content-Type: application/json
 
