@@ -1,0 +1,20 @@
+SCRUM-94 Docker Compose default workflow (safe summary)
+Date: 2026-11-07 (Asia/Bangkok)
+Code commit: fb293e2ac35c0fe29fbe3573bf5edf81b7a586a0
+Environment: Docker Desktop 4.97.0; Docker Engine 29.9.2; Compose 5.6.1; PostgreSQL 18; image builds use Node 26.13.0.
+
+Isolation/configuration:
+- Compose project: scrum94p2d2e1. Labels confirmed all test containers belong to this project.
+- Task database: brewlite_compose in the task-local postgres container, network scrum94p2d2e1_brewlite_net, named volume scrum94p2d2e1_brewlite_pgdata. This is separate from the already-running brewlite_compose project, which remained healthy.
+- Only host port mappings were overridden to avoid the existing stack: frontend 39000->3000, backend 39001->3001, PostgreSQL 39432->5432. Service runtime settings came from docker-compose.yml.
+- The repository has no separate Compose production profile; the default backend image runtime is production and reconciliation remains enabled.
+- Generated disposable DB/JWT secrets were not saved here. VNPAY_TMN_CODE and VNPAY_HASH_SECRET were intentionally blank; PAYMENT_RECONCILIATION_ENABLED=true; no Mock enablement was supplied. No real Sandbox request was made.
+
+Cases:
+- Compose preflight and config --services: PASS; services postgres, migrate, backend, frontend resolved; named volume brewlite_pgdata resolved.
+- `docker compose -p scrum94p2d2e1 ... up --build -d` expected all services to reach health; actual exit 1. The frontend image, backend image and migrate image built. PostgreSQL became healthy. Migrate exited 0 after applying 9/9 migrations against database brewlite_compose at postgres:5432. Backend restarted unhealthy and the frontend remained Created because the backend dependency never became healthy.
+- Backend startup log: `Missing required environment variable: VNPAY_TMN_CODE` from the production reconciliation QueryDR configuration. This is a missing local Sandbox configuration precondition; it does not establish a code defect.
+- Before seed, DB check: `brewlite_compose|9|0` (database, completed migrations, products). Manual README seed command with ALLOW_COMPOSE_DEMO_SEED=true: PASS, exit 0. Seed output: 9 menu products, 5 toppings. Post-seed DB counts: `brewlite_compose|9|4|9|5|0|0` (database, migrations, categories, products, toppings, orders, payments).
+- FE->BE->PostgreSQL login/order/Mock/history and restart persistence under the default production settings: BLOCKED because backend did not become healthy. Those flows were previously exercised only by the separate development override summarized in SCRUM94_Runtime_Smoke_Safe.log; they are not production or Sandbox evidence.
+
+No credentials, connection strings, cookies, JWTs or signed URLs are recorded. The task project, volume, containers and temporary config were removed after this summary was saved.

@@ -1,0 +1,12 @@
+SCRUM-94 browser screenshot availability check (safe summary)
+Date: 2026-11-07 Asia/Bangkok
+Branch: SCRUM-94-phase2-readme-report
+Application source commit: eef344c24fedd7480d06c085da3fff298def90d4 (merge of origin/dev 1a67a0c69503300595c3ccea3cfb87bb2ea06e3c)
+Environment: Windows desktop; Computer Use browser inventory via the available local UI bridge.
+
+Case: capture genuine screenshots of the task-local application (catalog, login, checkout, Mock payment success, order history).
+Expected: an isolated browser surface is available for the SCRUM-94 test application.
+Actual: browser inventory returned no browser surfaces and the explicit error "Browsers: Error: The browser access host is unavailable". The app UI was not opened and no screenshot was captured. The existing Edge window was already displaying unrelated work and was not changed.
+Status: BLOCKED. This is a tool-access limitation, not an application/browser-test result. No UI or Sandbox E2E is claimed.
+
+No credentials, app requests, cookies, tokens, headers, payment data, or signed URLs were captured in this check.

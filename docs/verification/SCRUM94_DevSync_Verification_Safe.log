@@ -1,0 +1,30 @@
+SCRUM-94 post-dev-sync verification (safe summary)
+Date: 2026-11-07 Asia/Bangkok
+Branch: SCRUM-94-phase2-readme-report
+Code commit under test: eef344c24fedd7480d06c085da3fff298def90d4 (merge of origin/dev 1a67a0c69503300595c3ccea3cfb87bb2ea06e3c)
+Environment: Docker Desktop 4.97.0; Docker Engine 29.9.2; Node 26.13.0 in backend Docker targets; PostgreSQL 18. Existing brewlite_compose containers were healthy on host ports 3000/3001/55432 before and after these checks.
+
+Scope of synced dev changes:
+- backend/package.json adds db:seed:promotion and db:seed:promotion:manual scripts.
+- Adds opt-in development/test coupon seed policy, host-side launcher, insert-only seed, and documentation/tests.
+- Read-only diff confirmed no changes from the previous source baseline in backend/src/payments, docker-compose.yml, backend/Dockerfile, backend/prisma/migrations, backend/package-lock.json, or frontend.
+- The existing Compose default up result and application smoke evidence remain tied to source commit fb293e2; they were not relabeled as tests of this merge commit. Backend migrate/runtime image targets and the new coupon helper were checked at eef344c.
+
+Cases:
+- docker build --target migrate --tag scrum94-sync-eef344-runner:local --file backend/Dockerfile backend: PASS. npm ci installed 531 packages; Prisma Client 7.10.1 generated; Nest build succeeded. npm audit reported 16 dependency advisories; no dependency change or fix was made.
+- docker build --target runtime --tag scrum94-sync-eef344-runtime:local --file backend/Dockerfile backend: PASS. Production prune completed and runtime image exported. npm audit reported 5 production dependency advisories; no dependency change or fix was made.
+- First npx vitest run for prisma/seed-compose-coupons.policy.spec.ts inside the Dockerfile migrate image: setup failure, 0 files discovered, exit 1. backend/.dockerignore intentionally excludes *.spec.ts, so the test file is not part of that image.
+- Corrected policy suite command with the source test file bind-mounted read-only into a no-network runner: PASS, 1 file, 25 passed, 0 failed, 0 skipped. No DB was used.
+- Initial isolated PostgreSQL container attempt: setup failure before readiness because the generated temporary env file had an empty password field. No migration, seed, host port bind, or DB connection occurred. The exact stopped task container and its anonymous volume were removed; corrected temporary env was generated without printing or logging its value.
+- Initial inline Node identity probe: setup failure because PowerShell/native argument quoting removed JS string quotes; no DB connection occurred. Replaced with a temporary read-only Node script.
+- Corrected PostgreSQL container: name scrum94-sync-eef344-pg; PostgreSQL 18; network=none; no published host ports; port 55432 only inside the container network namespace. Test runner shared this isolated namespace via --network container:scrum94-sync-eef344-pg. Its anonymous volume is task-owned. Database name was brewlite_compose solely to satisfy the new helper's exact guard; it was a separate task-local PostgreSQL instance/volume and not the existing application database/container.
+- Before migrations, a Node runner connected and confirmed current_database=brewlite_compose, inet_server_port=55432, current_user=scrum94. Existing application container inventory remained healthy and unchanged.
+- npm run db:migrate using the isolated runner: PASS, 9/9 migrations applied to the task-local database.
+- Before coupon seed: 9 migrations, 0 coupons, active_usage_sum=0, 0 coupon_redemptions.
+- npm run db:seed:promotion with the repository host-side launcher, read-only mounted task compose env and explicit acknowledgement: PASS, 5 new coupons, 0 already existed.
+- Repeated the same helper command: PASS, 0 new, 5 already existed; no existing rows updated.
+- Post-seed database query: current_database=brewlite_compose, port=55432, 9 migrations, 5 coupons, active_usage_sum=0, 0 redemptions. Database state existed only in the task container/volume.
+
+This is an isolated seed workflow verification, not a run against the user's local Compose database and not a Sandbox/QueryDR E2E. The host-side mapping was exercised as 127.0.0.1:55432 inside the test runner's private network namespace; no Windows host port was reserved. The default production Compose service was not started again at eef344c: the sync changed only seed scripts/helper/docs/tests, not Compose or payment runtime configuration. Its prior startup at fb293e2 was blocked by missing real VNPAY_TMN_CODE and remains non-PASS.
+
+Cleanup complete after evidence capture: removed only container scrum94-sync-eef344-pg, its inspected anonymous volume, image tags scrum94-sync-eef344-runner:local and scrum94-sync-eef344-runtime:local, and the five-file temp directory containing generated credentials and verification scripts. No prune or cache cleanup was run. A final read-only Docker inventory found no SCRUM-94 container, volume or image tags; the existing brewlite_compose frontend/backend/PostgreSQL containers remained healthy. This log does not contain credentials, DB URLs, tokens, cookies, headers or signed VNPay URLs.

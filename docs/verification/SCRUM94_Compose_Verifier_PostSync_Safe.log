@@ -1,0 +1,23 @@
+SCRUM-94 post-sync Compose verification
+Run date: 2026-11-07 23:41:25 +07:00
+Checkout HEAD: 304a7c6d7aacd1f36f5cf2834d38bdb0ab9f6abe
+origin/dev: dba36a5c31ea07e88b2201e3c8ffd6b345720afa
+Environment: Windows; Docker Desktop 4.97.0; Engine 29.9.2; Compose 5.6.1
+Command: node scripts/scrum92/verify_compose_e2e.mjs --up
+Expected: isolated default Compose test workflow builds, starts, migrates/seeds, exercises FE to BE to PostgreSQL paths, survives restart, and cleans exact test records.
+Actual: PASS; process exit 0 and verifier reported ALL VERIFICATION CHECKS PASSED.
+Isolation: project brewlite_scrum92_e2e; volume brewlite_scrum92_e2e_brewlite_pgdata; database brewlite_seed_scrum92_e2e; NODE_ENV=test; schedulers disabled; host ports 13000/13001/15492 mapped to frontend/backend/postgres 3000/3001/5432.
+Configuration distinction: used the repository verifier's synthetic VNPay test values and local HTTP return URL. The harness called only the local initiation endpoint; it did not follow the generated URL, contact VNPay, run IPN, or run QueryDR. This is not Sandbox evidence.
+Database check: database brewlite_seed_scrum92_e2e; PostgreSQL configured port 5432; completed migrations 9; categories 4; products 9; toppings 5. A read-only query after cleanup found 0 verifier users and 0 SCRUM92FREE coupons.
+Expected / actual checks:
+- Frontend home, backend liveness, Swagger and product image: expected HTTP 200; actual all 200.
+- FE proxy catalog: expected 9 seeded products; actual 9.
+- Register, login, /auth/me: expected 201/200/200; actual 201/200/200.
+- Create Order: expected 201 PENDING; actual 201 PENDING.
+- Mock on test profile: expected production guard rejection; actual 403 MOCK_PAYMENT_DISABLED.
+- ZERO_AMOUNT: nonzero order expected 409 ORDER_NOT_ZERO_AMOUNT; actual 409. Valid zero order expected settlement SUCCESS/PAID and replay idempotency; actual 201 SUCCESS/PAID/0 VND, then 200 replay with same payment.
+- Local VNPay initiation: expected PENDING plus idempotent replay; actual 201 PENDING and 200 replay. No signed URL was retained.
+- Restart/persistence: expected healthy services and identical database snapshot; actual postgres/backend/frontend healthy and pre/post snapshots identical.
+- Cleanup: expected deletion of exact verifier records and stock restoration; actual verifier exited 0, no state file and no user/coupon fixture residue.
+No suite-level pass count applies to this assertion-based E2E script.
+Sanitization: this file omits all emails, entity UUIDs, passwords, JWTs, cookies, Authorization headers, HashSecret values, and payment URLs/signatures.
