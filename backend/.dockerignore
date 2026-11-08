@@ -1,0 +1,47 @@
+# Host/build/test artifacts. Prisma Client is generated inside the Linux build.
+node_modules
+**/node_modules
+dist
+**/dist
+src/generated/prisma
+**/src/generated/prisma
+coverage
+**/coverage
+.nyc_output
+**/.nyc_output
+*.tsbuildinfo
+**/*.tsbuildinfo
+.task24-tests
+**/.task24-tests
+test
+**/test
+**/__tests__
+**/*.spec.ts
+**/*.spec.js
+**/*.e2e-spec.ts
+
+# Local credentials and package-manager configuration; .env.example is not needed.
+.env
+.env.*
+**/.env
+**/.env.*
+.npmrc
+**/.npmrc
+
+# Old local artifacts must never enter the backend build context.
+*.patch
+**/*.patch
+*.zip
+**/*.zip
+*.bundle
+**/*.bundle
+*.md
+**/*.md
+
+# Repository metadata and logs.
+.git
+**/.git
+.npm
+**/.npm
+*.log
+**/*.log

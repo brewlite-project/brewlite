@@ -11,6 +11,10 @@ async function bootstrap() {
     .setDescription('REST API documentation for BrewLite')
     .setVersion('1.0')
     .addBearerAuth()
+    .addApiKey(
+      { type: 'apiKey', in: 'header', name: 'X-Internal-Key' },
+      'internal-key',
+    )
     .build();
 
   const document = SwaggerModule.createDocument(app, config);

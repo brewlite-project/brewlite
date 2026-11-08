@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import AppProviders from "@/components/AppProviders";
 
 export const metadata: Metadata = {
   title: "BrewLite - Cà Phê Thủ Công Đặc Sản",
@@ -31,7 +32,7 @@ export default function RootLayout({
         />
       </head>
       <body className="bg-background font-body-md text-on-surface antialiased">
-        {children}
+        <AppProviders>{children}</AppProviders>
       </body>
     </html>
   );

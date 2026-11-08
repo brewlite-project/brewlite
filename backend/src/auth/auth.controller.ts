@@ -1,15 +1,20 @@
+
 import {
   BadRequestException,
   Body,
   Controller,
+  Get,
   HttpCode,
   HttpStatus,
   Inject,
   Post,
+  Req,
+  UseGuards,
   ValidationPipe,
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
+  ApiBearerAuth,
   ApiBody,
   ApiConflictResponse,
   ApiCreatedResponse,
@@ -24,15 +29,26 @@ import { RegisterDto } from './dto/register.dto.js';
 import { RegisterResponseDto } from './dto/register-response.dto.js';
 import { LoginDto } from './dto/login.dto.js';
 import { LoginResponseDto } from './dto/login-response.dto.js';
+import { MeResponseDto } from './dto/me-response.dto.js';
+import { JwtAuthGuard } from './jwt-auth.guard.js';
+import type { AuthenticatedUser } from './jwt.strategy.js';
 
 @ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
-  constructor(@Inject(AuthService) private readonly authService: AuthService) {}
+  constructor(
+    @Inject(AuthService)
+    private readonly authService: AuthService,
+  ) {}
 
+  // --------------------------------------------------
+  // POST /auth/login
+  // --------------------------------------------------
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Đăng nhập và cấp JWT có hiệu lực 1 giờ' })
+  @ApiOperation({
+    summary: 'Đăng nhập và cấp JWT có hiệu lực 1 giờ',
+  })
   @ApiBody({ type: LoginDto })
   @ApiOkResponse({ type: LoginResponseDto })
   @ApiBadRequestResponse({
@@ -74,7 +90,10 @@ export class AuthController {
         transform: true,
         whitelist: true,
         forbidUnknownValues: true,
-        validationError: { target: false, value: false },
+        validationError: {
+          target: false,
+          value: false,
+        },
         exceptionFactory: (errors) =>
           new BadRequestException({
             statusCode: 400,
@@ -91,8 +110,13 @@ export class AuthController {
     return this.authService.login(dto);
   }
 
+  // --------------------------------------------------
+  // POST /auth/register
+  // --------------------------------------------------
   @Post('register')
-  @ApiOperation({ summary: 'Đăng ký Customer; không tự động đăng nhập' })
+  @ApiOperation({
+    summary: 'Đăng ký Customer; không tự động đăng nhập',
+  })
   @ApiBody({ type: RegisterDto })
   @ApiCreatedResponse({ type: RegisterResponseDto })
   @ApiBadRequestResponse({
@@ -100,7 +124,9 @@ export class AuthController {
     schema: {
       example: {
         statusCode: 400,
-        message: ['password must be longer than or equal to 8 characters'],
+        message: [
+          'password must be longer than or equal to 8 characters',
+        ],
         error: 'Bad Request',
         code: 'VALIDATION_ERROR',
       },
@@ -134,7 +160,10 @@ export class AuthController {
         transform: true,
         whitelist: true,
         forbidUnknownValues: true,
-        validationError: { target: false, value: false },
+        validationError: {
+          target: false,
+          value: false,
+        },
         exceptionFactory: (errors) =>
           new BadRequestException({
             statusCode: 400,
@@ -149,5 +178,51 @@ export class AuthController {
     dto: RegisterDto,
   ): Promise<RegisterResponseDto> {
     return this.authService.register(dto);
+  }
+
+  // --------------------------------------------------
+  // GET /auth/me – SCRUM-71
+  // --------------------------------------------------
+  @Get('me')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Lấy thông tin Customer và điểm Loyalty hiện tại',
+    description:
+      'Xác thực Bearer JWT và lấy thông tin Customer từ PostgreSQL. ' +
+      'User ID được lấy từ JWT.sub, không nhận từ client. ' +
+      'Không trả passwordHash hoặc dữ liệu nhạy cảm.',
+  })
+  @ApiOkResponse({
+    description: 'Customer profile retrieved successfully',
+    type: MeResponseDto,
+  })
+  @ApiUnauthorizedResponse({
+    description:
+      'UNAUTHORIZED – JWT thiếu/sai/hết hạn hoặc User không còn tồn tại',
+    schema: {
+      example: {
+        statusCode: 401,
+        message: 'Unauthorized',
+        error: 'Unauthorized',
+        code: 'UNAUTHORIZED',
+      },
+    },
+  })
+  @ApiInternalServerErrorResponse({
+    description: 'INTERNAL_ERROR – Unexpected server error',
+    schema: {
+      example: {
+        statusCode: 500,
+        message: 'Internal server error',
+        error: 'Internal Server Error',
+        code: 'INTERNAL_ERROR',
+      },
+    },
+  })
+  getMe(
+    @Req() request: { user: AuthenticatedUser },
+  ): Promise<MeResponseDto> {
+    return this.authService.getMe(request.user.userId);
   }
 }

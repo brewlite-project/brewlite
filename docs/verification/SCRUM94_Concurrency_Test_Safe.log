@@ -1,0 +1,29 @@
+# SCRUM-94 PostgreSQL concurrency test log
+Date: 2026-11-06
+Commit: fb293e2ac35c0fe29fbe3573bf5edf81b7a586a0
+Environment: Docker Desktop 4.97.0 / Engine 29.9.2; Node 26.13.0; PostgreSQL 18; isolated network namespace, no host port binding.
+Database identity checked before test: brewlite_test, server port 5433, 9/9 migrations complete. The product-catalog migration creates four baseline categories; no product/topping demo seed was run.
+Suite: npm run test:integration -- test/payment-finalization-concurrency.integration-spec.ts test/payments-postgres.integration-spec.ts test/promotions-postgres.integration-spec.ts; PAYMENT_CONCURRENCY_TESTS=1.
+Result: 3 files, 83 passed, 0 failed, 0 skipped; runner exit 0. 23 gate-controlled concurrency cases included.
+Post-suite DB check: four baseline categories remain from migration; users, products, coupons, orders and payments are all 0. The test fixtures were removed by suite cleanup; the task-only DB volume was removed after evidence capture.
+
+> backend@0.0.1 test:integration
+> vitest run --config ./vitest.config.integration.ts test/payment-finalization-concurrency.integration-spec.ts test/payments-postgres.integration-spec.ts test/promotions-postgres.integration-spec.ts
+
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.11 [39m[90m/app[39m
+
+ [32m✓[39m test/payment-finalization-concurrency.integration-spec.ts [2m([22m[2m13 tests[22m[2m)[22m[33m 3393[2mms[22m[39m
+     [33m[2m✓[22m[39m deduplicates the same event sequentially without repeating writes [33m 404[2mms[22m[39m
+     [33m[2m✓[22m[39m rolls back coupon changes after a real user-row lock timeout, then retry applies effects once [33m 1360[2mms[22m[39m
+ [32m✓[39m test/payments-postgres.integration-spec.ts [2m([22m[2m42 tests[22m[2m)[22m[33m 5931[2mms[22m[39m
+       [33m[2m✓[22m[39m rejects a new attempt without side effects: test, flag undefined [33m 413[2mms[22m[39m
+       [33m[2m✓[22m[39m bounds Order lock waiting and permits retry after timeout rollback [33m 1606[2mms[22m[39m
+ [32m✓[39m test/promotions-postgres.integration-spec.ts [2m([22m[2m28 tests[22m[2m)[22m[33m 4253[2mms[22m[39m
+     [33m[2m✓[22m[39m uses normalized code and server discount; awards post-discount points once [33m 450[2mms[22m[39m
+     [33m[2m✓[22m[39m rolls back PAID if HELD redemption is missing and permits same-key retry after repair [33m 325[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m3 passed[39m[22m[90m (3)[39m
+[2m      Tests [22m [1m[32m83 passed[39m[22m[90m (83)[39m
+[2m   Start at [22m 16:56:11
+[2m   Duration [22m 19.08s[2m (transform 1.35s, setup 81ms, import 4.62s, tests 13.58s, environment 0ms)[22m

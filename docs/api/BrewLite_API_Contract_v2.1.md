@@ -2,7 +2,7 @@
 
 **Version:** 2.1
 **Sprint:** Sprint 2 – Cart, Authentication & Order (kế thừa Sprint 1)
-**Status:** Final Review Candidate – business decisions confirmed; implementation and cross-team approval pending
+**Status:** Approved / Sprint 2 Baseline
 **Owner:** HKhang (BrewLite project leader)
 **Tech Stack:** NestJS, Next.js, PostgreSQL, Prisma
 **API Style:** REST / JSON
@@ -74,19 +74,18 @@ Nếu coupon được triển khai trong Sprint 2, phần DB/model liên quan ch
 
 ### 1.5. Product Catalog Upgrade – Responsibility & Release Boundary
 
-| Hạng mục | Owner chính | Trách nhiệm/ranh giới |
-| --- | --- | --- |
-| ERD, Prisma Schema, Migration 5 | HKhang (đã merge PR #63) | Schema nền cho `categories`, `product_toppings`, `sizePolicy`, availability; không thay đổi migration cũ |
-| API Contract v2.1 | HKhang | Chốt response/rules, cập nhật Swagger expectation, chủ trì consistency review |
-| `GET /products`, `GET /products/:id` | HKhang (nhánh `feature/product-catalog-backend-upgrade`) | DTO, service, mapping, unit/HTTP tests, Swagger; duy trì 5 field cũ |
-| `POST /orders` và server-side validation | CKhang | Cập nhật code ở task/PR Order riêng để đáp ứng ORD-CAT-01…08; không tự động thuộc phạm vi PR Product Catalog |
-| Menu / Product Listing / Product Detail | Khánh | Tích hợp response Product v2.1, badge/category/size/topping, trạng thái unavailable |
-| Auth UI / Checkout | Lập | Gửi size/topping hợp lệ, xử lý mã lỗi Order, giữ Cart khi cần Login |
-| Register / Login / JWT | Hoàng | Đối chiếu AuthService với Argon2id helper, kiểm chứng Auth contract; không đổi payload Auth |
-| Schema Order và các phần DB Sprint 2 khác | Thụy (phân công Sprint 2 gốc) | Phối hợp CKhang nếu Order cần cập nhật ở nhánh khác |
+| Hạng mục                                  | Owner chính                                              | Trách nhiệm/ranh giới                                                                                        |
+| ----------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| ERD, Prisma Schema, Migration 5           | HKhang (đã merge PR #63)                                 | Schema nền cho `categories`, `product_toppings`, `sizePolicy`, availability; không thay đổi migration cũ     |
+| API Contract v2.1                         | HKhang                                                   | Chốt response/rules, cập nhật Swagger expectation, chủ trì consistency review                                |
+| `GET /products`, `GET /products/:id`      | HKhang (nhánh `feature/product-catalog-backend-upgrade`) | DTO, service, mapping, unit/HTTP tests, Swagger; duy trì 5 field cũ                                          |
+| `POST /orders` và server-side validation  | CKhang                                                   | Cập nhật code ở task/PR Order riêng để đáp ứng ORD-CAT-01…08; không tự động thuộc phạm vi PR Product Catalog |
+| Menu / Product Listing / Product Detail   | Khánh                                                    | Tích hợp response Product v2.1, badge/category/size/topping, trạng thái unavailable                          |
+| Auth UI / Checkout                        | Lập                                                      | Gửi size/topping hợp lệ, xử lý mã lỗi Order, giữ Cart khi cần Login                                          |
+| Register / Login / JWT                    | Hoàng                                                    | Đối chiếu AuthService với Argon2id helper, kiểm chứng Auth contract; không đổi payload Auth                  |
+| Schema Order và các phần DB Sprint 2 khác | Thụy (phân công Sprint 2 gốc)                            | Phối hợp CKhang nếu Order cần cập nhật ở nhánh khác                                                          |
 
 Quy tắc phối hợp: các chủ sở hữu Backend/Frontend xác nhận các trường, lỗi và quy tắc tương ứng trước khi đánh dấu tài liệu Approved. PR #63 xác nhận phần schema đã merge, **không có nghĩa** hai Product API và `POST /orders` đã triển khai v2.1.
-
 
 ---
 
@@ -127,20 +126,20 @@ Frontend sử dụng API Base URL từ biến môi trường, không hardcode đ
 
 ### 2.3. Data Conventions
 
-| Data Type       | Convention              |
-| --------------- | ----------------------- |
-| Product ID      | string (UUID)           |
-| User ID         | string (UUID)           |
-| Order ID        | string (UUID)           |
-| Topping ID      | string (UUID)           |
-| Product name    | string                  |
-| Image URL       | string                  |
-| Price           | JSON number, đơn vị VND |
-| Availability    | boolean                 |
+| Data Type       | Convention                |
+| --------------- | ------------------------- |
+| Product ID      | string (UUID)             |
+| User ID         | string (UUID)             |
+| Order ID        | string (UUID)             |
+| Topping ID      | string (UUID)             |
+| Product name    | string                    |
+| Image URL       | string                    |
+| Price           | JSON number, đơn vị VND   |
+| Availability    | boolean                   |
 | Size            | `S`, `M`, `L`, `ONE_SIZE` |
-| Size multiplier | `100`, `120`, `140`     |
-| Topping price   | JSON number, đơn vị VND |
-| Date/time       | ISO 8601 UTC            |
+| Size multiplier | `100`, `120`, `140`       |
+| Topping price   | JSON number, đơn vị VND   |
+| Date/time       | ISO 8601 UTC              |
 
 Giá tiền được truyền dưới dạng số, không kèm ký hiệu `đ` hoặc dấu phân cách hàng nghìn.
 
@@ -199,17 +198,17 @@ Sprint 2 dùng additive extension tại mục 5.2, không phá compatibility Pro
 
 ### 3.1. Overview
 
-| Attribute | Value |
-| --- | --- |
-| Method | GET |
-| Endpoint | `/products` |
-| Authentication | Public |
-| Success Status | 200 OK |
-| Related Requirements | FR-CAT-001 |
-| Related User Stories | US-CAT-01 |
-| Related Use Case | UC-CAT-001 |
-| Backend Owner (Sprint 1) | Hoàng |
-| Frontend Consumer | Khánh |
+| Attribute                | Value       |
+| ------------------------ | ----------- |
+| Method                   | GET         |
+| Endpoint                 | `/products` |
+| Authentication           | Public      |
+| Success Status           | 200 OK      |
+| Related Requirements     | FR-CAT-001  |
+| Related User Stories     | US-CAT-01   |
+| Related Use Case         | UC-CAT-001  |
+| Backend Owner (Sprint 1) | Hoàng       |
+| Frontend Consumer        | Khánh       |
 
 ### 3.2. Request
 
@@ -239,18 +238,18 @@ Không yêu cầu body/JWT; chưa có pagination hay filter bắt buộc trong v
 }
 ```
 
-| Field | Type | Rule |
-| --- | --- | --- |
-| `id` | UUID string | Giữ nguyên từ v1.0 |
-| `name` | string | Tên sản phẩm |
-| `imageUrl` | string | Relative path `/images/...` |
-| `basePriceVnd` | number | VND, safe integer |
-| `isAvailable` | boolean | `stock > 0 && category.isActive` |
-| `category` | object | `{code: string, name: string}`, luôn có |
-| `description` | string hoặc null | Field luôn xuất hiện |
-| `rating` | number hoặc null | 0–5; field luôn xuất hiện |
-| `isNew` | boolean | Badge sản phẩm mới |
-| `isBestseller` | boolean | Badge bán chạy |
+| Field          | Type             | Rule                                    |
+| -------------- | ---------------- | --------------------------------------- |
+| `id`           | UUID string      | Giữ nguyên từ v1.0                      |
+| `name`         | string           | Tên sản phẩm                            |
+| `imageUrl`     | string           | Relative path `/images/...`             |
+| `basePriceVnd` | number           | VND, safe integer                       |
+| `isAvailable`  | boolean          | `stock > 0 && category.isActive`        |
+| `category`     | object           | `{code: string, name: string}`, luôn có |
+| `description`  | string hoặc null | Field luôn xuất hiện                    |
+| `rating`       | number hoặc null | 0–5; field luôn xuất hiện               |
+| `isNew`        | boolean          | Badge sản phẩm mới                      |
+| `isBestseller` | boolean          | Badge bán chạy                          |
 
 ### 3.4. Business Rules
 
@@ -268,18 +267,18 @@ Không yêu cầu body/JWT; chưa có pagination hay filter bắt buộc trong v
 
 ### 4.1. Overview
 
-| Attribute | Value |
-| --- | --- |
-| Method | GET |
-| Endpoint | `/products/:id` |
-| Authentication | Public |
-| Success Status | 200 OK |
-| Not Found Status | 404 Not Found |
-| Related Requirements | FR-CAT-002, FR-CAT-003, FR-CAT-004 |
-| Related User Stories | US-CAT-02, US-CAT-03, US-CAT-04 |
-| Related Use Case | UC-CAT-002 |
-| Backend Owner (Sprint 1) | CKhang |
-| Frontend Consumers | Khánh, Lập |
+| Attribute                | Value                              |
+| ------------------------ | ---------------------------------- |
+| Method                   | GET                                |
+| Endpoint                 | `/products/:id`                    |
+| Authentication           | Public                             |
+| Success Status           | 200 OK                             |
+| Not Found Status         | 404 Not Found                      |
+| Related Requirements     | FR-CAT-002, FR-CAT-003, FR-CAT-004 |
+| Related User Stories     | US-CAT-02, US-CAT-03, US-CAT-04    |
+| Related Use Case         | UC-CAT-002                         |
+| Backend Owner (Sprint 1) | CKhang                             |
+| Frontend Consumers       | Khánh, Lập                         |
 
 ### 4.2. Request
 
@@ -558,14 +557,14 @@ Payment API không thuộc v2.0.
 }
 ```
 
-| Field              | Type          | Required | Validation                   |
-| ------------------ | ------------- | -------- | ---------------------------- |
-| items              | array         | Yes      | 1–20 dòng                    |
-| items[].productId  | UUID string   | Yes      | Product tồn tại              |
+| Field              | Type          | Required | Validation                     |
+| ------------------ | ------------- | -------- | ------------------------------ |
+| items              | array         | Yes      | 1–20 dòng                      |
+| items[].productId  | UUID string   | Yes      | Product tồn tại                |
 | items[].size       | enum string   | Yes      | S/M/L/ONE_SIZE theo sizePolicy |
-| items[].toppingIds | UUID string[] | Yes      | 0–3 ID khác nhau             |
-| items[].quantity   | integer       | Yes      | 1–10                         |
-| couponCode         | string        | No       | Tối đa 1 mã, trim, normalize |
+| items[].toppingIds | UUID string[] | Yes      | 0–3 ID khác nhau               |
+| items[].quantity   | integer       | Yes      | 1–10                           |
+| couponCode         | string        | No       | Tối đa 1 mã, trim, normalize   |
 
 Client không được quyết định:
 
@@ -619,16 +618,16 @@ discountVnd = 0
 
 Các mã dưới đây là **mã quy tắc nghiệp vụ để truy vết test**, không phải giá trị field `code` trong HTTP error response. Các lỗi trả về vẫn dùng `INVALID_CART`, `INSUFFICIENT_STOCK` hoặc `VALIDATION_ERROR` như §5 và §8.7.
 
-| Rule ID | Server-side rule | Khi vi phạm | `details[].reason` gợi ý |
-| --- | --- | --- | --- |
-| **ORD-CAT-01** | Product ID phải tham chiếu Product đang tồn tại | `400 INVALID_CART` | `PRODUCT_NOT_FOUND` |
-| **ORD-CAT-02** | Category của Product phải active; Product phải đủ stock theo quantity yêu cầu | Category inactive: `400 INVALID_CART`; thiếu stock: `409 INSUFFICIENT_STOCK` | `PRODUCT_UNAVAILABLE` (category inactive); trường hợp thiếu stock dùng `details` số lượng như §8.7 |
-| **ORD-CAT-03** | `sizePolicy=STANDARD` chỉ chấp nhận `S`, `M`, `L` | `400 INVALID_CART` | `INVALID_SIZE` |
-| **ORD-CAT-04** | `sizePolicy=ONE_SIZE` chỉ chấp nhận `ONE_SIZE` | `400 INVALID_CART` | `INVALID_SIZE` |
-| **ORD-CAT-05** | Mỗi `toppingId` phải có liên kết với chính Product trong `product_toppings` | `400 INVALID_CART` | `TOPPING_NOT_ALLOWED` (ID không tồn tại: `TOPPING_NOT_FOUND`) |
-| **ORD-CAT-06** | Topping đã liên kết phải có `isAvailable=true` tại thời điểm tạo Order | `400 INVALID_CART` | `TOPPING_UNAVAILABLE` |
-| **ORD-CAT-07** | Mỗi dòng tối đa 3 topping ID **khác nhau**, không ID trùng | `400 INVALID_CART` (semantic); lỗi hình dạng/kiểu dữ liệu có thể là `400 VALIDATION_ERROR` | `DUPLICATE_TOPPING`, `TOO_MANY_TOPPINGS` |
-| **ORD-CAT-08** | Đọc giá Product/Topping từ PostgreSQL, tính lại và lưu snapshot bằng công thức §8.3, không tin giá Client | Không chấp nhận giá Client làm nguồn giá; lỗi dữ liệu Cart trả `400 INVALID_CART` khi thích hợp | `INVALID_PRICE_DATA` nếu dữ liệu không hợp lệ; lỗi hạ tầng thật sự là HTTP 500 |
+| Rule ID        | Server-side rule                                                                                          | Khi vi phạm                                                                                     | `details[].reason` gợi ý                                                                           |
+| -------------- | --------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| **ORD-CAT-01** | Product ID phải tham chiếu Product đang tồn tại                                                           | `400 INVALID_CART`                                                                              | `PRODUCT_NOT_FOUND`                                                                                |
+| **ORD-CAT-02** | Category của Product phải active; Product phải đủ stock theo quantity yêu cầu                             | Category inactive: `400 INVALID_CART`; thiếu stock: `409 INSUFFICIENT_STOCK`                    | `PRODUCT_UNAVAILABLE` (category inactive); trường hợp thiếu stock dùng `details` số lượng như §8.7 |
+| **ORD-CAT-03** | `sizePolicy=STANDARD` chỉ chấp nhận `S`, `M`, `L`                                                         | `400 INVALID_CART`                                                                              | `INVALID_SIZE`                                                                                     |
+| **ORD-CAT-04** | `sizePolicy=ONE_SIZE` chỉ chấp nhận `ONE_SIZE`                                                            | `400 INVALID_CART`                                                                              | `INVALID_SIZE`                                                                                     |
+| **ORD-CAT-05** | Mỗi `toppingId` phải có liên kết với chính Product trong `product_toppings`                               | `400 INVALID_CART`                                                                              | `TOPPING_NOT_ALLOWED` (ID không tồn tại: `TOPPING_NOT_FOUND`)                                      |
+| **ORD-CAT-06** | Topping đã liên kết phải có `isAvailable=true` tại thời điểm tạo Order                                    | `400 INVALID_CART`                                                                              | `TOPPING_UNAVAILABLE`                                                                              |
+| **ORD-CAT-07** | Mỗi dòng tối đa 3 topping ID **khác nhau**, không ID trùng                                                | `400 INVALID_CART` (semantic); lỗi hình dạng/kiểu dữ liệu có thể là `400 VALIDATION_ERROR`      | `DUPLICATE_TOPPING`, `TOO_MANY_TOPPINGS`                                                           |
+| **ORD-CAT-08** | Đọc giá Product/Topping từ PostgreSQL, tính lại và lưu snapshot bằng công thức §8.3, không tin giá Client | Không chấp nhận giá Client làm nguồn giá; lỗi dữ liệu Cart trả `400 INVALID_CART` khi thích hợp | `INVALID_PRICE_DATA` nếu dữ liệu không hợp lệ; lỗi hạ tầng thật sự là HTTP 500                     |
 
 **Thứ tự phân loại lỗi:** sai shape, kiểu dữ liệu, UUID và enum không nằm trong tập `S/M/L/ONE_SIZE` → `VALIDATION_ERROR`; size nằm trong tập enum nhưng sai `sizePolicy` của Product → `INVALID_CART / INVALID_SIZE`. Category inactive **không** được đánh đồng với thiếu stock. Backend không công khai số stock qua Product API, nhưng `INSUFFICIENT_STOCK` có thể cung cấp chi tiết số lượng theo định dạng lỗi Order đã chốt.
 
@@ -881,10 +880,10 @@ Các nội dung này được xử lý ở Sprint 3 / Task 10 hoặc version con
 
 ## 11. Version / Change History
 
-| Version | Status                | Scope                                                        | Compatibility               |
-| ------- | --------------------- | ------------------------------------------------------------ | --------------------------- |
-| 1.0     | Approved              | GET `/products`, GET `/products/:id`                         | Sprint 1 baseline           |
-| 2.0     | Approved – API Design | Adds Auth/JWT and POST `/orders`; preserves Product contract | Baseline Sprint 2 |
+| Version | Status                 | Scope                                                                                                                             | Compatibility                                               |
+| ------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| 1.0     | Approved               | GET `/products`, GET `/products/:id`                                                                                              | Sprint 1 baseline                                           |
+| 2.0     | Approved – API Design  | Adds Auth/JWT and POST `/orders`; preserves Product contract                                                                      | Baseline Sprint 2                                           |
 | 2.1     | Final Review Candidate | Catalog fields, availability, sizes, product-specific toppings, price rounding, Argon2id; ORD-CAT-01…08 and responsibility matrix | Additive Product fields; Order size/validation rule updates |
 
 ---

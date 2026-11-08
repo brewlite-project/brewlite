@@ -48,7 +48,7 @@ export const MAX_ORDER_QUANTITY = 10;
  * Định dạng số nguyên VND sang chuỗi hiển thị trên UI (API Contract Mục 2.3)
  */
 export function formatVnd(amountVnd: number): string {
-  return `${Math.round(amountVnd).toLocaleString("vi-VN")} đ`;
+  return `${Math.round(amountVnd).toLocaleString("vi-VN")}\u00A0₫`;
 }
 
 /**

@@ -17,7 +17,11 @@ export class PrismaService
       );
     }
 
-    super({ adapter: new PrismaPg({ connectionString }) });
+    // Prisma's pg adapter serializes DateTime values as UTC without an offset.
+    // Each PostgreSQL connection must interpret/return those values in UTC.
+    super({
+      adapter: new PrismaPg({ connectionString, options: '-c timezone=UTC' }),
+    });
   }
 
   async onModuleInit() {

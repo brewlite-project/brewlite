@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
+import { useCart } from "@/context/CartContext";
 import type {
   DrinkSize,
   ProductDetail,
@@ -60,6 +61,8 @@ export default function ProductDetailModal(props: ProductDetailModalProps) {
 }
 
 function ProductDetailModalContent({
+  // Lấy hàm addToCart từ CartContext
+
   product,
   onClose,
   onAddToCart,
@@ -67,6 +70,7 @@ function ProductDetailModalContent({
   // ==========================================================================
   // PHẦN 1: QUẢN LÝ STATE (SIZE, TOPPING, SỐ LƯỢNG, GHI CHÚ)
   // ==========================================================================
+  const { addToCart } = useCart();
 
   // State lưu kích cỡ đang chọn — Mặc định là Size S (100%) theo Business Rule
   const initialSize: DrinkSize = useMemo(() => {
@@ -244,7 +248,22 @@ function ProductDetailModalContent({
   const handleSubmitAddToCart = () => {
     if (!product.isAvailable) return;
 
-    onAddToCart?.({
+    const result = addToCart({
+      productId: product.id,
+      productName: product.name,
+      imageUrl: product.imageUrl,
+      size: activeSizeOption.size,
+      sizeMultiplierPercent: activeSizeOption.multiplierPercent,
+      basePriceVnd: product.basePriceVnd,
+      toppings: selectedToppings,
+      toppingIds: selectedToppings.map((t) => t.id),
+      quantity,
+      note: note.trim(),
+      sizePolicy: product.sizePolicy,
+    });
+
+    if (result.success) {
+      onAddToCart?.({
       productId: product.id,
       productName: product.name,
       size: activeSizeOption.size,
@@ -256,7 +275,8 @@ function ProductDetailModalContent({
       unitPriceVnd,
       lineTotalVnd,
       note: note.trim(),
-    });
+      });
+    }
   };
 
   // ==========================================================================

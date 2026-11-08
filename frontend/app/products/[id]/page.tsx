@@ -3,6 +3,7 @@
 import React, { use, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useCart } from "@/context/CartContext";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import ProductDetailModal from "@/components/ProductDetailModal";
@@ -26,6 +27,7 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
   // Lấy ID sản phẩm từ đường dẫn URL (/products/[id])
   const { id } = use(params);
   const router = useRouter();
+  const { openCart, totalQuantity } = useCart();
 
   // Dữ liệu danh mục và sản phẩm cho lớp nền mờ phía sau
   const initialCatalog = useMemo(() => getCatalogData(), []);
@@ -127,8 +129,8 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
     <div className="min-h-screen flex flex-col bg-background font-body-md text-on-surface antialiased">
       {/* Thanh Header điều hướng trên cùng */}
       <Header
-        cartCount={0}
-        onCartClick={showCartUnderConstructionNotice}
+        cartCount={totalQuantity}
+        onCartClick={openCart}
         activeNav="thuc-don"
         siteConfig={siteConfig}
       />
@@ -136,7 +138,7 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
       <main className="w-full pt-20 bg-background min-h-screen flex-1">
         <div className="flex flex-col w-full relative">
           {/* Lớp nền trang Thực đơn được làm mờ phía dưới Modal */}
-          <div className="w-full max-w-[1320px] mx-auto px-margin py-space-lg filter blur-[2px] opacity-40 pointer-events-none select-none">
+          <div className="w-full max-w-[1320px] mx-auto px-margin py-space-lg opacity-90 pointer-events-none select-none">
             <div className="flex items-center justify-between mb-space-lg">
               <div className="flex gap-space-sm flex-wrap">
                 {categories.map((cat, index) => (
@@ -197,7 +199,7 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
             <ProductDetailModal
               product={lookupResult.data}
               onClose={handleCloseModal}
-              onAddToCart={showCartUnderConstructionNotice}
+              onAddToCart={() => { openCart(); router.push("/"); }}
             />
           ) : (
             <div

@@ -1,6 +1,6 @@
 // BrewLite - Prisma database schema
 // Source of truth for database structure: database/schema.dbml
-// Current scope: Product Catalog upgrade and existing Sprint 1/2 models.
+// Proposed SCRUM-76 Phase 2 Payment extension (review kit; not applied to repository).
 // PostgreSQL CHECK constraints and partial unique indexes
 // are maintained through SQL migrations.
 
@@ -115,6 +115,55 @@ enum RedemptionStatus {
   @@map("redemption_status")
 }
 
+enum PaymentMethod {
+  CARD
+  WALLET
+
+  @@map("payment_method")
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  @@map("payment_status")
+}
+
+enum PaymentProvider {
+  MOCK
+  VNPAY
+  ZERO_AMOUNT
+  @@map("payment_provider")
+}
+enum PaymentReconciliationState {
+  NONE
+  SCHEDULED
+  RESOLVED
+  REQUIRES_REVIEW
+  @@map("payment_reconciliation_state")
+}
+enum PaymentGatewaySource {
+  IPN
+  QUERYDR
+  @@map("payment_gateway_source")
+}
+enum PaymentGatewayOutcome {
+  UNKNOWN
+  SUCCESS
+  FAILED
+  @@map("payment_gateway_outcome")
+}
+enum PaymentGatewayDisposition {
+  OBSERVED
+  FINALIZED
+  DUPLICATE
+  CONFLICT
+  FINANCIAL_EXCEPTION
+  @@map("payment_gateway_disposition")
+}
+
+
+
 model User {
   id                String             @id @default(uuid()) @db.Uuid
   email             String             @unique @db.VarChar(255)
@@ -125,6 +174,7 @@ model User {
   updatedAt         DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   couponRedemptions CouponRedemption[]
   orders            Order[]
+  payments Payment[]
 
   @@map("users")
 }
@@ -168,6 +218,7 @@ model Order {
   user   User        @relation(fields: [userId], references: [id], onDelete: Restrict)
   coupon Coupon?     @relation(fields: [couponId], references: [id], onDelete: Restrict)
   items  OrderItem[]
+  payments Payment[]
 
   @@index([userId], map: "ix_orders_user_id")
   @@index([userId, createdAt], map: "ix_orders_user_created")
@@ -231,4 +282,74 @@ model CouponRedemption {
   @@index([couponId, status], map: "ix_coupon_redemptions_coupon_status")
   @@index([userId, couponId, status], map: "ix_coupon_redemptions_user_coupon_status")
   @@map("coupon_redemptions")
+}
+
+model Payment {
+  id                   String @id @default(uuid()) @db.Uuid
+  orderId              String @map("order_id") @db.Uuid
+  userId               String @map("user_id") @db.Uuid
+  idempotencyKey       String @map("idempotency_key") @db.VarChar(64)
+  requestHash          String @map("request_hash") @db.VarChar(128)
+  amountVnd            BigInt @map("amount_vnd")
+  provider             PaymentProvider
+  method               PaymentMethod?
+  status               PaymentStatus
+  mockReference        String? @map("mock_reference") @db.VarChar(255)
+  methodLast4          String? @map("method_last4") @db.VarChar(4)
+  responseSnapshot     Json? @map("response_snapshot") @db.JsonB
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  // CK-R01: DB-clock touch must be explicit on mutations, no Prisma @updatedAt.
+  updatedAt            DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  vnpTxnRef            String? @unique(map: "uq_payments_vnp_txn_ref") @map("vnp_txn_ref") @db.VarChar(100)
+  vnpTmnCode           String? @map("vnp_tmn_code") @db.Text
+  vnpCreateDate        String? @map("vnp_create_date") @db.VarChar(14)
+  gatewayExpiresAt     DateTime? @map("gateway_expires_at") @db.Timestamptz(6)
+  initiationSnapshot   Json? @map("initiation_snapshot") @db.JsonB
+  finalOutcomeSnapshot Json? @map("final_outcome_snapshot") @db.JsonB
+  verifiedPaidAt       DateTime? @map("verified_paid_at") @db.Timestamptz(6)
+  verifiedAt           DateTime? @map("verified_at") @db.Timestamptz(6)
+  finalizedAt          DateTime? @map("finalized_at") @db.Timestamptz(6)
+  reconciliationState PaymentReconciliationState @default(NONE) @map("reconciliation_state")
+  nextQueryAt          DateTime? @map("next_query_at") @db.Timestamptz(6)
+  lastQueryAt          DateTime? @map("last_query_at") @db.Timestamptz(6)
+  queryAttempts        Int @default(0) @map("query_attempts")
+  reconcileUntil       DateTime? @map("reconcile_until") @db.Timestamptz(6)
+  claimToken           String? @map("claim_token") @db.Uuid
+  leaseExpiresAt       DateTime? @map("lease_expires_at") @db.Timestamptz(6)
+  lastQueryRequestId   String? @map("last_query_request_id") @db.VarChar(64)
+  lastQueryError       String? @map("last_query_error") @db.Text
+  reviewReason         String? @map("review_reason") @db.Text
+  hasFinancialException Boolean @default(false) @map("has_financial_exception")
+  order                Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  user                 User @relation(fields: [userId], references: [id], onDelete: Restrict)
+  gatewayEvents        PaymentGatewayEvent[]
+  @@unique([userId, idempotencyKey], map: "uq_payments_user_idempotency")
+  @@index([orderId], map: "ix_payments_order_id")
+  @@index([reconciliationState, nextQueryAt, id], map: "ix_payments_reconcile_due")
+  @@index([reconciliationState, reconcileUntil, id], map: "ix_payments_reconcile_horizon")
+  @@map("payments")
+}
+
+model PaymentGatewayEvent {
+  id                  String @id @default(uuid()) @db.Uuid
+  paymentId           String @map("payment_id") @db.Uuid
+  source              PaymentGatewaySource
+  eventIdentity       String @map("event_identity") @db.VarChar(64)
+  queryRequestId      String? @map("query_request_id") @db.VarChar(64)
+  responseCode        String? @map("response_code") @db.Text
+  transactionStatus   String? @map("transaction_status") @db.Text
+  gatewayTransactionNo String? @map("gateway_transaction_no") @db.Text
+  amountVnd           BigInt? @map("amount_vnd")
+  gatewayPaidAt       DateTime? @map("gateway_paid_at") @db.Timestamptz(6)
+  outcome             PaymentGatewayOutcome
+  disposition         PaymentGatewayDisposition
+  exceptionReason     String? @map("exception_reason") @db.Text
+  receivedAt          DateTime @map("received_at") @db.Timestamptz(6)
+  verifiedAt          DateTime @map("verified_at") @db.Timestamptz(6)
+  evidence            Json @db.JsonB
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  payment             Payment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  @@unique([paymentId, source, eventIdentity], map: "uq_payment_gateway_events_identity")
+  @@index([paymentId, receivedAt, id], map: "ix_payment_gateway_events_history")
+  @@map("payment_gateway_events")
 }

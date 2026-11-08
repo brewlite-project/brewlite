@@ -24,8 +24,10 @@ import {
   type SiteConfigData,
 } from "@/mock-data";
 import { fetchCatalogData } from "@/services/api.service";
+import { useCart } from "@/context/CartContext";
 
 export default function HomePage() {
+  const { openCart, totalQuantity } = useCart();
   // ==========================================================================
   // PHẦN 1: QUẢN LÝ STATE & TẢI DỮ LIỆU TỪ API (GET /products)
   // ==========================================================================
@@ -155,7 +157,7 @@ export default function HomePage() {
   };
 
   const handleCartClick = () => {
-    showToastNotice("Mục giỏ hàng hiện đang trong quá trình xây dựng");
+    openCart();
   };
 
   const handleFeatureNotice = (featureLabel: string) => {
@@ -271,19 +273,10 @@ export default function HomePage() {
                     <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-primary" />
                   </span>
                   <span className="font-medium text-on-surface">
-                    Đang đồng bộ thực đơn theo thời gian thực:
+                    Đang đồng bộ thực đơn:
                   </span>
                   <span>
-                    Dữ liệu máy chủ chi nhánh Saigon Center đang được tải
-                    xuống...
-                  </span>
-                </div>
-                <div className="hidden lg:flex items-center gap-space-xs font-label-md text-label-md text-on-surface-variant">
-                  <span className="material-symbols-outlined text-[16px] text-tertiary">
-                    bolt
-                  </span>
-                  <span>
-                    Phiên kết nối API v2.1 • Cổng máy chủ 3001
+                    Thực đơn chi nhánh Saigon Center đang được tải xuống...
                   </span>
                 </div>
               </div>
